@@ -7,12 +7,17 @@
     "spike:session:new": "tsx src/spikes/session-resume.ts new",
     "spike:session:resume": "tsx src/spikes/session-resume.ts resume",
     "spike:session:inspect": "tsx src/spikes/session-resume.ts inspect",
-    "spike:session:reset": "tsx src/spikes/session-resume.ts reset"
+    "spike:session:reset": "tsx src/spikes/session-resume.ts reset",
+    "spike:stream:serve": "tsx src/spikes/event-streaming.ts serve",
+    "spike:stream:client": "tsx src/spikes/event-streaming.ts client",
+    "spike:stream:reset": "tsx src/spikes/event-streaming.ts reset"
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "0.64.0"
+    "@mariozechner/pi-coding-agent": "0.64.0",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
+    "@types/ws": "^8.18.1",
     "tsx": "^4.20.6",
     "typescript": "^5.7.3"
   }
