@@ -7,7 +7,7 @@ Pirouette (`pru`) runs long-lived pi coding agents on a single EC2 instance insi
 - **Language:** TypeScript throughout (CLI + web backend + agent management), to use the pi SDK natively.
 - **Pi integration:** Use the pi SDK (`@mariozechner/pi-coding-agent`) directly — `createAgentSession`, `SessionManager`, RPC mode where needed. This gives us full control over sessions, streaming, tools, extensions, compaction, forking, etc.
 - **Container:** Single `npx27/dev-unfetched` (Arch Linux) container on a single EC2 instance. All agents share the container, isolated by git worktree + filesystem.
-- **Web UI:** Chat-focused dashboard (inspired by Orchestra), using the base16 theming system from [neevparikh.github.io](https://github.com/neevparikh/neevparikh.github.io). Google OAuth for auth. Browser push notifications.
+- **Web UI:** Chat-focused dashboard (inspired by Orchestra), using the base16 theming system from [neevparikh.github.io](https://github.com/neevparikh/neevparikh.github.io). Initially exposed over Tailscale, with browser push notifications.
 - **CLI (`pru`):** Management only (provisioning, launching agents, status). All agent interaction happens via the web UI.
 - **Routing:** Orchestra-style keyword/availability scoring to auto-route messages to the best agent.
 - **Agent lifecycle:** Agents persist across restarts via pi's session resume. Idle agents sit waiting for messages. Notify user (browser push) when agent finishes and needs input.
@@ -33,9 +33,9 @@ pru CLI ──── SSH ──────────────────�
                                           │   ├── Router (keyword/availability scoring)
                                           │   └── Git worktree manager
                                           │
-Browser  <──── HTTPS (agents.neevparikh.com) ──>│
+Browser  <──── HTTPS over Tailscale ───────>│
   │                                       │
-  ├── Google OAuth                        ├── Agent 1 (pi session, worktree A)
+  ├── Tailscale access                    ├── Agent 1 (pi session, worktree A)
   ├── WebSocket (live streaming)          ├── Agent 2 (pi session, worktree B)
   ├── Push notifications                  ├── Agent 3 (pi session, worktree C)
   └── base16 theme picker                └── ~/repos/<project>/
@@ -64,13 +64,29 @@ Browser  <──── HTTPS (agents.neevparikh.com) ──>│
    - Chat-per-agent view (read messages, send replies)
    - Project/agent overview panel
    - base16 theme system (reuse from personal website)
-   - Google OAuth login
+   - Initially reachable only over Tailscale
    - Browser push notifications when agents need input
    - Mobile-friendly (phase 3)
 
 ---
 
 ## phases
+
+### phase 0 — technical spikes
+
+**Goal:** De-risk the parts that could invalidate the architecture before building the full product.
+
+#### spikes to run first
+- **pi session persistence + resume:** prove `createAgentSession()` + `SessionManager` can create, persist, stop, and resume a session cleanly after a server restart.
+- **event streaming:** prove agent events can be subscribed to on the backend and forwarded to a browser client over WebSocket with acceptable fidelity.
+- **worktree lifecycle:** prove repo clone, worktree creation, branch naming, cleanup, and relaunch all behave predictably.
+- **container git auth:** prove an agent running inside the container can fetch, push, and use `gh`/git flows with the intended auth setup.
+- **Tailscale ingress + TLS:** prove the EC2 instance can join the tailnet, serve the app over Tailscale, and obtain HTTPS certs cleanly via Tailscale/Caddy integration.
+
+#### output of phase 0
+- A minimal local or EC2-hosted prototype that exercises the above paths end-to-end.
+- Notes on any SDK limitations, auth quirks, or operational gotchas discovered during spikes.
+- A clear go/no-go decision before building the broader server + UI surface area.
 
 ### phase 1 — MVP: EC2 + agents + basic web UI
 
@@ -84,7 +100,7 @@ pru launch <name> [--repo <url>]   # Start a new pi agent (clone repo or bare)
 pru list                           # List all agents and their states
 pru stop <agent>                   # Stop an agent
 pru ssh                            # SSH into container (ForwardAgent yes)
-pru open                           # Open web UI in browser (http://<ip>:7777)
+pru open                           # Open web UI in browser (Tailscale HTTPS URL)
 pru teardown                       # Stop instance (agents resume on next setup)
 ```
 
@@ -101,7 +117,7 @@ pru teardown                       # Stop instance (agents resume on next setup)
 - Main panel: chat view for selected agent (messages, tool call summaries)
 - Input bar at bottom to send messages
 - Basic styling with base16 theming (hardcode one dark + one light theme)
-- Google OAuth login gate
+- Access restricted by serving over Tailscale
 - No routing yet — you pick which agent to message
 
 #### EC2 / container setup
@@ -141,15 +157,25 @@ pru teardown                       # Stop instance (agents resume on next setup)
 - Support rebasing agent branches on main
 - Push agent branches to origin
 
-### phase 3 — domain, mobile, notifications
+### phase 2.5 — auth + public ingress
+
+**Goal:** Move from tailnet-only access to a more shareable web deployment.
+
+#### auth / ingress setup
+- Add Google OAuth login gate once the app needs to be accessible outside Tailscale
+- Decide whether to keep Tailscale as an admin path or expose a public hostname as the primary entrypoint
+- If exposing publicly, add a subdomain such as `agents.neevparikh.com` (or `pru.neevparikh.com`)
+- Choose reverse proxy and certificate flow for public access
+
+### phase 3 — mobile, notifications, polish
 
 **Goal:** Production-quality web experience.
 
-#### domain setup
-- Subdomain: `agents.neevparikh.com` (or `pru.neevparikh.com`)
-- DNS: Add A record in Squarespace DNS pointing to EC2 Elastic IP
-- HTTPS: Let's Encrypt via certbot (or Cloudflare proxy)
-- Nginx reverse proxy in container: HTTPS termination → pirouette server on localhost:7777
+#### network / serving setup
+- Start with Tailscale-only access for internal use
+- Use Tailscale HTTPS certs for the tailnet-served app
+- Prefer Caddy for HTTPS termination and simple Tailscale cert integration → pirouette server on localhost:7777
+- Revisit public DNS / non-Tailscale ingress later if needed
 
 #### mobile improvements
 - Responsive layout (already using Tailwind, but optimize touch targets, scrolling)
@@ -213,7 +239,7 @@ const { session: resumed } = await createAgentSession({
 - **Frontend:** Single-page app, vanilla TS + Tailwind CSS + base16 theming
   - No heavy framework needed — it's a chat UI
   - Could use Preact or similar if complexity grows
-- **Auth:** Google OAuth 2.0 (server-side flow), session cookies
+- **Auth:** Phase 1 relies on Tailscale network access; add Google OAuth 2.0 later if broader access is needed
 - **Notifications:** Web Push API + service worker
 
 ### base16 theming
@@ -226,7 +252,7 @@ Reuse the base16-tailwind system from the personal website:
 
 ### container lifecycle
 1. `pru setup` launches EC2 instance + runs Docker container
-2. Container entrypoint: fetch dotfiles, start sshd, start pirouette server
+2. Container entrypoint: fetch dotfiles, start sshd, join Tailscale (or run alongside a host-level Tailscale setup), start Caddy for TLS termination, then start pirouette server
 3. pirouette server auto-resumes any previously running agents (checks persisted state)
 4. `pru teardown` stops EC2 (EBS persists, so container state survives)
 5. Next `pru setup` restarts instance, container resumes, agents resume
@@ -248,8 +274,9 @@ Host pirouette
 ## TODOs / deferred
 
 - [ ] **Middleman proxy:** All LLM API calls should go via the internal METR middleman proxy. Need to configure base URL / API key routing once we know the network setup.
-- [ ] **API keys / .env:** Define what goes in `.env` (LLM keys, Google OAuth client ID/secret, etc.). Should use `uv run --env-file .env` for Python tools agents might use.
+- [ ] **API keys / .env:** Define what goes in `.env` (LLM keys, Tailscale/Caddy config, Google OAuth client ID/secret later, etc.). Should use `uv run --env-file .env` for Python tools agents might use.
 - [ ] **GitHub auth in container:** Set up `gh auth` — likely via SSH agent forwarding (already have `ForwardAgent yes`) + `gh auth login` with a token, or just rely on SSH for git operations.
+- [ ] **Google OAuth:** Add app-level Google login once Tailscale-only access is no longer sufficient.
 - [ ] **Google account for agents:** Limited-permission Google account so agents can draft reports in Google Docs for review/comment.
 - [ ] **Slack/Signal notifications:** Browser push is MVP; add Slack/Signal integration later.
 - [ ] **Agent-to-user "ping" tool:** Custom pi tool or extension that agents can call to notify the user. Integrate with push notifications.

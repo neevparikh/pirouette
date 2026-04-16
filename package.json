@@ -1,0 +1,19 @@
+{
+  "name": "pirouette",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "spike:session:new": "tsx src/spikes/session-resume.ts new",
+    "spike:session:resume": "tsx src/spikes/session-resume.ts resume",
+    "spike:session:inspect": "tsx src/spikes/session-resume.ts inspect",
+    "spike:session:reset": "tsx src/spikes/session-resume.ts reset"
+  },
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "0.64.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.6",
+    "typescript": "^5.7.3"
+  }
+}
