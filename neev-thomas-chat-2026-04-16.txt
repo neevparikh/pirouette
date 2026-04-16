@@ -1,0 +1,11 @@
+- Thomas: Maybe want the ability to dig into the code that an agent is running, e.g. ssh in
+  - This may quickly get to be too low level
+- Authentication?
+  - Neev: Give everyone their own instance that only they can access
+- Thomas: How to share outputs if everyone has their own instance?
+  - Neev: Agent will e.g. create Google Docs or GitHub pull requests or PDFs, and we will share those around
+  - Google Docs and PRs are nice because you can comment on them easily
+- Neev expects eventually to not care about reading or sharing trajectories, just care about outputs
+  - Thomas: Maybe we still want a way to export trajectories, so that we can use them as examples in our risk reports
+- What if you want to hook up to GPUs?
+  - Neev: Use tinker for fine tuning things, give the agent AWS creds for other uses of GPUs
