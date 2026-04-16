@@ -11,6 +11,7 @@ Pirouette (`pru`) runs long-lived pi coding agents on a single EC2 instance insi
 - **CLI (`pru`):** Management only (provisioning, launching agents, status). All agent interaction happens via the web UI.
 - **Routing:** Orchestra-style keyword/availability scoring to auto-route messages to the best agent.
 - **Agent lifecycle:** Agents persist across restarts via pi's session resume. Idle agents sit waiting for messages. Notify user (browser push) when agent finishes and needs input.
+- **Durability model:** Treat the container as disposable. Store pi sessions, repos, worktrees, and pirouette metadata on a persistent EBS-backed data directory mounted into the container.
 
 ### non-goals
 - Multiple EC2 instances or host types.
@@ -38,11 +39,14 @@ Browser  <──── HTTPS over Tailscale ───────>│
   ├── Tailscale access                    ├── Agent 1 (pi session, worktree A)
   ├── WebSocket (live streaming)          ├── Agent 2 (pi session, worktree B)
   ├── Push notifications                  ├── Agent 3 (pi session, worktree C)
-  └── base16 theme picker                └── ~/repos/<project>/
-                                                ├── .git/
-                                                └── .pirouette-worktrees/
-                                                    ├── agent-1/
-                                                    └── agent-2/
+  └── base16 theme picker                └── /data/
+                                                ├── repos/<project>/
+                                                │   ├── .git/
+                                                │   └── .pirouette-worktrees/
+                                                │       ├── agent-1/
+                                                │       └── agent-2/
+                                                ├── sessions/
+                                                └── state/
 ```
 
 ### key components
@@ -58,7 +62,7 @@ Browser  <──── HTTPS over Tailscale ───────>│
    - Node.js process managing all agent sessions via pi SDK
    - Serves the web dashboard (static frontend + API)
    - WebSocket for live agent streaming to browser
-   - Persists state to disk (agent configs, project mappings)
+   - Persists state to disk on the mounted `/data` volume (agent configs, project mappings, session files)
 
 3. **Web dashboard** (served by pirouette server)
    - Chat-per-agent view (read messages, send replies)
@@ -124,15 +128,17 @@ pru teardown                       # Stop instance (agents resume on next setup)
 - Instance type: `m6i.16xlarge` (or similar — beefy for many concurrent agents)
 - AMI: Amazon Linux 2023 or Ubuntu (just needs Docker)
 - Docker image: `npx27/dev-unfetched` (has pi, node, npm, uv, git, gh, tmux, etc.)
+- Attach a persistent EBS data volume to the instance and mount it on the host (for example `/var/lib/pirouette`)
+- Bind-mount that host path into the container as `/data`
 - Container runs with SSH forwarding so `gh` and git work via forwarded agent
 - pirouette server starts automatically inside container
-- Repos live at `~/repos/` inside container
+- Repos, worktrees, session files, and pirouette state all live under `/data`, not in the container writable layer
 
 #### agent launch flow
 1. `pru launch my-agent --repo https://github.com/user/project`
-2. Server clones repo to `~/repos/project/` (if not already there)
-3. Creates git worktree at `~/repos/.pirouette-worktrees/project/my-agent/`
-4. Starts pi session with `cwd` set to the worktree
+2. Server clones repo to `/data/repos/project/` (if not already there)
+3. Creates git worktree at `/data/repos/.pirouette-worktrees/project/my-agent/`
+4. Starts pi session with `cwd` set to the worktree and session files stored under `/data/sessions/`
 5. If `--repo` is omitted, starts agent in a bare directory and the agent can set up its own repo
 
 ### phase 2 — routing + projects
@@ -153,7 +159,7 @@ pru teardown                       # Stop instance (agents resume on next setup)
 
 #### worktree management
 - Auto-create worktree + branch on agent launch
-- Worktrees stored outside the main repo (like Orchestra: `~/repos/.pirouette-worktrees/<project>/<agent>/`)
+- Worktrees stored outside the main repo (like Orchestra: `/data/repos/.pirouette-worktrees/<project>/<agent>/`)
 - Support rebasing agent branches on main
 - Push agent branches to origin
 
@@ -209,9 +215,11 @@ import {
   ModelRegistry,
 } from "@mariozechner/pi-coding-agent";
 
+const sessionRoot = "/data/sessions";
+
 const { session } = await createAgentSession({
   cwd: worktreePath,
-  sessionManager: SessionManager.create(worktreePath),
+  sessionManager: SessionManager.create(worktreePath, sessionRoot),
   authStorage,
   modelRegistry,
   // model, thinkingLevel, etc.
@@ -228,7 +236,7 @@ await session.prompt("Fix the failing tests");
 // Resume existing session
 const { session: resumed } = await createAgentSession({
   cwd: worktreePath,
-  sessionManager: SessionManager.continueRecent(worktreePath),
+  sessionManager: SessionManager.continueRecent(worktreePath, sessionRoot),
   authStorage,
   modelRegistry,
 });
@@ -250,12 +258,24 @@ Reuse the base16-tailwind system from the personal website:
 - Support light/dark/system mode toggle
 - Persist theme choice in localStorage
 
+### durable storage layout
+Treat the container as replaceable and keep the source of truth on the mounted data volume.
+
+Suggested layout inside the container:
+- `/data/sessions/` — pi session JSONL files
+- `/data/repos/` — cloned repos
+- `/data/repos/.pirouette-worktrees/` — agent worktrees
+- `/data/state/` — pirouette metadata (agents, projects, routing state, notification state)
+- `/data/logs/` — optional server logs and exported artifacts
+
+This matters because a resumable pi session is only useful if the corresponding `cwd` still exists. Sessions and worktrees therefore need to persist together.
+
 ### container lifecycle
-1. `pru setup` launches EC2 instance + runs Docker container
+1. `pru setup` launches EC2 instance, mounts the persistent EBS-backed data volume on the host, and runs Docker with that volume bound into the container as `/data`
 2. Container entrypoint: fetch dotfiles, start sshd, join Tailscale (or run alongside a host-level Tailscale setup), start Caddy for TLS termination, then start pirouette server
-3. pirouette server auto-resumes any previously running agents (checks persisted state)
-4. `pru teardown` stops EC2 (EBS persists, so container state survives)
-5. Next `pru setup` restarts instance, container resumes, agents resume
+3. pirouette server reads metadata from `/data/state/` and auto-resumes any previously running agents using session files from `/data/sessions/`
+4. `pru teardown` stops EC2; the EBS volume persists, so repos, worktrees, metadata, and sessions survive
+5. Next `pru setup` restarts the instance, reattaches/mounts the data volume, starts the container, and agents resume
 
 ### SSH config
 `pru setup` adds an entry to `~/.ssh/config`:
@@ -273,6 +293,7 @@ Host pirouette
 
 ## TODOs / deferred
 
+- [ ] **Backups / disaster recovery:** Enable regular snapshots for the persistent EBS data volume; optionally also ship `/data/sessions/` + `/data/state/` backups to S3 for extra safety.
 - [ ] **Middleman proxy:** All LLM API calls should go via the internal METR middleman proxy. Need to configure base URL / API key routing once we know the network setup.
 - [ ] **API keys / .env:** Define what goes in `.env` (LLM keys, Tailscale/Caddy config, Google OAuth client ID/secret later, etc.). Should use `uv run --env-file .env` for Python tools agents might use.
 - [ ] **GitHub auth in container:** Set up `gh auth` — likely via SSH agent forwarding (already have `ForwardAgent yes`) + `gh auth login` with a token, or just rely on SSH for git operations.
