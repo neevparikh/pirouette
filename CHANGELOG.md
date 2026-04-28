@@ -5,6 +5,21 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.2.2 — CLI version fix
+
+### Fixed
+
+- `pirouette --version` and `pru --version` now report the actual
+  package version. Previously hardcoded as `"0.1.0"` in `src/cli/index.ts`,
+  so the published 0.2.1 (and earlier 0.2.0) reported `0.1.0`. The CLI
+  now reads `version` straight from `package.json` at startup, so the
+  two can't drift again.
+
+No other changes vs 0.2.1. If you're already on a working 0.2.1 you
+lose nothing by skipping this; the install ergonomics are the same.
+
+---
+
 ## 0.2.1 — security hardening (no-devops-needed pass)
 
 Focused security release closing every issue from the v0.2 review that

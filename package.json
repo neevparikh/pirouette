@@ -1,6 +1,6 @@
 {
   "name": "@neevparikh/pirouette",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Long-lived pi coding agents in the cloud, with a web dashboard and a CLI.",
   "license": "MIT",
   "type": "module",
