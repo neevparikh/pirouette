@@ -25,7 +25,7 @@ lose nothing by skipping this; the install ergonomics are the same.
 Focused security release closing every issue from the v0.2 review that
 doesn't require devops involvement or an auth-architecture decision.
 Application-layer auth (bearer token / OIDC) is deliberately deferred to
-a later release — see `docs/security_plan.md` for the full reasoning.
+a later release.
 
 ### Security
 
@@ -78,8 +78,6 @@ a later release — see `docs/security_plan.md` for the full reasoning.
 - New "Trust model" section in `README.md` stating clearly what
   pirouette enforces (network layer + SSH key today) and what's out
   of scope until a later release.
-- `docs/security_plan.md` carries the full plan including options for
-  the auth layer that this release deliberately doesn't ship.
 
 ### Build / packaging
 

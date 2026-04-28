@@ -218,4 +218,6 @@ __marimo__/
 # time. The committed copy of Tailwind lives at vendor/tailwindcss-3.4.17.min.js;
 # scripts/vendor.mjs writes processed bundles here for both dev and build modes.
 src/web/vendor/
+
+# Design docs / planning notes are kept local only — not pushed publicly.
 docs/

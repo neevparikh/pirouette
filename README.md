@@ -1,38 +1,37 @@
 # pirouette
 
-Run long-lived [pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) coding agents in the cloud, with a web dashboard to interact with them and a CLI for management.
+Run long-lived [pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)
+coding agents on a cloud VM, with a web dashboard for talking to them
+and a CLI (`pru`) for managing the box.
 
-Single-user by design. You run one EC2 instance with a Docker container; pirouette's server lives inside the container and manages a pool of pi agents for you.
+You provision one EC2 instance with a Docker container; pirouette's server
+runs inside the container and manages a pool of pi agents. Each agent gets
+its own git worktree so they can work on different branches in parallel.
 
-## What's new in 0.2.1
+## What this is
 
-Security hardening pass — closes the bug-class issues from the v0.2
-security review without touching auth (which needs a separate design
-round). See `CHANGELOG.md` and `docs/security_plan.md` for details.
+- **Single-user.** Designed for one person on one cloud box. No multi-user
+  features, no public access path.
+- **Long-running.** Agents survive across SSH disconnects, browser
+  refreshes, container restarts, even instance reboots (state lives on
+  a persistent EBS volume).
+- **Pi-native.** Uses [pi-coding-agent](https://github.com/badlogic/pi-mono)
+  directly — same session format, same extensions, same provider plumbing.
+  If you've used pi locally you'll recognize the model.
+- **Web + CLI.** Browser dashboard for chatting; `pru` for provisioning,
+  shelling in, viewing logs, shipping local changes.
 
-- **DNS-rebinding from malicious browser tabs blocked** — wildcard CORS
-  removed; `Host` (HTTP) and `Origin` (WS) validated against an allowlist.
-- **Dashboard runs without CDN** — marked, marked-highlight, DOMPurify,
-  highlight.js, and Tailwind all self-hosted at build time.
-- **Default bind tightened** — `pirouette server` defaults to `127.0.0.1`;
-  container path explicitly opts into `0.0.0.0` via `PIROUETTE_HOST`.
-- **Bug-class fixes** — path-traversal in the static server, `git clone`
-  URL hygiene, agent/project name validation (control chars), `pru logs
-  --lines` shell-injection guard, `$EDITOR` runs without a shell.
+## What this isn't
 
-## What's new in 0.2
-
-- **Vim modal editing** in the message input (toggle in input footer; persists)
-- **Live message-queue display** + steer / follow-up choice while streaming
-- **Per-agent model selector** in the agent header
-- **Session forking** with parent tree visualization in the sidebar
-- **Pi-style live footer** in the agent header (tokens, cost, context %, thinking)
-- **Full base16 theme picker** (449 themes, light/dark/system slots)
-- **Auto-push of laptop auth state** at `pru setup`; new `pru sync --secrets`
-- **Configurable container entrypoint** (`container.entrypoint_script`)
-- **Streaming flash + whole-page rebuild** both fixed (per-block reconciliation)
-
-Full list in [`CHANGELOG.md`](CHANGELOG.md).
+- **Not a multi-tenant service.** Anyone who can reach the dashboard's
+  port has full shell access on your container (the agents have
+  bash/edit/write tools by design). Today the only thing keeping that
+  perimeter narrow is your AWS security group + SSH tunnel.
+  See [Trust model](#trust-model) below.
+- **Not yet authenticated** at the application layer. A random shared
+  bearer token is on the roadmap.
+- **Not an `eval`-style harness.** No sandboxing of agent actions
+  beyond what the container itself provides.
 
 ## Install
 
@@ -40,53 +39,82 @@ Full list in [`CHANGELOG.md`](CHANGELOG.md).
 npm install -g @neevparikh/pirouette   # provides both `pirouette` and `pru`
 ```
 
-## Quick start (local only — no cloud)
-
-```bash
-pirouette server                # serves on :7777
-open http://localhost:7777
-```
-
 ## Quick start (cloud)
+
+The primary use case. Provisions an EC2 instance, attaches a 500 GiB
+EBS volume, runs your Docker image, installs pirouette inside it, and
+opens a browser to the dashboard via SSH tunnel.
 
 One-time setup:
 
-1. Install the AWS CLI and log in to the profile you want to use.
-2. Make sure that profile can create EC2 instances + EBS volumes in your target region.
-3. Create `~/.pirouette/config.toml` with your AWS network info (see below).
+1. Install the AWS CLI and `aws sso login` (or otherwise authenticate)
+   to a profile that can create EC2 + EBS in your target region.
+2. Create `~/.pirouette/config.toml` with your AWS network info — see
+   [Configuration](#configuration) below.
 
 Then:
 
 ```bash
-pru preflight     # read-only: verifies your AWS config + resources
-pru setup         # provisions: instance + 500 GiB EBS + container + server
-pru open          # SSH port-forward :7777 + opens browser
+pru preflight     # read-only: verify AWS config + resource discovery
+pru setup         # provision: instance + EBS + container + server
+pru open          # SSH-tunnel :7777 to the container, open browser
 ```
 
-When you're done working for a while:
+Day-to-day:
 
 ```bash
-pru teardown      # stops the instance; EBS data volume preserved
+pru open          # tunnel + browser (idempotent — safe to re-run)
+pru ssh           # shell into the container
+pru status        # instance state + server health
+pru logs -f       # tail server logs
 ```
+
+When you're done for a while:
+
+```bash
+pru teardown      # stop the instance; EBS preserved (state survives)
+```
+
+To rebuild from scratch:
+
+```bash
+pru destroy [--delete-volume]   # terminate; optionally also delete EBS
+```
+
+## Quick start (local dev)
+
+For developing pirouette itself, or running agents locally without an
+EC2 box:
+
+```bash
+pirouette server                # binds 127.0.0.1:7777
+open http://localhost:7777
+```
+
+Local mode skips the entire AWS / Docker / SSH-tunnel layer — you're
+just running the server process directly. Most useful for working on
+the dashboard or the server code.
 
 ## Configuration
 
-Pirouette reads TOML config from three places, in order (later wins):
+Pirouette reads TOML from three places, in order (later wins):
 
 1. Built-in defaults
 2. `./pirouette.toml` (packaged with the tool; generic defaults only)
 3. `~/.pirouette/config.toml` (your per-user overrides; not checked in)
 
-Run `pru config show` to see the effective merged config.
+`pru config show` prints the effective merged config; `pru config edit`
+opens your override file in `$EDITOR`.
 
-### Required fields
+### Required fields for `pru setup`
 
-`pru setup` will refuse to run until these are set in `~/.pirouette/config.toml`:
+`pru setup` will refuse to run until these are set in
+`~/.pirouette/config.toml`:
 
 | key | what it is |
 |---|---|
 | `aws.network.vpc_name` | Name tag of the VPC to launch into |
-| `aws.network.subnet_name_pattern` | Name-tag glob for private subnets; first alphabetical match is used |
+| `aws.network.subnet_name_pattern` | Name-tag glob for private subnets; first alphabetical match wins |
 | `aws.network.security_group_name` | Existing SG attached to the instance (must allow SSH inbound from your location) |
 | `aws.tags.Owner` | Tag applied to every created resource — usually your email |
 | `instance.key_name` | An existing EC2 keypair; if missing, pirouette imports `ssh.public_key_path` under this name |
@@ -103,7 +131,9 @@ Any image you use as `container.image` needs:
 - `tmux`, `git`, `curl`, and an `ssh` server
 - (Optional) `yadm` if you want dotfiles support
 
-One image that satisfies all of this out of the box: [`npx27/dev-unfetched`](https://hub.docker.com/r/npx27/dev-unfetched) (Arch Linux, user `neev`, uid 1000). Build your own for a leaner footprint.
+[`npx27/dev-unfetched`](https://hub.docker.com/r/npx27/dev-unfetched)
+satisfies all of this out of the box (Arch Linux, user `neev`, uid
+1000). Build your own for a leaner footprint.
 
 ### Minimal `~/.pirouette/config.toml`
 
@@ -125,7 +155,7 @@ key_name = "you@example.com"
 
 [container]
 image          = "npx27/dev-unfetched:latest"   # or your own image
-container_user = "neev"                           # match your image's user
+container_user = "neev"                         # match your image's user
 npm_package    = "@neevparikh/pirouette@latest"
 
 # Optional — both are skipped if empty.
@@ -140,18 +170,21 @@ authorized_keys_url = "https://github.com/you.keys"
 
 | command | purpose |
 |---|---|
-| `pru launch <name>` | Create a new pi agent (optional `--repo`, `--model`, `--thinking`) |
+| `pru launch <name>` | Create a new pi agent (`--repo`, `--model`, `--thinking` optional) |
 | `pru list` | List all agents and their state |
 | `pru send <agent> <msg>` | Send a message to an agent |
 | `pru stop <agent>` | Stop an agent (keeps its state) |
 | `pru rm <agent>` | Remove an agent; `--all` also deletes its worktree + session files |
 | `pru status` | Show remote instance + server health |
 
+You can also create agents from the web UI by typing `@<newname> message`
+in the input bar.
+
 ### Infrastructure
 
 | command | purpose |
 |---|---|
-| `pru preflight` | Read-only: validate AWS config and resource discovery |
+| `pru preflight` | Read-only: validate AWS config + resource discovery |
 | `pru setup` | Provision / resume the EC2 instance + start the container |
 | `pru teardown` | Stop the instance; EBS preserved |
 | `pru destroy [--delete-volume]` | Terminate; optionally delete EBS |
@@ -170,13 +203,14 @@ authorized_keys_url = "https://github.com/you.keys"
 | `pru config path` | Print config file search paths |
 | `pru config edit` | Open `~/.pirouette/config.toml` in `$EDITOR` |
 
-## Environment variables
+### Environment variables
 
-Rarely needed — the CLI reads config from TOML. These override specific runtime values.
+Rarely needed — the CLI reads config from TOML. These override specific
+runtime values.
 
 | var | default | purpose |
 |---|---|---|
-| `PIROUETTE_HOST` | `0.0.0.0` | Server bind host |
+| `PIROUETTE_HOST` | `127.0.0.1` (container path passes `0.0.0.0`) | Server bind host |
 | `PIROUETTE_PORT` | `7777` | Server port (or `container.pirouette_port` in config) |
 | `PIROUETTE_DATA_DIR` | `.pirouette/data` | Server data directory |
 | `PIROUETTE_URL` | `http://127.0.0.1:7777` | CLI → server URL (overrides tunnel) |
@@ -184,58 +218,48 @@ Rarely needed — the CLI reads config from TOML. These override specific runtim
 
 ## Trust model
 
-Pirouette today relies on the layers _below_ the application for access
-control. There's no application-layer authentication on the HTTP / WebSocket
-API yet (planned for a later release).
+Pirouette has no application-layer authentication. The HTTP and WebSocket
+APIs are wide open to anyone who can reach the listener. What keeps that
+narrow today:
 
-What keeps the API narrow today:
-
-- **AWS security group** — only port 22 inbound, only from a specific
-  source SG (e.g. your Tailscale subnet router). Configurable via
-  `aws.network.security_group_name`.
+- **AWS security group** — only port 22 inbound, only from the source
+  SG you configure (e.g. a Tailscale subnet router).
 - **SSH key** — required to open the port-forward to the container.
 - **Same-origin web app** — the dashboard is served from the same
   listener as the API. Cross-origin requests are rejected by `Host`
-  header validation (HTTP) and `Origin` validation (WebSocket); there
-  are no `Access-Control-Allow-*` headers.
-- **Default `127.0.0.1` bind** — `pirouette server` (local-dev) binds
-  loopback only. Container path explicitly opts into `0.0.0.0` (gated
-  by SG). Override with `PIROUETTE_HOST=0.0.0.0` if you really mean it.
+  validation (HTTP) and `Origin` validation (WebSocket); there are no
+  `Access-Control-Allow-*` headers.
+- **Loopback bind by default** — `pirouette server` (local-dev) binds
+  `127.0.0.1` only. The container path explicitly opts into `0.0.0.0`
+  via `PIROUETTE_HOST` because Docker port-mapping requires it; the SG
+  is what gates external reachability there.
 
-What this means in practice: **anyone who can establish a TCP connection
-to the dashboard port has shell access on your container**, because the
-agents have full bash/edit/write tools by design. The SG + SSH tunnel
-are what keeps that perimeter narrow today.
+In practice: **anyone who can establish a TCP connection to the dashboard
+port has shell access on your container.** The agents have full
+bash/edit/write tools by design. The SG + SSH tunnel are the perimeter.
 
 ### Things you're trusting (the supply chain)
 
-- The npm package `@neevparikh/pirouette` (or whatever
-  `container.npm_package` points at).
+- The npm package `@neevparikh/pirouette` (or whatever you set
+  `container.npm_package` to).
 - The dotfiles repo at `dotfiles.clone_url` (yadm clone over HTTPS).
 - The keys served at `dotfiles.authorized_keys_url` (used as
   `authorized_keys` for the container's sshd).
 - Your AWS account's network isolation.
 - Trust-on-first-use SSH host keys (`StrictHostKeyChecking=accept-new`).
-  In a private VPC this is generally fine; if you're sharing a network
-  with untrusted parties, pre-seed `~/.ssh/known_hosts` manually.
-- Browser libraries vendored at build time — marked, marked-highlight,
-  DOMPurify, highlight.js (from npm), and the Tailwind v3 CDN runtime
-  (committed at `vendor/tailwindcss-3.4.17.min.js`). No CDN dependency
-  at runtime.
+  Fine for a private VPC; pre-seed `~/.ssh/known_hosts` manually if
+  you're sharing a network with untrusted parties.
 
-### What's planned but not yet shipped
+Browser libraries (marked, marked-highlight, DOMPurify, highlight.js,
+Tailwind) are vendored at build time — no CDN dependency at runtime.
 
-A future release will add an application-layer auth boundary so a
-network-level breach doesn't immediately mean RCE. The current
-top-of-the-list candidates are: a random shared bearer token, or a
-METR-Okta-issued JWT with subject validation. Decisions are tracked
-in `docs/security_plan.md`.
+### Operational mitigations
 
-If you need stronger guarantees today, the operational mitigations are:
+If your threat model is stricter than what's enforced by code today:
 
 1. Don't broaden the SG.
-2. Don't bind the dashboard to a public IP (`PIROUETTE_HOST=0.0.0.0`
-   is for the container path; everything else should stay loopback).
+2. Don't bind the dashboard to a public IP. `PIROUETTE_HOST=0.0.0.0`
+   is for the container path; everything else should stay loopback.
 3. Treat anyone with read access to your laptop's `~/.ssh/` as having
    full pirouette access.
 
@@ -254,8 +278,6 @@ pru ssh ────── jump via host ─────── :2222 ───�
                                                                                      │
                                                  persistent EBS volume at /data ────┘
 ```
-
-See [docs/initial_setup.md](docs/initial_setup.md) for design notes and [docs/todos.md](docs/todos.md) for status.
 
 ## License
 
