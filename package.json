@@ -1,9 +1,36 @@
 {
-  "name": "pirouette",
-  "version": "0.1.0",
-  "private": true,
+  "name": "@neevparikh/pirouette",
+  "version": "0.2.0",
+  "description": "Long-lived pi coding agents in the cloud, with a web dashboard and a CLI.",
+  "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/neevparikh/pirouette.git"
+  },
+  "author": "Neev Parikh",
+  "bin": {
+    "pirouette": "dist/cli/index.js",
+    "pru": "dist/cli/index.js"
+  },
+  "main": "dist/cli/index.js",
+  "files": [
+    "dist/",
+    "scripts/",
+    "pirouette.toml",
+    "README.md",
+    "CHANGELOG.md"
+  ],
   "scripts": {
+    "build": "tsc -p tsconfig.build.json && node scripts/post-build.mjs",
+    "clean": "rm -rf dist",
+    "themes": "node scripts/generate-themes.mjs",
+    "prepublishOnly": "npm run clean && npm run typecheck && npm test && npm run build",
+    "dev": "tsx src/cli/index.ts server",
+    "pru": "tsx src/cli/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "spike:session:new": "tsx src/spikes/session-resume.ts new",
     "spike:session:resume": "tsx src/spikes/session-resume.ts resume",
     "spike:session:inspect": "tsx src/spikes/session-resume.ts inspect",
@@ -13,12 +40,19 @@
     "spike:stream:reset": "tsx src/spikes/event-streaming.ts reset"
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "0.64.0",
+    "@mariozechner/pi-coding-agent": "^0.68.1",
+    "commander": "^13.1.0",
+    "smol-toml": "^1.6.1",
     "ws": "^8.18.3"
   },
   "devDependencies": {
+    "@types/jsdom": "^28.0.1",
     "@types/ws": "^8.18.1",
+    "isomorphic-dompurify": "^2.36.0",
+    "jsdom": "^25.0.1",
+    "marked": "^15.0.12",
     "tsx": "^4.20.6",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^3.2.4"
   }
 }

@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "declaration": false,
+    "sourceMap": true,
+    "removeComments": false
+  },
+  "include": ["src/cli/**/*.ts", "src/server/**/*.ts"],
+  "exclude": ["src/spikes/**", "src/web/**", "**/*.test.*", "**/__tests__/**"]
+}

@@ -1,0 +1,132 @@
+# Pirouette default configuration.
+#
+# Layering (later wins):
+#   built-in defaults  <  ./pirouette.toml (this file)  <  ~/.pirouette/config.toml  <  CLI flags
+#
+# This file ships with the package and contains generic defaults. Put your
+# per-user / environment-specific values in `~/.pirouette/config.toml`
+# (not in the repo). Run `pru config show` to see the effective merged config.
+#
+# Required fields (the CLI will refuse to run AWS operations until these are set):
+#   - aws.tags.Owner
+#   - aws.network.vpc_name
+#   - aws.network.subnet_name_pattern
+#   - aws.network.security_group_name
+#   - instance.key_name
+#
+# A minimal ~/.pirouette/config.toml looks like:
+#
+#   [aws]
+#   profile = "my-aws-profile"
+#   region  = "us-west-2"
+#
+#   [aws.network]
+#   vpc_name            = "my-vpc"
+#   subnet_name_pattern = "my-private-subnet-*"
+#   security_group_name = "my-dev-sg"
+#
+#   [aws.tags]
+#   Owner = "you@example.com"
+#
+#   [instance]
+#   key_name = "you@example.com"
+#
+#   [dotfiles]
+#   clone_url           = "https://github.com/you/dotfiles.git"
+#   authorized_keys_url = "https://github.com/you.keys"
+
+[aws]
+profile = "default"
+region  = "us-west-2"
+
+[aws.network]
+# Resources are discovered by name/tag at runtime (no hardcoded IDs).
+# All three must be set before `pru setup`.
+vpc_name            = ""
+subnet_name_pattern = ""
+security_group_name = ""
+
+[aws.tags]
+# Applied to every resource we create. Set Owner to your email; add any others
+# required by your AWS account (e.g. Environment, CostCenter).
+Owner = ""
+
+[instance]
+type     = "m6i.16xlarge"
+# Lookup: latest Ubuntu 24.04 (Noble) x86_64 gp3 from Canonical. Rarely needs override.
+ami_name_pattern = "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"
+ami_owner        = "099720109477"  # Canonical
+# Name of an existing EC2 keypair in the target account/region. If not found,
+# `pru setup` will try to import `ssh.public_key_path` under this name.
+key_name = ""
+
+[ebs]
+size_gb     = 500
+type        = "gp3"
+# Name tag used to find the volume across instance lifecycles. The volume
+# survives `pru teardown` and is reattached on the next `pru setup`.
+volume_name = "pirouette-data"
+
+[ssh]
+# EC2 host user. Ubuntu AMIs use "ubuntu"; Amazon Linux uses "ec2-user".
+user            = "ubuntu"
+private_key     = "~/.ssh/id_ed25519"
+public_key_path = "~/.ssh/id_ed25519.pub"
+# Local SSH config alias added by `pru setup`. You can `ssh pirouette` after
+# setup; `pru ssh` jumps through this alias into the container.
+host_alias      = "pirouette"
+
+[container]
+# Dev container image. Must be set in your ~/.pirouette/config.toml.
+#
+# Requirements for any image pirouette can use:
+#   - a non-root user (ideally uid 1000) with passwordless sudo
+#   - node + npm installed
+#   - tmux, git, ssh server, curl
+#   - (optional) yadm if you want the dotfiles feature
+#
+# The image `npx27/dev-unfetched:latest` satisfies all of the above and
+# happens to use uid 1000 / user `neev`. Build your own for a cleaner
+# footprint if you prefer.
+image          = ""
+# The non-root user baked into the image above. `pru setup` bind-mounts
+# `/home/<container_user>` on the host into the container so dotfiles and
+# npm globals persist across container restarts.
+container_user = ""
+# Optional; defaults to `/home/<container_user>` if unset.
+container_home = ""
+pirouette_port = 7777
+# npm package `pirouette server` is installed from at first boot. Override
+# with your fork's scope if you publish your own build.
+npm_package    = "@neevparikh/pirouette@latest"
+# Default model used when `pru launch` doesn't pass --model. Must be a model
+# string your credentials can actually reach (e.g. "anthropic/claude-sonnet-4-5").
+default_model  = ""
+# Default thinking level for new agents when none is specified (e.g. when
+# quick-creating from the web UI via @<newname>). Empty = off. Options:
+# off | minimal | low | medium | high.
+default_thinking_level = ""
+
+# Optional path to your own container entrypoint script. The default
+# (bundled with the npm package) does:
+#   1. yadm clone $PIROUETTE_DOTFILES_URL
+#   2. fetch authorized_keys, start sshd
+#   3. install $PIROUETTE_PACKAGE globally
+#   4. start `pirouette server` in a tmux session
+# Override if you use chezmoi/stow/vcsh, want different install steps,
+# need extra setup before the server, etc. The script must run as the
+# container's non-root user, leave the container alive (e.g.
+# `exec sleep infinity`), and read PIROUETTE_PACKAGE / PIROUETTE_DATA_DIR /
+# PIROUETTE_PORT from its env. Path may start with `~`.
+# entrypoint_script = "~/.config/pirouette/my-entrypoint.sh"
+entrypoint_script = ""
+
+[dotfiles]
+# Optional. If set, the container's entrypoint runs `yadm clone <url>` on
+# first boot. Must be a PUBLIC HTTPS URL (no credentials available inside
+# the container). Leave empty to skip.
+clone_url = ""
+# Optional. URL that returns an SSH authorized_keys file (e.g. GitHub's
+# `/USER.keys` endpoint). The container's entrypoint curls this into
+# ~/.ssh/authorized_keys so you can `ssh` into it. Leave empty to skip.
+authorized_keys_url = ""

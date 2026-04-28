@@ -1,0 +1,3145 @@
+[
+  {
+    "slug": "base24-3024-day",
+    "name": "3024 Day",
+    "variant": "light",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-3024-night",
+    "name": "3024 Night",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-adventure-time",
+    "name": "Adventure Time",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-alien-blood",
+    "name": "Alien Blood",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-argonaut",
+    "name": "Argonaut",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-arthur",
+    "name": "Arthur",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-atelier-sulphurpool",
+    "name": "Atelier Sulphurpool",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-ayu",
+    "name": "ayu",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-ayu-light",
+    "name": "Ayu Light",
+    "variant": "light",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-banana-blueberry",
+    "name": "Banana Blueberry",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-batman",
+    "name": "Batman",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-birds-of-paradise",
+    "name": "Birds Of Paradise",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-blazer",
+    "name": "Blazer",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-blue-berry-pie",
+    "name": "Blue Berry Pie",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-blue-matrix",
+    "name": "Blue Matrix",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-bluloco-dark",
+    "name": "Bluloco Dark",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-bluloco-light",
+    "name": "Bluloco Light",
+    "variant": "light",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-borland",
+    "name": "Borland",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-breeze",
+    "name": "Breeze",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-broadcast",
+    "name": "Broadcast",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-brogrammer",
+    "name": "Brogrammer",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-builtin-dark",
+    "name": "Builtin Dark",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-builtin-light",
+    "name": "Builtin Light",
+    "variant": "light",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-builtin-pastel-dark",
+    "name": "Builtin Pastel Dark",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-builtin-solarized-dark",
+    "name": "Builtin Solarized Dark",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-builtin-solarized-light",
+    "name": "Builtin Solarized Light",
+    "variant": "light",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-builtin-tango-dark",
+    "name": "Builtin Tango Dark",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-builtin-tango-light",
+    "name": "Builtin Tango Light",
+    "variant": "light",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-catppuccin-frappe",
+    "name": "Catppuccin Frappe",
+    "variant": "dark",
+    "system": "base24",
+    "author": "https://github.com/catppuccin/catppuccin"
+  },
+  {
+    "slug": "base24-catppuccin-latte",
+    "name": "Catppuccin Latte",
+    "variant": "light",
+    "system": "base24",
+    "author": "https://github.com/catppuccin/catppuccin"
+  },
+  {
+    "slug": "base24-catppuccin-macchiato",
+    "name": "Catppuccin Macchiato",
+    "variant": "dark",
+    "system": "base24",
+    "author": "https://github.com/catppuccin/catppuccin"
+  },
+  {
+    "slug": "base24-catppuccin-mocha",
+    "name": "Catppuccin Mocha",
+    "variant": "dark",
+    "system": "base24",
+    "author": "https://github.com/catppuccin/catppuccin"
+  },
+  {
+    "slug": "base24-chalk",
+    "name": "Chalk",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-chalkboard",
+    "name": "Chalkboard",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-challenger-deep",
+    "name": "Challenger Deep",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-ciapre",
+    "name": "Ciapre",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-clrs",
+    "name": "CLRS",
+    "variant": "light",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-cobalt-neon",
+    "name": "Cobalt Neon",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-cobalt2",
+    "name": "Cobalt2",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-crayon-pony-fish",
+    "name": "Crayon Pony Fish",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-cyberdyne",
+    "name": "Cyberdyne",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-dark-plus",
+    "name": "Dark Plus",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-deep",
+    "name": "deep",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-deep-oceanic-next",
+    "name": "Deep Oceanic Next",
+    "variant": "dark",
+    "system": "base24",
+    "author": "spearkkk (https://github.com/spearkkk)"
+  },
+  {
+    "slug": "base24-desert",
+    "name": "Desert",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-dimmed-monokai",
+    "name": "Dimmed Monokai",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-dracula",
+    "name": "Dracula",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-earthsong",
+    "name": "Earthsong",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-elemental",
+    "name": "Elemental",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-elementary",
+    "name": "Elementary",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-embarcadero",
+    "name": "Embarcadero",
+    "variant": "dark",
+    "system": "base24",
+    "author": "Thomas Leon Highbaugh"
+  },
+  {
+    "slug": "base24-encom",
+    "name": "ENCOM",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-espresso",
+    "name": "Espresso",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-espresso-libre",
+    "name": "Espresso Libre",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-fideloper",
+    "name": "Fideloper",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-firefox-dev",
+    "name": "Firefox Dev",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-fish-tank",
+    "name": "Fish Tank",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-flat",
+    "name": "Flat",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-flatland",
+    "name": "Flatland",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-floraverse",
+    "name": "Floraverse",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-forest-blue",
+    "name": "Forest Blue",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-framer",
+    "name": "Framer",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-front-end-delight",
+    "name": "Front End Delight",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-fun-forrest",
+    "name": "Fun Forrest",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-galaxy",
+    "name": "Galaxy",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-github",
+    "name": "Github",
+    "variant": "light",
+    "system": "base24",
+    "author": "Tinted Theming (https://github.com/tinted-theming)"
+  },
+  {
+    "slug": "base24-github-dark",
+    "name": "Github Dark",
+    "variant": "dark",
+    "system": "base24",
+    "author": "Tinted Theming (https://github.com/tinted-theming)"
+  },
+  {
+    "slug": "base24-grape",
+    "name": "Grape",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-gruvbox-dark",
+    "name": "Gruvbox Dark",
+    "variant": "dark",
+    "system": "base24",
+    "author": "Tinted Theming (https://github.com/tinted-theming), morhetz (https://github.com/morhetz/gruvbox)"
+  },
+  {
+    "slug": "base24-gruvbox-light",
+    "name": "Gruvbox Light",
+    "variant": "light",
+    "system": "base24",
+    "author": "Tinted Theming (https://github.com/tinted-theming), morhetz (https://github.com/morhetz/gruvbox)"
+  },
+  {
+    "slug": "base24-hacktober",
+    "name": "Hacktober",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-hardcore",
+    "name": "Hardcore",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-highway",
+    "name": "Highway",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-hipster-green",
+    "name": "Hipster Green",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-hivacruz",
+    "name": "Hivacruz",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-homebrew",
+    "name": "Homebrew",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-hopscotch",
+    "name": "Hopscotch",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-hurtado",
+    "name": "Hurtado",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-hybrid",
+    "name": "Hybrid",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-ic-green-ppl",
+    "name": "IC-Green-PPL",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-ic-orange-ppl",
+    "name": "IC-Orange-PPL",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-idea",
+    "name": "Idea",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-idle-toes",
+    "name": "Idle Toes",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-jackie-brown",
+    "name": "Jackie Brown",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-japanesque",
+    "name": "Japanesque",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-jellybeans",
+    "name": "Jellybeans",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-jet-brains-darcula",
+    "name": "Jet Brains Darcula",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-kibble",
+    "name": "Kibble",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-lab-fox",
+    "name": "Lab Fox",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-laser",
+    "name": "Laser",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-later-this-evening",
+    "name": "Later This Evening",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-lavandula",
+    "name": "Lavandula",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-lovelace",
+    "name": "Lovelace",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-man-page",
+    "name": "Man Page",
+    "variant": "light",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-material",
+    "name": "Material",
+    "variant": "light",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-material-dark",
+    "name": "Material Dark",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-mathias",
+    "name": "Mathias",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-medallion",
+    "name": "Medallion",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-mission-brogue",
+    "name": "Mission Brogue",
+    "variant": "dark",
+    "system": "base24",
+    "author": "Thomas Leon Highbaugh"
+  },
+  {
+    "slug": "base24-misterioso",
+    "name": "Misterioso",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-molokai",
+    "name": "Molokai",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-mona-lisa",
+    "name": "Mona Lisa",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-monokai-vivid",
+    "name": "Monokai Vivid",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-night-lion-v1",
+    "name": "Night Lion V1",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-night-lion-v2",
+    "name": "Night Lion V2",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-night-owlish-light",
+    "name": "Night Owlish Light",
+    "variant": "light",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-nocturnal-winter",
+    "name": "Nocturnal Winter",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-obsidian",
+    "name": "Obsidian",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-ocean",
+    "name": "Ocean",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-oceanic-material",
+    "name": "Oceanic Material",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-ollie",
+    "name": "Ollie",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-one-black",
+    "name": "One Black",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-one-dark",
+    "name": "One Dark",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-one-half-light",
+    "name": "One Half Light",
+    "variant": "light",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-one-light",
+    "name": "One Light",
+    "variant": "light",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-operator-mono-dark",
+    "name": "Operator Mono Dark",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-pandora",
+    "name": "Pandora",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-paul-millr",
+    "name": "Paul Millr",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-pencil-dark",
+    "name": "Pencil Dark",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-pencil-light",
+    "name": "Pencil Light",
+    "variant": "light",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-piatto-light",
+    "name": "Piatto Light",
+    "variant": "light",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-pnevma",
+    "name": "Pnevma",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-pro",
+    "name": "Pro",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-pro-light",
+    "name": "Pro Light",
+    "variant": "light",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-purple-rain",
+    "name": "Purple Rain",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-purplepeter",
+    "name": "Purplepeter",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-rebecca",
+    "name": "Rebecca",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-red-alert",
+    "name": "Red Alert",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-red-planet",
+    "name": "Red Planet",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-red-sands",
+    "name": "Red Sands",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-rippedcasts",
+    "name": "Rippedcasts",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-royal",
+    "name": "Royal",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-scarlet-protocol",
+    "name": "Scarlet Protocol",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-sea-shells",
+    "name": "Sea Shells",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-seafoam-pastel",
+    "name": "Seafoam Pastel",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-shades-of-purple",
+    "name": "Shades Of Purple",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-shaman",
+    "name": "Shaman",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-slate",
+    "name": "Slate",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-sleepy-hollow",
+    "name": "Sleepy Hollow",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-smyck",
+    "name": "Smyck",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-soft-server",
+    "name": "Soft Server",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-softstack-dark",
+    "name": "Softstack Dark",
+    "variant": "dark",
+    "system": "base24",
+    "author": "Neev Parikh (https://github.com/neevparikh), Tinted Theming (https://github.com/tinted-theming), morhetz (https://github.com/morhetz/gruvbox)"
+  },
+  {
+    "slug": "base24-softstack-light",
+    "name": "Softstack Light",
+    "variant": "light",
+    "system": "base24",
+    "author": "Neev Parikh (https://github.com/neevparikh), Tinted Theming (https://github.com/tinted-theming), morhetz (https://github.com/morhetz/gruvbox)"
+  },
+  {
+    "slug": "base24-solarized-dark-higher-contrast",
+    "name": "Solarized Dark Higher Contrast",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-solarized-dark-patched",
+    "name": "Solarized Dark Patched",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-space-gray-eighties",
+    "name": "Space Gray Eighties",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-space-gray-eighties-dull",
+    "name": "Space Gray Eighties Dull",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-spacedust",
+    "name": "Spacedust",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-sparky",
+    "name": "Sparky",
+    "variant": "dark",
+    "system": "base24",
+    "author": "Leila Sother (https://github.com/mixcoac)"
+  },
+  {
+    "slug": "base24-spiderman",
+    "name": "Spiderman",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-square",
+    "name": "Square",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-sundried",
+    "name": "Sundried",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-tango-adapted",
+    "name": "Tango Adapted",
+    "variant": "light",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-tango-half-adapted",
+    "name": "Tango Half Adapted",
+    "variant": "light",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-terminal-basic",
+    "name": "Terminal Basic",
+    "variant": "light",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-thayer-bright",
+    "name": "Thayer Bright",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-the-hulk",
+    "name": "The Hulk",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-toy-chest",
+    "name": "Toy Chest",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-treehouse",
+    "name": "Treehouse",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-twilight",
+    "name": "Twilight",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-ubuntu",
+    "name": "Ubuntu",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-ultra-violet",
+    "name": "Ultra Violet",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-under-the-sea",
+    "name": "Under The Sea",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-unikitty",
+    "name": "Unikitty",
+    "variant": "light",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-vibrant-ink",
+    "name": "Vibrant Ink",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-violet-dark",
+    "name": "Violet Dark",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-violet-light",
+    "name": "Violet Light",
+    "variant": "light",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-warm-neon",
+    "name": "Warm Neon",
+    "variant": "light",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-wez",
+    "name": "Wez",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-wild-cherry",
+    "name": "Wild Cherry",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-wombat",
+    "name": "Wombat",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-wryan",
+    "name": "Wryan",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base24-zenburn",
+    "name": "Zenburn",
+    "variant": "dark",
+    "system": "base24",
+    "author": "FredHappyface (https://github.com/fredHappyface)"
+  },
+  {
+    "slug": "base16-3024",
+    "name": "3024",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Jan T. Sott (http://github.com/idleberg)"
+  },
+  {
+    "slug": "base16-apathy",
+    "name": "Apathy",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Jannik Siebert (https://github.com/janniks)"
+  },
+  {
+    "slug": "base16-apprentice",
+    "name": "Apprentice",
+    "variant": "dark",
+    "system": "base16",
+    "author": "romainl"
+  },
+  {
+    "slug": "base16-ashes",
+    "name": "Ashes",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Jannik Siebert (https://github.com/janniks)"
+  },
+  {
+    "slug": "base16-atelier-cave",
+    "name": "Atelier Cave",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Bram de Haan (http://atelierbramdehaan.nl)"
+  },
+  {
+    "slug": "base16-atelier-cave-light",
+    "name": "Atelier Cave Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Bram de Haan (http://atelierbramdehaan.nl)"
+  },
+  {
+    "slug": "base16-atelier-dune",
+    "name": "Atelier Dune",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Bram de Haan (http://atelierbramdehaan.nl)"
+  },
+  {
+    "slug": "base16-atelier-dune-light",
+    "name": "Atelier Dune Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Bram de Haan (http://atelierbramdehaan.nl)"
+  },
+  {
+    "slug": "base16-atelier-estuary",
+    "name": "Atelier Estuary",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Bram de Haan (http://atelierbramdehaan.nl)"
+  },
+  {
+    "slug": "base16-atelier-estuary-light",
+    "name": "Atelier Estuary Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Bram de Haan (http://atelierbramdehaan.nl)"
+  },
+  {
+    "slug": "base16-atelier-forest",
+    "name": "Atelier Forest",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Bram de Haan (http://atelierbramdehaan.nl)"
+  },
+  {
+    "slug": "base16-atelier-forest-light",
+    "name": "Atelier Forest Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Bram de Haan (http://atelierbramdehaan.nl)"
+  },
+  {
+    "slug": "base16-atelier-heath",
+    "name": "Atelier Heath",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Bram de Haan (http://atelierbramdehaan.nl)"
+  },
+  {
+    "slug": "base16-atelier-heath-light",
+    "name": "Atelier Heath Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Bram de Haan (http://atelierbramdehaan.nl)"
+  },
+  {
+    "slug": "base16-atelier-lakeside",
+    "name": "Atelier Lakeside",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Bram de Haan (http://atelierbramdehaan.nl)"
+  },
+  {
+    "slug": "base16-atelier-lakeside-light",
+    "name": "Atelier Lakeside Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Bram de Haan (http://atelierbramdehaan.nl)"
+  },
+  {
+    "slug": "base16-atelier-plateau",
+    "name": "Atelier Plateau",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Bram de Haan (http://atelierbramdehaan.nl)"
+  },
+  {
+    "slug": "base16-atelier-plateau-light",
+    "name": "Atelier Plateau Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Bram de Haan (http://atelierbramdehaan.nl)"
+  },
+  {
+    "slug": "base16-atelier-savanna",
+    "name": "Atelier Savanna",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Bram de Haan (http://atelierbramdehaan.nl)"
+  },
+  {
+    "slug": "base16-atelier-savanna-light",
+    "name": "Atelier Savanna Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Bram de Haan (http://atelierbramdehaan.nl)"
+  },
+  {
+    "slug": "base16-atelier-seaside",
+    "name": "Atelier Seaside",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Bram de Haan (http://atelierbramdehaan.nl)"
+  },
+  {
+    "slug": "base16-atelier-seaside-light",
+    "name": "Atelier Seaside Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Bram de Haan (http://atelierbramdehaan.nl)"
+  },
+  {
+    "slug": "base16-atelier-sulphurpool",
+    "name": "Atelier Sulphurpool",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Bram de Haan (http://atelierbramdehaan.nl)"
+  },
+  {
+    "slug": "base16-atelier-sulphurpool-light",
+    "name": "Atelier Sulphurpool Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Bram de Haan (http://atelierbramdehaan.nl)"
+  },
+  {
+    "slug": "base16-atlas",
+    "name": "Atlas",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Alex Lende (https://ajlende.com)"
+  },
+  {
+    "slug": "base16-ayu-dark",
+    "name": "Ayu Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Khue Nguyen <Z5483Y@gmail.com>"
+  },
+  {
+    "slug": "base16-ayu-light",
+    "name": "Ayu Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Khue Nguyen <Z5483Y@gmail.com>"
+  },
+  {
+    "slug": "base16-ayu-mirage",
+    "name": "Ayu Mirage",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Khue Nguyen <Z5483Y@gmail.com>"
+  },
+  {
+    "slug": "base16-aztec",
+    "name": "Aztec",
+    "variant": "dark",
+    "system": "base16",
+    "author": "TheNeverMan (github.com/TheNeverMan)"
+  },
+  {
+    "slug": "base16-bespin",
+    "name": "Bespin",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Jan T. Sott"
+  },
+  {
+    "slug": "base16-black-metal",
+    "name": "Black Metal",
+    "variant": "dark",
+    "system": "base16",
+    "author": "metalelf0 (https://github.com/metalelf0)"
+  },
+  {
+    "slug": "base16-black-metal-bathory",
+    "name": "Black Metal (Bathory)",
+    "variant": "dark",
+    "system": "base16",
+    "author": "metalelf0 (https://github.com/metalelf0)"
+  },
+  {
+    "slug": "base16-black-metal-burzum",
+    "name": "Black Metal (Burzum)",
+    "variant": "dark",
+    "system": "base16",
+    "author": "metalelf0 (https://github.com/metalelf0)"
+  },
+  {
+    "slug": "base16-black-metal-dark-funeral",
+    "name": "Black Metal (Dark Funeral)",
+    "variant": "dark",
+    "system": "base16",
+    "author": "metalelf0 (https://github.com/metalelf0)"
+  },
+  {
+    "slug": "base16-black-metal-gorgoroth",
+    "name": "Black Metal (Gorgoroth)",
+    "variant": "dark",
+    "system": "base16",
+    "author": "metalelf0 (https://github.com/metalelf0)"
+  },
+  {
+    "slug": "base16-black-metal-immortal",
+    "name": "Black Metal (Immortal)",
+    "variant": "dark",
+    "system": "base16",
+    "author": "metalelf0 (https://github.com/metalelf0)"
+  },
+  {
+    "slug": "base16-black-metal-khold",
+    "name": "Black Metal (Khold)",
+    "variant": "dark",
+    "system": "base16",
+    "author": "metalelf0 (https://github.com/metalelf0)"
+  },
+  {
+    "slug": "base16-black-metal-marduk",
+    "name": "Black Metal (Marduk)",
+    "variant": "dark",
+    "system": "base16",
+    "author": "metalelf0 (https://github.com/metalelf0)"
+  },
+  {
+    "slug": "base16-black-metal-mayhem",
+    "name": "Black Metal (Mayhem)",
+    "variant": "dark",
+    "system": "base16",
+    "author": "metalelf0 (https://github.com/metalelf0)"
+  },
+  {
+    "slug": "base16-black-metal-nile",
+    "name": "Black Metal (Nile)",
+    "variant": "dark",
+    "system": "base16",
+    "author": "metalelf0 (https://github.com/metalelf0)"
+  },
+  {
+    "slug": "base16-black-metal-venom",
+    "name": "Black Metal (Venom)",
+    "variant": "dark",
+    "system": "base16",
+    "author": "metalelf0 (https://github.com/metalelf0)"
+  },
+  {
+    "slug": "base16-blue-forest",
+    "name": "Blue Forest",
+    "variant": "dark",
+    "system": "base16",
+    "author": "alonsodomin (https://github.com/alonsodomin)"
+  },
+  {
+    "slug": "base16-blueish",
+    "name": "Blueish",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Ben Mayoras"
+  },
+  {
+    "slug": "base16-brewer",
+    "name": "Brewer",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Timothée Poisot (http://github.com/tpoisot)"
+  },
+  {
+    "slug": "base16-bright",
+    "name": "Bright",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Chris Kempson (http://chriskempson.com)"
+  },
+  {
+    "slug": "base16-brogrammer",
+    "name": "Brogrammer",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Vik Ramanujam (http://github.com/piggyslasher)"
+  },
+  {
+    "slug": "base16-brush-trees",
+    "name": "Brush Trees",
+    "variant": "light",
+    "system": "base16",
+    "author": "Abraham White <abelincoln.white@gmail.com>"
+  },
+  {
+    "slug": "base16-brush-trees-dark",
+    "name": "Brush Trees Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Abraham White <abelincoln.white@gmail.com>"
+  },
+  {
+    "slug": "base16-caroline",
+    "name": "caroline",
+    "variant": "dark",
+    "system": "base16",
+    "author": "ed (https://codeberg.org/ed)"
+  },
+  {
+    "slug": "base16-catppuccin-frappe",
+    "name": "Catppuccin Frappe",
+    "variant": "dark",
+    "system": "base16",
+    "author": "https://github.com/catppuccin/catppuccin"
+  },
+  {
+    "slug": "base16-catppuccin-latte",
+    "name": "Catppuccin Latte",
+    "variant": "light",
+    "system": "base16",
+    "author": "https://github.com/catppuccin/catppuccin"
+  },
+  {
+    "slug": "base16-catppuccin-macchiato",
+    "name": "Catppuccin Macchiato",
+    "variant": "dark",
+    "system": "base16",
+    "author": "https://github.com/catppuccin/catppuccin"
+  },
+  {
+    "slug": "base16-catppuccin-mocha",
+    "name": "Catppuccin Mocha",
+    "variant": "dark",
+    "system": "base16",
+    "author": "https://github.com/catppuccin/catppuccin"
+  },
+  {
+    "slug": "base16-chalk",
+    "name": "Chalk",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Chris Kempson (http://chriskempson.com)"
+  },
+  {
+    "slug": "base16-circus",
+    "name": "Circus",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Stephan Boyer (https://github.com/stepchowfun) and Esther Wang (https://github.com/ewang12)"
+  },
+  {
+    "slug": "base16-classic-dark",
+    "name": "Classic Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Jason Heeris (http://heeris.id.au)"
+  },
+  {
+    "slug": "base16-classic-light",
+    "name": "Classic Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Jason Heeris (http://heeris.id.au)"
+  },
+  {
+    "slug": "base16-codeschool",
+    "name": "Codeschool",
+    "variant": "dark",
+    "system": "base16",
+    "author": "blockloop"
+  },
+  {
+    "slug": "base16-colors",
+    "name": "Colors",
+    "variant": "dark",
+    "system": "base16",
+    "author": "mrmrs (http://clrs.cc)"
+  },
+  {
+    "slug": "base16-cupcake",
+    "name": "Cupcake",
+    "variant": "light",
+    "system": "base16",
+    "author": "Chris Kempson (http://chriskempson.com)"
+  },
+  {
+    "slug": "base16-cupertino",
+    "name": "Cupertino",
+    "variant": "light",
+    "system": "base16",
+    "author": "Defman21"
+  },
+  {
+    "slug": "base16-da-one-black",
+    "name": "Da One Black",
+    "variant": "dark",
+    "system": "base16",
+    "author": "NNB (https://github.com/NNBnh)"
+  },
+  {
+    "slug": "base16-da-one-gray",
+    "name": "Da One Gray",
+    "variant": "dark",
+    "system": "base16",
+    "author": "NNB (https://github.com/NNBnh)"
+  },
+  {
+    "slug": "base16-da-one-ocean",
+    "name": "Da One Ocean",
+    "variant": "dark",
+    "system": "base16",
+    "author": "NNB (https://github.com/NNBnh)"
+  },
+  {
+    "slug": "base16-da-one-paper",
+    "name": "Da One Paper",
+    "variant": "light",
+    "system": "base16",
+    "author": "NNB (https://github.com/NNBnh)"
+  },
+  {
+    "slug": "base16-da-one-sea",
+    "name": "Da One Sea",
+    "variant": "dark",
+    "system": "base16",
+    "author": "NNB (https://github.com/NNBnh)"
+  },
+  {
+    "slug": "base16-da-one-white",
+    "name": "Da One White",
+    "variant": "light",
+    "system": "base16",
+    "author": "NNB (https://github.com/NNBnh)"
+  },
+  {
+    "slug": "base16-danqing",
+    "name": "DanQing",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Wenhan Zhu (Cosmos) (zhuwenhan950913@gmail.com)"
+  },
+  {
+    "slug": "base16-danqing-light",
+    "name": "DanQing Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Wenhan Zhu (Cosmos) (zhuwenhan950913@gmail.com)"
+  },
+  {
+    "slug": "base16-darcula",
+    "name": "Darcula",
+    "variant": "dark",
+    "system": "base16",
+    "author": "jetbrains"
+  },
+  {
+    "slug": "base16-dark-violet",
+    "name": "Dark Violet",
+    "variant": "dark",
+    "system": "base16",
+    "author": "ruler501 (https://github.com/ruler501/base16-darkviolet)"
+  },
+  {
+    "slug": "base16-darkmoss",
+    "name": "darkmoss",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Gabriel Avanzi (https://github.com/avanzzzi)"
+  },
+  {
+    "slug": "base16-darktooth",
+    "name": "Darktooth",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Jason Milkins (https://github.com/jasonm23)"
+  },
+  {
+    "slug": "base16-decaf",
+    "name": "Decaf",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Alex Mirrington (https://github.com/alexmirrington)"
+  },
+  {
+    "slug": "base16-deep-oceanic-next",
+    "name": "Deep Oceanic Next",
+    "variant": "dark",
+    "system": "base16",
+    "author": "spearkkk (https://github.com/spearkkk)"
+  },
+  {
+    "slug": "base16-default-dark",
+    "name": "Default Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Chris Kempson (http://chriskempson.com)"
+  },
+  {
+    "slug": "base16-default-light",
+    "name": "Default Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Chris Kempson (http://chriskempson.com)"
+  },
+  {
+    "slug": "base16-digital-rain",
+    "name": "Digital Rain",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Nathan Byrd (https://github.com/cognitivegears)"
+  },
+  {
+    "slug": "base16-dirtysea",
+    "name": "dirtysea",
+    "variant": "light",
+    "system": "base16",
+    "author": "Kahlil (Kal) Hodgson"
+  },
+  {
+    "slug": "base16-dracula",
+    "name": "Dracula",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Jamy Golden (http://github.com/JamyGolden), based on Dracula Theme (http://github.com/dracula)"
+  },
+  {
+    "slug": "base16-edge-dark",
+    "name": "Edge Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "cjayross (https://github.com/cjayross)"
+  },
+  {
+    "slug": "base16-edge-light",
+    "name": "Edge Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "cjayross (https://github.com/cjayross)"
+  },
+  {
+    "slug": "base16-eighties",
+    "name": "Eighties",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Chris Kempson (http://chriskempson.com)"
+  },
+  {
+    "slug": "base16-embers",
+    "name": "Embers",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Jannik Siebert (https://github.com/janniks)"
+  },
+  {
+    "slug": "base16-embers-light",
+    "name": "Embers Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Jannik Siebert (https://github.com/janniks)"
+  },
+  {
+    "slug": "base16-emil",
+    "name": "emil",
+    "variant": "light",
+    "system": "base16",
+    "author": "limelier"
+  },
+  {
+    "slug": "base16-equilibrium-dark",
+    "name": "Equilibrium Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Carlo Abelli"
+  },
+  {
+    "slug": "base16-equilibrium-gray-dark",
+    "name": "Equilibrium Gray Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Carlo Abelli"
+  },
+  {
+    "slug": "base16-equilibrium-gray-light",
+    "name": "Equilibrium Gray Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Carlo Abelli"
+  },
+  {
+    "slug": "base16-equilibrium-light",
+    "name": "Equilibrium Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Carlo Abelli"
+  },
+  {
+    "slug": "base16-eris",
+    "name": "eris",
+    "variant": "dark",
+    "system": "base16",
+    "author": "ed (https://codeberg.org/ed)"
+  },
+  {
+    "slug": "base16-espresso",
+    "name": "Espresso",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Unknown. Maintained by Alex Mirrington (https://github.com/alexmirrington)"
+  },
+  {
+    "slug": "base16-eva",
+    "name": "Eva",
+    "variant": "dark",
+    "system": "base16",
+    "author": "kjakapat (https://github.com/kjakapat)"
+  },
+  {
+    "slug": "base16-eva-dim",
+    "name": "Eva Dim",
+    "variant": "dark",
+    "system": "base16",
+    "author": "kjakapat (https://github.com/kjakapat)"
+  },
+  {
+    "slug": "base16-evenok-dark",
+    "name": "Evenok Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Mekeor Melire"
+  },
+  {
+    "slug": "base16-everforest",
+    "name": "Everforest",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Sainnhe Park (https://github.com/sainnhe)"
+  },
+  {
+    "slug": "base16-everforest-dark-hard",
+    "name": "Everforest Dark Hard",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Sainnhe Park (https://github.com/sainnhe)"
+  },
+  {
+    "slug": "base16-flat",
+    "name": "Flat",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Chris Kempson (http://chriskempson.com)"
+  },
+  {
+    "slug": "base16-framer",
+    "name": "Framer",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Framer (Maintained by Jesse Hoyos)"
+  },
+  {
+    "slug": "base16-fruit-soda",
+    "name": "Fruit Soda",
+    "variant": "light",
+    "system": "base16",
+    "author": "jozip"
+  },
+  {
+    "slug": "base16-gigavolt",
+    "name": "Gigavolt",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Aidan Swope (http://github.com/Whillikers)"
+  },
+  {
+    "slug": "base16-github",
+    "name": "Github",
+    "variant": "light",
+    "system": "base16",
+    "author": "Tinted Theming (https://github.com/tinted-theming)"
+  },
+  {
+    "slug": "base16-github-dark",
+    "name": "Github Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Tinted Theming (https://github.com/tinted-theming)"
+  },
+  {
+    "slug": "base16-google-dark",
+    "name": "Google Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Seth Wright (http://sethawright.com)"
+  },
+  {
+    "slug": "base16-google-light",
+    "name": "Google Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Seth Wright (http://sethawright.com)"
+  },
+  {
+    "slug": "base16-gotham",
+    "name": "Gotham",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Andrea Leopardi (arranged by Brett Jones)"
+  },
+  {
+    "slug": "base16-grayscale-dark",
+    "name": "Grayscale Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Alexandre Gavioli (https://github.com/Alexx2/)"
+  },
+  {
+    "slug": "base16-grayscale-light",
+    "name": "Grayscale Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Alexandre Gavioli (https://github.com/Alexx2/)"
+  },
+  {
+    "slug": "base16-green-screen",
+    "name": "Green Screen",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Chris Kempson (http://chriskempson.com)"
+  },
+  {
+    "slug": "base16-gruber",
+    "name": "Gruber",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Patel, Nimai <nimai.m.patel@gmail.com>, colors from www.github.com/rexim/gruber-darker-theme"
+  },
+  {
+    "slug": "base16-gruvbox-dark",
+    "name": "Gruvbox dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Tinted Theming (https://github.com/tinted-theming), morhetz (https://github.com/morhetz/gruvbox)"
+  },
+  {
+    "slug": "base16-gruvbox-dark-hard",
+    "name": "Gruvbox dark, hard",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Dawid Kurek (dawikur@gmail.com), morhetz (https://github.com/morhetz/gruvbox)"
+  },
+  {
+    "slug": "base16-gruvbox-dark-medium",
+    "name": "Gruvbox dark, medium",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Dawid Kurek (dawikur@gmail.com), morhetz (https://github.com/morhetz/gruvbox)"
+  },
+  {
+    "slug": "base16-gruvbox-dark-pale",
+    "name": "Gruvbox dark, pale",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Dawid Kurek (dawikur@gmail.com), morhetz (https://github.com/morhetz/gruvbox)"
+  },
+  {
+    "slug": "base16-gruvbox-dark-soft",
+    "name": "Gruvbox dark, soft",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Dawid Kurek (dawikur@gmail.com), morhetz (https://github.com/morhetz/gruvbox)"
+  },
+  {
+    "slug": "base16-gruvbox-light",
+    "name": "Gruvbox Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Tinted Theming (https://github.com/tinted-theming), morhetz (https://github.com/morhetz/gruvbox)"
+  },
+  {
+    "slug": "base16-gruvbox-light-hard",
+    "name": "Gruvbox light, hard",
+    "variant": "light",
+    "system": "base16",
+    "author": "Dawid Kurek (dawikur@gmail.com), morhetz (https://github.com/morhetz/gruvbox)"
+  },
+  {
+    "slug": "base16-gruvbox-light-medium",
+    "name": "Gruvbox light, medium",
+    "variant": "light",
+    "system": "base16",
+    "author": "Dawid Kurek (dawikur@gmail.com), morhetz (https://github.com/morhetz/gruvbox)"
+  },
+  {
+    "slug": "base16-gruvbox-light-soft",
+    "name": "Gruvbox light, soft",
+    "variant": "light",
+    "system": "base16",
+    "author": "Dawid Kurek (dawikur@gmail.com), morhetz (https://github.com/morhetz/gruvbox)"
+  },
+  {
+    "slug": "base16-gruvbox-material-dark-hard",
+    "name": "Gruvbox Material Dark, Hard",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Mayush Kumar (https://github.com/MayushKumar), sainnhe (https://github.com/sainnhe/gruvbox-material-vscode)"
+  },
+  {
+    "slug": "base16-gruvbox-material-dark-medium",
+    "name": "Gruvbox Material Dark, Medium",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Mayush Kumar (https://github.com/MayushKumar), sainnhe (https://github.com/sainnhe/gruvbox-material-vscode)"
+  },
+  {
+    "slug": "base16-gruvbox-material-dark-soft",
+    "name": "Gruvbox Material Dark, Soft",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Mayush Kumar (https://github.com/MayushKumar), sainnhe (https://github.com/sainnhe/gruvbox-material-vscode)"
+  },
+  {
+    "slug": "base16-gruvbox-material-light-hard",
+    "name": "Gruvbox Material Light, Hard",
+    "variant": "light",
+    "system": "base16",
+    "author": "Mayush Kumar (https://github.com/MayushKumar), sainnhe (https://github.com/sainnhe/gruvbox-material-vscode)"
+  },
+  {
+    "slug": "base16-gruvbox-material-light-medium",
+    "name": "Gruvbox Material Light, Medium",
+    "variant": "light",
+    "system": "base16",
+    "author": "Mayush Kumar (https://github.com/MayushKumar), sainnhe (https://github.com/sainnhe/gruvbox-material-vscode)"
+  },
+  {
+    "slug": "base16-gruvbox-material-light-soft",
+    "name": "Gruvbox Material Light, Soft",
+    "variant": "light",
+    "system": "base16",
+    "author": "Mayush Kumar (https://github.com/MayushKumar), sainnhe (https://github.com/sainnhe/gruvbox-material-vscode)"
+  },
+  {
+    "slug": "base16-hardcore",
+    "name": "Hardcore",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Chris Caller"
+  },
+  {
+    "slug": "base16-harmonic16-dark",
+    "name": "Harmonic16 Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Jannik Siebert (https://github.com/janniks)"
+  },
+  {
+    "slug": "base16-harmonic16-light",
+    "name": "Harmonic16 Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Jannik Siebert (https://github.com/janniks)"
+  },
+  {
+    "slug": "base16-heetch-dark",
+    "name": "Heetch Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Geoffrey Teale (tealeg@gmail.com)"
+  },
+  {
+    "slug": "base16-heetch-light",
+    "name": "Heetch Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Geoffrey Teale (tealeg@gmail.com)"
+  },
+  {
+    "slug": "base16-helios",
+    "name": "Helios",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Alex Meyer (https://github.com/reyemxela)"
+  },
+  {
+    "slug": "base16-hopscotch",
+    "name": "Hopscotch",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Jan T. Sott"
+  },
+  {
+    "slug": "base16-horizon-dark",
+    "name": "Horizon Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Michaël Ball (http://github.com/michael-ball/)"
+  },
+  {
+    "slug": "base16-horizon-light",
+    "name": "Horizon Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Michaël Ball (http://github.com/michael-ball/)"
+  },
+  {
+    "slug": "base16-horizon-terminal-dark",
+    "name": "Horizon Terminal Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Michaël Ball (http://github.com/michael-ball/)"
+  },
+  {
+    "slug": "base16-horizon-terminal-light",
+    "name": "Horizon Terminal Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Michaël Ball (http://github.com/michael-ball/)"
+  },
+  {
+    "slug": "base16-humanoid-dark",
+    "name": "Humanoid dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Thomas (tasmo) Friese"
+  },
+  {
+    "slug": "base16-humanoid-light",
+    "name": "Humanoid light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Thomas (tasmo) Friese"
+  },
+  {
+    "slug": "base16-ia-dark",
+    "name": "iA Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "iA Inc. (modified by aramisgithub)"
+  },
+  {
+    "slug": "base16-ia-light",
+    "name": "iA Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "iA Inc. (modified by aramisgithub)"
+  },
+  {
+    "slug": "base16-icy-dark",
+    "name": "Icy Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "icyphox (https://icyphox.ga)"
+  },
+  {
+    "slug": "base16-ir-black",
+    "name": "IR Black",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Timothée Poisot (http://timotheepoisot.fr)"
+  },
+  {
+    "slug": "base16-isotope",
+    "name": "Isotope",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Jan T. Sott"
+  },
+  {
+    "slug": "base16-jabuti",
+    "name": "Jabuti",
+    "variant": "dark",
+    "system": "base16",
+    "author": "https://github.com/notusknot"
+  },
+  {
+    "slug": "base16-kanagawa",
+    "name": "Kanagawa",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Tommaso Laurenzi (https://github.com/rebelot)"
+  },
+  {
+    "slug": "base16-kanagawa-dragon",
+    "name": "Kanagawa Dragon",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Tommaso Laurenzi (https://github.com/rebelot)"
+  },
+  {
+    "slug": "base16-katy",
+    "name": "Katy",
+    "variant": "dark",
+    "system": "base16",
+    "author": "George Essig (https://github.com/gessig)"
+  },
+  {
+    "slug": "base16-kimber",
+    "name": "Kimber",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Mishka Nguyen (https://github.com/akhsiM)"
+  },
+  {
+    "slug": "base16-lime",
+    "name": "lime",
+    "variant": "dark",
+    "system": "base16",
+    "author": "limelier"
+  },
+  {
+    "slug": "base16-london-tube",
+    "name": "London Tube",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Jan T. Sott"
+  },
+  {
+    "slug": "base16-macintosh",
+    "name": "Macintosh",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Rebecca Bettencourt (http://www.kreativekorp.com)"
+  },
+  {
+    "slug": "base16-marrakesh",
+    "name": "Marrakesh",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Alexandre Gavioli (http://github.com/Alexx2/)"
+  },
+  {
+    "slug": "base16-materia",
+    "name": "Materia",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Defman21"
+  },
+  {
+    "slug": "base16-material",
+    "name": "Material",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Nate Peterson"
+  },
+  {
+    "slug": "base16-material-darker",
+    "name": "Material Darker",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Nate Peterson"
+  },
+  {
+    "slug": "base16-material-lighter",
+    "name": "Material Lighter",
+    "variant": "light",
+    "system": "base16",
+    "author": "Nate Peterson"
+  },
+  {
+    "slug": "base16-material-palenight",
+    "name": "Material Palenight",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Nate Peterson"
+  },
+  {
+    "slug": "base16-material-vivid",
+    "name": "Material Vivid",
+    "variant": "dark",
+    "system": "base16",
+    "author": "joshyrobot"
+  },
+  {
+    "slug": "base16-measured-dark",
+    "name": "Measured Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Measured (https://measured.co)"
+  },
+  {
+    "slug": "base16-measured-light",
+    "name": "Measured Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Measured (https://measured.co)"
+  },
+  {
+    "slug": "base16-mellow-purple",
+    "name": "Mellow Purple",
+    "variant": "dark",
+    "system": "base16",
+    "author": "gidsi"
+  },
+  {
+    "slug": "base16-mexico-light",
+    "name": "Mexico Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Sheldon Johnson"
+  },
+  {
+    "slug": "base16-mocha",
+    "name": "Mocha",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Chris Kempson (http://chriskempson.com)"
+  },
+  {
+    "slug": "base16-monokai",
+    "name": "Monokai",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Wimer Hazenberg (http://www.monokai.nl)"
+  },
+  {
+    "slug": "base16-moonlight",
+    "name": "Moonlight",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Jeremy Swinarton (https://github.com/jswinarton)"
+  },
+  {
+    "slug": "base16-mountain",
+    "name": "Mountain",
+    "variant": "dark",
+    "system": "base16",
+    "author": "gnsfujiwara (https://github.com/gnsfujiwara)"
+  },
+  {
+    "slug": "base16-nebula",
+    "name": "Nebula",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Gabriel Fontes (https://github.com/Misterio77)"
+  },
+  {
+    "slug": "base16-nord",
+    "name": "Nord",
+    "variant": "dark",
+    "system": "base16",
+    "author": "arcticicestudio"
+  },
+  {
+    "slug": "base16-nord-light",
+    "name": "Nord Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "threddast, based on fuxialexander's doom-nord-light-theme (Doom Emacs)"
+  },
+  {
+    "slug": "base16-nova",
+    "name": "Nova",
+    "variant": "dark",
+    "system": "base16",
+    "author": "George Essig (https://github.com/gessig), Trevor D. Miller (https://trevordmiller.com)"
+  },
+  {
+    "slug": "base16-ocean",
+    "name": "Ocean",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Chris Kempson (http://chriskempson.com)"
+  },
+  {
+    "slug": "base16-oceanicnext",
+    "name": "OceanicNext",
+    "variant": "dark",
+    "system": "base16",
+    "author": "https://github.com/voronianski/oceanic-next-color-scheme"
+  },
+  {
+    "slug": "base16-one-light",
+    "name": "One Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Daniel Pfeifer (http://github.com/purpleKarrot)"
+  },
+  {
+    "slug": "base16-onedark",
+    "name": "OneDark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Lalit Magant (http://github.com/tilal6991)"
+  },
+  {
+    "slug": "base16-onedark-dark",
+    "name": "OneDark Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "olimorris (https://github.com/olimorris)"
+  },
+  {
+    "slug": "base16-outrun-dark",
+    "name": "Outrun Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Hugo Delahousse (http://github.com/hugodelahousse/)"
+  },
+  {
+    "slug": "base16-oxocarbon-dark",
+    "name": "Oxocarbon Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "shaunsingh/IBM"
+  },
+  {
+    "slug": "base16-oxocarbon-light",
+    "name": "Oxocarbon Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "shaunsingh/IBM"
+  },
+  {
+    "slug": "base16-pandora",
+    "name": "pandora",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Cassandra Fox"
+  },
+  {
+    "slug": "base16-papercolor-dark",
+    "name": "PaperColor Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": ""
+  },
+  {
+    "slug": "base16-papercolor-light",
+    "name": "PaperColor Light",
+    "variant": "light",
+    "system": "base16",
+    "author": ""
+  },
+  {
+    "slug": "base16-paraiso",
+    "name": "Paraiso",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Jan T. Sott"
+  },
+  {
+    "slug": "base16-pasque",
+    "name": "Pasque",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Gabriel Fontes (https://github.com/Misterio77)"
+  },
+  {
+    "slug": "base16-phd",
+    "name": "PhD",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Hennig Hasemann (http://leetless.de/vim.html)"
+  },
+  {
+    "slug": "base16-pico",
+    "name": "Pico",
+    "variant": "dark",
+    "system": "base16",
+    "author": "PICO-8 (http://www.lexaloffle.com/pico-8.php)"
+  },
+  {
+    "slug": "base16-pinky",
+    "name": "pinky",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Benjamin (https://github.com/b3nj5m1n)"
+  },
+  {
+    "slug": "base16-pop",
+    "name": "Pop",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Chris Kempson (http://chriskempson.com)"
+  },
+  {
+    "slug": "base16-porple",
+    "name": "Porple",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Niek den Breeje (https://github.com/AuditeMarlow)"
+  },
+  {
+    "slug": "base16-precious-dark-eleven",
+    "name": "Precious Dark Eleven",
+    "variant": "dark",
+    "system": "base16",
+    "author": "4lex4 <4lex49@zoho.com>"
+  },
+  {
+    "slug": "base16-precious-dark-fifteen",
+    "name": "Precious Dark Fifteen",
+    "variant": "dark",
+    "system": "base16",
+    "author": "4lex4 <4lex49@zoho.com>"
+  },
+  {
+    "slug": "base16-precious-light-warm",
+    "name": "Precious Light Warm",
+    "variant": "light",
+    "system": "base16",
+    "author": "4lex4 <4lex49@zoho.com>"
+  },
+  {
+    "slug": "base16-precious-light-white",
+    "name": "Precious Light White",
+    "variant": "light",
+    "system": "base16",
+    "author": "4lex4 <4lex49@zoho.com>"
+  },
+  {
+    "slug": "base16-primer-dark",
+    "name": "Primer Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Jimmy Lin"
+  },
+  {
+    "slug": "base16-primer-dark-dimmed",
+    "name": "Primer Dark Dimmed",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Jimmy Lin"
+  },
+  {
+    "slug": "base16-primer-light",
+    "name": "Primer Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Jimmy Lin"
+  },
+  {
+    "slug": "base16-purpledream",
+    "name": "Purpledream",
+    "variant": "dark",
+    "system": "base16",
+    "author": "malet"
+  },
+  {
+    "slug": "base16-qualia",
+    "name": "Qualia",
+    "variant": "dark",
+    "system": "base16",
+    "author": "isaacwhanson"
+  },
+  {
+    "slug": "base16-railscasts",
+    "name": "Railscasts",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Ryan Bates (http://railscasts.com)"
+  },
+  {
+    "slug": "base16-rebecca",
+    "name": "Rebecca",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Victor Borja (http://github.com/vic) based on Rebecca Theme (http://github.com/vic/rebecca-theme)"
+  },
+  {
+    "slug": "base16-rose-pine",
+    "name": "Rosé Pine",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Emilia Dunfelt <edun@dunfelt.se>"
+  },
+  {
+    "slug": "base16-rose-pine-dawn",
+    "name": "Rosé Pine Dawn",
+    "variant": "light",
+    "system": "base16",
+    "author": "Emilia Dunfelt <edun@dunfelt.se>"
+  },
+  {
+    "slug": "base16-rose-pine-moon",
+    "name": "Rosé Pine Moon",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Emilia Dunfelt <edun@dunfelt.se>"
+  },
+  {
+    "slug": "base16-saga",
+    "name": "SAGA",
+    "variant": "dark",
+    "system": "base16",
+    "author": "https://github.com/SAGAtheme/SAGA"
+  },
+  {
+    "slug": "base16-sagelight",
+    "name": "Sagelight",
+    "variant": "light",
+    "system": "base16",
+    "author": "Carter Veldhuizen"
+  },
+  {
+    "slug": "base16-sakura",
+    "name": "Sakura",
+    "variant": "light",
+    "system": "base16",
+    "author": "Misterio77 (http://github.com/Misterio77)"
+  },
+  {
+    "slug": "base16-sandcastle",
+    "name": "Sandcastle",
+    "variant": "dark",
+    "system": "base16",
+    "author": "George Essig (https://github.com/gessig)"
+  },
+  {
+    "slug": "base16-selenized-black",
+    "name": "selenized-black",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Jan Warchol (https://github.com/jan-warchol/selenized) / adapted to base16 by ali"
+  },
+  {
+    "slug": "base16-selenized-dark",
+    "name": "selenized-dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Jan Warchol (https://github.com/jan-warchol/selenized) / adapted to base16 by ali"
+  },
+  {
+    "slug": "base16-selenized-light",
+    "name": "selenized-light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Jan Warchol (https://github.com/jan-warchol/selenized) / adapted to base16 by ali"
+  },
+  {
+    "slug": "base16-selenized-white",
+    "name": "selenized-white",
+    "variant": "light",
+    "system": "base16",
+    "author": "Jan Warchol (https://github.com/jan-warchol/selenized) / adapted to base16 by ali"
+  },
+  {
+    "slug": "base16-seti-ui",
+    "name": "Seti UI",
+    "variant": "dark",
+    "system": "base16",
+    "author": ""
+  },
+  {
+    "slug": "base16-shades-of-purple",
+    "name": "Shades of Purple",
+    "variant": "dark",
+    "system": "base16",
+    "author": ""
+  },
+  {
+    "slug": "base16-shadesmear-dark",
+    "name": "ShadeSmear Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Kyle Giammarco (http://kyle.giammar.co)"
+  },
+  {
+    "slug": "base16-shadesmear-light",
+    "name": "ShadeSmear Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Kyle Giammarco (http://kyle.giammar.co)"
+  },
+  {
+    "slug": "base16-shapeshifter",
+    "name": "Shapeshifter",
+    "variant": "light",
+    "system": "base16",
+    "author": "Tyler Benziger (http://tybenz.com)"
+  },
+  {
+    "slug": "base16-silk-dark",
+    "name": "Silk Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Gabriel Fontes (https://github.com/Misterio77)"
+  },
+  {
+    "slug": "base16-silk-light",
+    "name": "Silk Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Gabriel Fontes (https://github.com/Misterio77)"
+  },
+  {
+    "slug": "base16-snazzy",
+    "name": "Snazzy",
+    "variant": "dark",
+    "system": "base16",
+    "author": ""
+  },
+  {
+    "slug": "base16-solar-flare",
+    "name": "Solar Flare",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Chuck Harmston (https://chuck.harmston.ch)"
+  },
+  {
+    "slug": "base16-solar-flare-light",
+    "name": "Solar Flare Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Chuck Harmston (https://chuck.harmston.ch)"
+  },
+  {
+    "slug": "base16-solarized-dark",
+    "name": "Solarized Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Ethan Schoonover (modified by aramisgithub)"
+  },
+  {
+    "slug": "base16-solarized-light",
+    "name": "Solarized Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Ethan Schoonover (modified by aramisgithub)"
+  },
+  {
+    "slug": "base16-spaceduck",
+    "name": "Spaceduck",
+    "variant": "dark",
+    "system": "base16",
+    "author": ""
+  },
+  {
+    "slug": "base16-spacemacs",
+    "name": "Spacemacs",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Nasser Alshammari (https://github.com/nashamri/spacemacs-theme)"
+  },
+  {
+    "slug": "base16-sparky",
+    "name": "Sparky",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Leila Sother (https://github.com/mixcoac)"
+  },
+  {
+    "slug": "base16-standardized-dark",
+    "name": "standardized-dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "ali (https://github.com/ali-githb/base16-standardized-scheme)"
+  },
+  {
+    "slug": "base16-standardized-light",
+    "name": "standardized-light",
+    "variant": "light",
+    "system": "base16",
+    "author": "ali (https://github.com/ali-githb/base16-standardized-scheme)"
+  },
+  {
+    "slug": "base16-stella",
+    "name": "Stella",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Shrimpram"
+  },
+  {
+    "slug": "base16-still-alive",
+    "name": "Still Alive",
+    "variant": "light",
+    "system": "base16",
+    "author": "Derrick McKee (derrick.mckee@gmail.com)"
+  },
+  {
+    "slug": "base16-summercamp",
+    "name": "summercamp",
+    "variant": "dark",
+    "system": "base16",
+    "author": "zoe firi (zoefiri.github.io)"
+  },
+  {
+    "slug": "base16-summerfruit-dark",
+    "name": "Summerfruit Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Christopher Corley (http://christop.club/)"
+  },
+  {
+    "slug": "base16-summerfruit-light",
+    "name": "Summerfruit Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Christopher Corley (http://christop.club/)"
+  },
+  {
+    "slug": "base16-synth-midnight-terminal-dark",
+    "name": "Synth Midnight Terminal Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Michaël Ball (http://github.com/michael-ball/)"
+  },
+  {
+    "slug": "base16-synth-midnight-terminal-light",
+    "name": "Synth Midnight Terminal Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Michaël Ball (http://github.com/michael-ball/)"
+  },
+  {
+    "slug": "base16-tango",
+    "name": "Tango",
+    "variant": "dark",
+    "system": "base16",
+    "author": "@Schnouki, based on the Tango Desktop Project"
+  },
+  {
+    "slug": "base16-tarot",
+    "name": "tarot",
+    "variant": "dark",
+    "system": "base16",
+    "author": "ed (https://codeberg.org/ed)"
+  },
+  {
+    "slug": "base16-tender",
+    "name": "tender",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Jacobo Tabernero (https://github/com/jacoborus/tender.vim)"
+  },
+  {
+    "slug": "base16-terracotta",
+    "name": "Terracotta",
+    "variant": "light",
+    "system": "base16",
+    "author": "Alexander Rossell Hayes (https://github.com/rossellhayes)"
+  },
+  {
+    "slug": "base16-terracotta-dark",
+    "name": "Terracotta Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Alexander Rossell Hayes (https://github.com/rossellhayes)"
+  },
+  {
+    "slug": "base16-tokyo-city-dark",
+    "name": "Tokyo City Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Michaël Ball"
+  },
+  {
+    "slug": "base16-tokyo-city-light",
+    "name": "Tokyo City Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Michaël Ball"
+  },
+  {
+    "slug": "base16-tokyo-city-terminal-dark",
+    "name": "Tokyo City Terminal Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Michaël Ball"
+  },
+  {
+    "slug": "base16-tokyo-city-terminal-light",
+    "name": "Tokyo City Terminal Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Michaël Ball"
+  },
+  {
+    "slug": "base16-tokyo-night-dark",
+    "name": "Tokyo Night Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Michaël Ball"
+  },
+  {
+    "slug": "base16-tokyo-night-light",
+    "name": "Tokyo Night Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Michaël Ball"
+  },
+  {
+    "slug": "base16-tokyo-night-moon",
+    "name": "Tokyo Night Moon",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Ólafur Bjarki Bogason"
+  },
+  {
+    "slug": "base16-tokyo-night-storm",
+    "name": "Tokyo Night Storm",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Michaël Ball"
+  },
+  {
+    "slug": "base16-tokyo-night-terminal-dark",
+    "name": "Tokyo Night Terminal Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Michaël Ball"
+  },
+  {
+    "slug": "base16-tokyo-night-terminal-light",
+    "name": "Tokyo Night Terminal Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Michaël Ball"
+  },
+  {
+    "slug": "base16-tokyo-night-terminal-storm",
+    "name": "Tokyo Night Terminal Storm",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Michaël Ball"
+  },
+  {
+    "slug": "base16-tokyodark",
+    "name": "Tokyodark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Jamy Golden (https://github.com/JamyGolden), Based on Tokyodark.nvim (https://github.com/tiagovla/tokyodark.nvim)"
+  },
+  {
+    "slug": "base16-tokyodark-terminal",
+    "name": "Tokyodark Terminal",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Tiagovla (https://github.com/tiagovla/)"
+  },
+  {
+    "slug": "base16-tomorrow",
+    "name": "Tomorrow",
+    "variant": "light",
+    "system": "base16",
+    "author": "Chris Kempson (http://chriskempson.com)"
+  },
+  {
+    "slug": "base16-tomorrow-night",
+    "name": "Tomorrow Night",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Chris Kempson (http://chriskempson.com)"
+  },
+  {
+    "slug": "base16-tomorrow-night-eighties",
+    "name": "Tomorrow Night Eighties",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Chris Kempson (http://chriskempson.com)"
+  },
+  {
+    "slug": "base16-twilight",
+    "name": "Twilight",
+    "variant": "dark",
+    "system": "base16",
+    "author": "David Hart (https://github.com/hartbit)"
+  },
+  {
+    "slug": "base16-unikitty-dark",
+    "name": "Unikitty Dark",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Josh W Lewis (@joshwlewis)"
+  },
+  {
+    "slug": "base16-unikitty-light",
+    "name": "Unikitty Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Josh W Lewis (@joshwlewis)"
+  },
+  {
+    "slug": "base16-unikitty-reversible",
+    "name": "Unikitty Reversible",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Josh W Lewis (@joshwlewis)"
+  },
+  {
+    "slug": "base16-uwunicorn",
+    "name": "UwUnicorn",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Fernando Marques (https://github.com/RakkiUwU) and Gabriel Fontes (https://github.com/Misterio77)"
+  },
+  {
+    "slug": "base16-valua",
+    "name": "Valua",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Nonetrix (https://github.com/nonetrix)"
+  },
+  {
+    "slug": "base16-vesper",
+    "name": "Vesper",
+    "variant": "dark",
+    "system": "base16",
+    "author": "FormalSnake (https://github.com/formalsnake)"
+  },
+  {
+    "slug": "base16-vice",
+    "name": "vice",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Thomas Leon Highbaugh thighbaugh@zoho.com"
+  },
+  {
+    "slug": "base16-vulcan",
+    "name": "vulcan",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Andrey Varfolomeev"
+  },
+  {
+    "slug": "base16-windows-10",
+    "name": "Windows 10",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Fergus Collins (https://github.com/ferguscollins)"
+  },
+  {
+    "slug": "base16-windows-10-light",
+    "name": "Windows 10 Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Fergus Collins (https://github.com/ferguscollins)"
+  },
+  {
+    "slug": "base16-windows-95",
+    "name": "Windows 95",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Fergus Collins (https://github.com/ferguscollins)"
+  },
+  {
+    "slug": "base16-windows-95-light",
+    "name": "Windows 95 Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Fergus Collins (https://github.com/ferguscollins)"
+  },
+  {
+    "slug": "base16-windows-high-contrast",
+    "name": "Windows High Contrast",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Fergus Collins (https://github.com/ferguscollins)"
+  },
+  {
+    "slug": "base16-windows-high-contrast-light",
+    "name": "Windows High Contrast Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Fergus Collins (https://github.com/ferguscollins)"
+  },
+  {
+    "slug": "base16-windows-nt",
+    "name": "Windows NT",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Fergus Collins (https://github.com/ferguscollins)"
+  },
+  {
+    "slug": "base16-windows-nt-light",
+    "name": "Windows NT Light",
+    "variant": "light",
+    "system": "base16",
+    "author": "Fergus Collins (https://github.com/ferguscollins)"
+  },
+  {
+    "slug": "base16-woodland",
+    "name": "Woodland",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Jay Cornwall (https://jcornwall.com)"
+  },
+  {
+    "slug": "base16-xcode-dusk",
+    "name": "XCode Dusk",
+    "variant": "dark",
+    "system": "base16",
+    "author": "Elsa Gonsiorowski (https://github.com/gonsie)"
+  },
+  {
+    "slug": "base16-zenbones",
+    "name": "Zenbones",
+    "variant": "dark",
+    "system": "base16",
+    "author": "mcchrish"
+  },
+  {
+    "slug": "base16-zenburn",
+    "name": "Zenburn",
+    "variant": "dark",
+    "system": "base16",
+    "author": "elnawe"
+  }
+]
