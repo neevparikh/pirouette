@@ -5,6 +5,85 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.2.1 — security hardening (no-devops-needed pass)
+
+Focused security release closing every issue from the v0.2 review that
+doesn't require devops involvement or an auth-architecture decision.
+Application-layer auth (bearer token / OIDC) is deliberately deferred to
+a later release — see `docs/security_plan.md` for the full reasoning.
+
+### Security
+
+- **DNS-rebinding from malicious browser tabs blocked.** Removed wildcard
+  `Access-Control-Allow-Origin`; the dashboard is same-origin and never
+  needed CORS. Server now validates the `Host` header on every HTTP
+  request and the `Origin` header on WebSocket upgrades against an
+  allowlist (`localhost:<port>`, `127.0.0.1:<port>`, plus the configured
+  bind host). Mismatches return 421 (HTTP) or 403 (WS).
+- **Default bind narrowed.** `pirouette server` binds `127.0.0.1` by
+  default; the container path explicitly opts into `0.0.0.0` via
+  `PIROUETTE_HOST` since Docker port-mapping requires it.
+- **OPTIONS preflights refused.** No CORS allow headers — returns 405,
+  which the browser interprets as "not welcome" and blocks the
+  follow-up POST. Removes the JSON-content-type cross-origin attack.
+- **Static-server path-traversal check fixed.** The previous
+  `startsWith(webDir)` guard was missing a path separator (so
+  `/srv/web2/...` would have been accepted as if under `/srv/web`).
+  Replaced with `path.resolve` + `startsWith(webDir + path.sep)`.
+- **`git clone` argument hygiene.** Inserted `--` separator before the
+  user-supplied URL; rejects URLs not matching
+  `^(https?://|git@|ssh://)`. Set `GIT_TERMINAL_PROMPT=0` and
+  `GIT_ASKPASS=/bin/false` so malformed remotes don't hang waiting
+  for credentials.
+- **Input validation.**
+  - Agent IDs in URL paths are matched against `[a-z0-9][a-z0-9-]{0,63}`;
+    anything else returns 404. Prevents log injection via newline-bearing
+    IDs and keeps `Map` keys clean.
+  - Agent and project names are rejected if they contain control
+    characters, are empty, or exceed 200 chars (400 with a clear error).
+  - `pru logs --lines` is parsed as a number with range check
+    (1–100000); rejects `'200; rm -rf ~'`-style shell injection in
+    the SSH-delivered tail command.
+- **`EDITOR` launched without a shell.** `pru config edit` now uses
+  `spawnSync` with an explicit arg array (`shell: false`) so values
+  like `EDITOR='vi -c "set syntax"'` parse safely.
+- **Dashboard JS dependencies self-hosted.** marked, marked-highlight,
+  DOMPurify are copied from `node_modules/` at build time; highlight.js
+  is bundled with esbuild (the npm package ships only CJS). The
+  Tailwind v3 CDN runtime is committed at
+  `vendor/tailwindcss-3.4.17.min.js` (no v3 npm equivalent exists).
+  Closes the CDN-compromise attack surface and lets the dashboard work
+  offline / inside private networks.
+- **18 new tests** in `src/server/__tests__/security.test.ts` covering
+  Host validation, CORS removal, WS Origin checks, path traversal,
+  and input validation. 127 vitest tests total (was 109).
+
+### Documentation
+
+- New "Trust model" section in `README.md` stating clearly what
+  pirouette enforces (network layer + SSH key today) and what's out
+  of scope until a later release.
+- `docs/security_plan.md` carries the full plan including options for
+  the auth layer that this release deliberately doesn't ship.
+
+### Build / packaging
+
+- New `scripts/vendor.mjs` (run before `dev` and `build`) writes vendor
+  files into `src/web/vendor/` (gitignored) so both dev mode and
+  shipped `dist/web/vendor/` see the same artifacts from one source.
+- `npm run dev` and `npm run build` both implicitly re-run vendoring;
+  no manual step.
+
+### What this release does NOT close
+
+- The pirouette server still has no application-layer authentication.
+  Anyone who can reach `:7777` (today: SSH-tunneled by you, gated by
+  AWS SG) has agent-level RCE. This is the C1 finding from the
+  security review and remains open until a future release adds bearer
+  / OIDC auth.
+
+---
+
 ## 0.2.0 — 2026-04-28
 
 Big iteration round on UI polish + pi feature parity in the web dashboard,

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Post-build tasks:
-//   1. Copy src/web/ → dist/web/ (static assets, not TypeScript)
-//   2. Make dist/cli/index.js executable (so the `bin` entry works)
-//   3. Prepend a shebang line to dist/cli/index.js
+//   1. Copy src/web/ -> dist/web/ (static assets, not TypeScript). Picks up
+//      vendor/ already populated by `scripts/vendor.mjs` (run earlier in
+//      the build pipeline).
+//   2. Make dist/cli/index.js executable + add shebang (for the `bin` entry).
 
 import { chmodSync, cpSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -14,7 +15,7 @@ const srcWeb = path.join(repo, "src", "web");
 const distWeb = path.join(repo, "dist", "web");
 const cliIndex = path.join(repo, "dist", "cli", "index.js");
 
-// 1. Copy web assets (excluding test files)
+// 1. Copy web assets (excluding test files; vendor/ comes along automatically)
 if (existsSync(srcWeb)) {
   cpSync(srcWeb, distWeb, {
     recursive: true,

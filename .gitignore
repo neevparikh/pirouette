@@ -213,3 +213,8 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Vendored browser libs are regenerated from node_modules + vendor/ at build
+# time. The committed copy of Tailwind lives at vendor/tailwindcss-3.4.17.min.js;
+# scripts/vendor.mjs writes processed bundles here for both dev and build modes.
+src/web/vendor/

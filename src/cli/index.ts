@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 /** pru — Pirouette CLI for managing cloud pi agents. */
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { Command } from "commander";
 import { launch } from "./commands/launch.js";
 import { list } from "./commands/list.js";
@@ -21,12 +25,29 @@ import { logs } from "./commands/logs.js";
 import { sync } from "./commands/sync.js";
 import { close } from "./commands/open.js";
 
+/** Read pirouette's version straight from package.json so the CLI's
+ *  `--version` output never drifts from the published package version.
+ *  Resolves the same way regardless of run mode:
+ *    - dev    (src/cli/index.ts via tsx)  → repo root via ../../package.json
+ *    - built  (dist/cli/index.js)         → repo root via ../../package.json
+ *  In both layouts, package.json is two directories up. */
+function readVersion(): string {
+  try {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const pkgPath = path.resolve(here, "..", "..", "package.json");
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: string };
+    return pkg.version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
+
 const program = new Command();
 
 program
   .name("pru")
   .description("Pirouette — manage cloud pi agents")
-  .version("0.1.0");
+  .version(readVersion());
 
 program
   .command("server")

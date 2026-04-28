@@ -4,6 +4,22 @@ Run long-lived [pi](https://github.com/badlogic/pi-mono/tree/main/packages/codin
 
 Single-user by design. You run one EC2 instance with a Docker container; pirouette's server lives inside the container and manages a pool of pi agents for you.
 
+## What's new in 0.2.1
+
+Security hardening pass — closes the bug-class issues from the v0.2
+security review without touching auth (which needs a separate design
+round). See `CHANGELOG.md` and `docs/security_plan.md` for details.
+
+- **DNS-rebinding from malicious browser tabs blocked** — wildcard CORS
+  removed; `Host` (HTTP) and `Origin` (WS) validated against an allowlist.
+- **Dashboard runs without CDN** — marked, marked-highlight, DOMPurify,
+  highlight.js, and Tailwind all self-hosted at build time.
+- **Default bind tightened** — `pirouette server` defaults to `127.0.0.1`;
+  container path explicitly opts into `0.0.0.0` via `PIROUETTE_HOST`.
+- **Bug-class fixes** — path-traversal in the static server, `git clone`
+  URL hygiene, agent/project name validation (control chars), `pru logs
+  --lines` shell-injection guard, `$EDITOR` runs without a shell.
+
 ## What's new in 0.2
 
 - **Vim modal editing** in the message input (toggle in input footer; persists)
@@ -165,6 +181,63 @@ Rarely needed — the CLI reads config from TOML. These override specific runtim
 | `PIROUETTE_DATA_DIR` | `.pirouette/data` | Server data directory |
 | `PIROUETTE_URL` | `http://127.0.0.1:7777` | CLI → server URL (overrides tunnel) |
 | `AWS_PROFILE` | — | Overrides `aws.profile` |
+
+## Trust model
+
+Pirouette today relies on the layers _below_ the application for access
+control. There's no application-layer authentication on the HTTP / WebSocket
+API yet (planned for a later release).
+
+What keeps the API narrow today:
+
+- **AWS security group** — only port 22 inbound, only from a specific
+  source SG (e.g. your Tailscale subnet router). Configurable via
+  `aws.network.security_group_name`.
+- **SSH key** — required to open the port-forward to the container.
+- **Same-origin web app** — the dashboard is served from the same
+  listener as the API. Cross-origin requests are rejected by `Host`
+  header validation (HTTP) and `Origin` validation (WebSocket); there
+  are no `Access-Control-Allow-*` headers.
+- **Default `127.0.0.1` bind** — `pirouette server` (local-dev) binds
+  loopback only. Container path explicitly opts into `0.0.0.0` (gated
+  by SG). Override with `PIROUETTE_HOST=0.0.0.0` if you really mean it.
+
+What this means in practice: **anyone who can establish a TCP connection
+to the dashboard port has shell access on your container**, because the
+agents have full bash/edit/write tools by design. The SG + SSH tunnel
+are what keeps that perimeter narrow today.
+
+### Things you're trusting (the supply chain)
+
+- The npm package `@neevparikh/pirouette` (or whatever
+  `container.npm_package` points at).
+- The dotfiles repo at `dotfiles.clone_url` (yadm clone over HTTPS).
+- The keys served at `dotfiles.authorized_keys_url` (used as
+  `authorized_keys` for the container's sshd).
+- Your AWS account's network isolation.
+- Trust-on-first-use SSH host keys (`StrictHostKeyChecking=accept-new`).
+  In a private VPC this is generally fine; if you're sharing a network
+  with untrusted parties, pre-seed `~/.ssh/known_hosts` manually.
+- Browser libraries vendored at build time — marked, marked-highlight,
+  DOMPurify, highlight.js (from npm), and the Tailwind v3 CDN runtime
+  (committed at `vendor/tailwindcss-3.4.17.min.js`). No CDN dependency
+  at runtime.
+
+### What's planned but not yet shipped
+
+A future release will add an application-layer auth boundary so a
+network-level breach doesn't immediately mean RCE. The current
+top-of-the-list candidates are: a random shared bearer token, or a
+METR-Okta-issued JWT with subject validation. Decisions are tracked
+in `docs/security_plan.md`.
+
+If you need stronger guarantees today, the operational mitigations are:
+
+1. Don't broaden the SG.
+2. Don't bind the dashboard to a public IP (`PIROUETTE_HOST=0.0.0.0`
+   is for the container path; everything else should stay loopback).
+3. Treat anyone with read access to your laptop's `~/.ssh/` as having
+   full pirouette access.
 
 ## Architecture
 

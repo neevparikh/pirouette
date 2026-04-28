@@ -344,6 +344,11 @@ async function bootstrapContainer(
     PIROUETTE_DATA_DIR: "/data",
     PIROUETTE_PACKAGE: cfg.container.npm_package,
     PIROUETTE_PORT: String(PIROUETTE_PORT),
+    // Container must bind 0.0.0.0 so Docker's port mapping (`-p 7777:7777`)
+    // can route inbound traffic to it. The server defaults to 127.0.0.1
+    // for local-dev safety; we override here. The Host-header allowlist
+    // inside the server is what gates which clients are accepted.
+    PIROUETTE_HOST: "0.0.0.0",
   };
   if (cfg.container.default_model)
     env.PIROUETTE_DEFAULT_MODEL = cfg.container.default_model;

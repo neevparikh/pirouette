@@ -21,8 +21,20 @@ export interface LogsOptions {
   boot?: boolean;
 }
 
+/** Validate `--lines` and return a canonical integer string. We pass
+ *  this through `ssh ... <command>` which goes through a remote shell,
+ *  so an unsanitized value like `200; rm -rf ~` would inject the
+ *  trailing command. Self-RCE only — still cheap to prevent. */
+function validateLines(raw: string | undefined): string {
+  const n = Number(raw ?? "200");
+  if (!Number.isFinite(n) || n <= 0 || n > 100_000) {
+    throw new Error(`--lines must be a positive integer up to 100000 (got: ${raw})`);
+  }
+  return String(Math.floor(n));
+}
+
 function buildRemoteCommand(opts: LogsOptions, cfg: ReturnType<typeof getConfig>): string {
-  const lines = opts.lines ?? "200";
+  const lines = validateLines(opts.lines);
   const follow = opts.follow ? "-f" : "";
   const entrypointLog = `${containerHome(cfg)}/logs/entrypoint.log`;
 

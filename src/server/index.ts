@@ -63,7 +63,12 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
   // the container behave identically given the same config file.
   const cfg = getConfig();
 
-  const host = opts.host ?? process.env.PIROUETTE_HOST ?? "0.0.0.0";
+  // Default bind: 127.0.0.1. The container path explicitly passes
+  // PIROUETTE_HOST=0.0.0.0 (necessary for Docker port mapping); local-dev
+  // and any "someone runs `pirouette server` directly" paths get the
+  // safer default. The remaining defense — Host header validation
+  // below — is what protects against DNS rebinding regardless.
+  const host = opts.host ?? process.env.PIROUETTE_HOST ?? "127.0.0.1";
   const port =
     opts.port ??
     (process.env.PIROUETTE_PORT ? Number(process.env.PIROUETTE_PORT) : cfg.container.pirouette_port);
@@ -114,6 +119,30 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
   }
 
   // ---- helpers ----
+
+  /** Agent IDs are 8-char UUID slices in practice. We accept lowercase
+   *  alphanumerics and hyphens up to 64 chars to be forward-compatible.
+   *  Any character outside this set is treated as a 404 — prevents log
+   *  injection (newlines / ANSI sequences) and keeps Map keys clean. */
+  const AGENT_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+  /** Validate + trim an incoming agent or project name. Rejects empty,
+   *  too-long, or control-character-bearing values. The latter would
+   *  otherwise corrupt server logs and could spoof structured log lines
+   *  in tools that parse them. */
+  function validateName(name: unknown): string {
+    if (typeof name !== "string") throw new Error("name must be a string");
+    const trimmed = name.trim();
+    if (trimmed.length === 0) throw new Error("name cannot be empty");
+    if (trimmed.length > 200) throw new Error("name too long (max 200 chars)");
+    // \x00-\x1f covers control chars including \n, \r, \t, ESC, etc.
+    // \x7f is DEL. Both are useless in legitimate names.
+    if (/[\x00-\x1f\x7f]/.test(trimmed)) {
+      throw new Error("name contains control characters");
+    }
+    return trimmed;
+  }
+
   async function readBody(req: IncomingMessage): Promise<string> {
     const chunks: Buffer[] = [];
     for await (const chunk of req) {
@@ -123,12 +152,11 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
   }
 
   function json(res: ServerResponse, status: number, body: unknown): void {
-    res.writeHead(status, {
-      "content-type": "application/json",
-      "access-control-allow-origin": "*",
-      "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
-      "access-control-allow-headers": "content-type",
-    });
+    // Same-origin only — dashboard is served from the same listener.
+    // No `Access-Control-Allow-*` headers means cross-origin reads of
+    // the response body are blocked by the browser, and JSON-content-type
+    // POSTs from another origin fail their preflight.
+    res.writeHead(status, { "content-type": "application/json" });
     res.end(JSON.stringify(body));
   }
 
@@ -147,12 +175,20 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
   };
 
   async function serveStatic(res: ServerResponse, urlPath: string): Promise<boolean> {
-    const safePath = path.normalize(urlPath).replace(/^(\.\.[/\\])+/, "");
-    const filePath = path.join(webDir, safePath === "/" ? "index.html" : safePath);
-    if (!filePath.startsWith(webDir)) return false;
+    // Resolve the requested path under webDir. Use `path.resolve` (which
+    // collapses `..` segments) plus a separator-aware `startsWith` so
+    // sibling-prefix attacks (`/srv/web2/...` matching `/srv/web` prefix)
+    // are rejected. The previous regex strip + plain `startsWith` was
+    // a no-op on payloads like `/foo/../etc/passwd` because `path.normalize`
+    // already collapsed the `..` before the regex saw it.
+    const requested = urlPath === "/" ? "/index.html" : urlPath;
+    const resolved = path.resolve(webDir, "." + requested);
+    if (resolved !== webDir && !resolved.startsWith(webDir + path.sep)) {
+      return false;
+    }
     try {
-      const content = await readFile(filePath);
-      const ext = path.extname(filePath);
+      const content = await readFile(resolved);
+      const ext = path.extname(resolved);
       res.writeHead(200, { "content-type": MIME_TYPES[ext] ?? "application/octet-stream" });
       res.end(content);
       return true;
@@ -161,18 +197,56 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
     }
   }
 
+  /** Build the set of `Host` header values we accept. Anything else gets
+   *  421 (Misdirected Request) without further routing. This is the
+   *  primary defense against DNS rebinding: a malicious site that
+   *  rebinds `evil.com` to `127.0.0.1` and tricks the browser into
+   *  sending requests to us still has `Host: evil.com` (the attacker
+   *  controls neither the browser's `Host` calculation nor the
+   *  server's allowlist). */
+  function getAllowedHosts(): Set<string> {
+    const portStr = String(port);
+    const allowed = new Set<string>([
+      `localhost:${portStr}`,
+      `127.0.0.1:${portStr}`,
+    ]);
+    // When binding 0.0.0.0 (container path) clients may also legitimately
+    // address us by the container's bind IP. We can't enumerate every
+    // possible source, so allow the actual bind host if it's not the
+    // wildcard.
+    if (host !== "0.0.0.0" && host !== "127.0.0.1") {
+      allowed.add(`${host}:${portStr}`);
+    }
+    // Container path: the docker port mapping makes this listener
+    // reachable as the container's hostname or any IP, but we only
+    // accept connections we can recognize — same-origin only.
+    return allowed;
+  }
+
   // ---- request routing ----
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const method = req.method ?? "GET";
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     const pathname = url.pathname;
 
+    // Host header validation. Reject before any further processing so
+    // we don't even read the body of a request we won't honor. Returns
+    // 421 (Misdirected Request) per the spec; the body is intentionally
+    // sparse to avoid leaking what's allowed.
+    const hostHeader = req.headers.host ?? "";
+    const allowed = getAllowedHosts();
+    if (!allowed.has(hostHeader)) {
+      res.writeHead(421, { "content-type": "text/plain" });
+      res.end("misdirected request");
+      return;
+    }
+
+    // Same-origin design: refuse all cross-origin preflights outright.
+    // A 405 with no Access-Control-Allow-* tells the browser "not
+    // welcome", which is exactly the signal we want to give a malicious
+    // tab attempting a non-simple POST.
     if (method === "OPTIONS") {
-      res.writeHead(204, {
-        "access-control-allow-origin": "*",
-        "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
-        "access-control-allow-headers": "content-type",
-      });
+      res.writeHead(405);
       res.end();
       return;
     }
@@ -194,20 +268,19 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
     if (method === "POST" && pathname === "/api/agents") {
       try {
         const body = JSON.parse(await readBody(req)) as CreateAgentRequest;
-        if (!body.name || typeof body.name !== "string") {
-          error(res, 400, "name is required");
-          return;
-        }
+        const name = validateName(body.name);
+        const projectName =
+          body.projectName != null ? validateName(body.projectName) : undefined;
         const config = await agentManager.createAgent({
-          name: body.name.trim(),
-          projectName: body.projectName,
+          name,
+          projectName,
           model: body.model,
           thinkingLevel: body.thinkingLevel,
         });
         broadcast({ kind: "agent_created", agent: config });
         json(res, 201, config);
       } catch (err) {
-        error(res, 500, err instanceof Error ? err.message : String(err));
+        error(res, 400, err instanceof Error ? err.message : String(err));
       }
       return;
     }
@@ -221,18 +294,15 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
     if (method === "POST" && pathname === "/api/projects") {
       try {
         const body = JSON.parse(await readBody(req)) as CreateProjectRequest;
-        if (!body.name || typeof body.name !== "string") {
-          error(res, 400, "name is required");
-          return;
-        }
+        const name = validateName(body.name);
         const project = await projectManager.createProject({
-          name: body.name.trim(),
+          name,
           repoUrl: body.repoUrl,
         });
         broadcast({ kind: "project_created", project });
         json(res, 201, project);
       } catch (err) {
-        error(res, 500, err instanceof Error ? err.message : String(err));
+        error(res, 400, err instanceof Error ? err.message : String(err));
       }
       return;
     }
@@ -270,6 +340,14 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
     if (agentMatch) {
       const agentId = agentMatch[1];
       const sub = agentMatch[2] ?? "";
+
+      // Reject anything that's not a well-formed agent id outright.
+      // Same response as "agent not found" — don't leak whether the
+      // shape was valid but unknown vs unparseable.
+      if (!AGENT_ID_RE.test(agentId)) {
+        error(res, 404, "Agent not found");
+        return;
+      }
 
       if (method === "GET" && sub === "") {
         const agent = agentManager.getAgent(agentId);
@@ -360,7 +438,16 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
             name?: string;
             entryId?: string;
           };
-          const child = await agentManager.forkAgent(agentId, body);
+          // Validate name if provided (forkAgent generates a default
+          // otherwise). Ditto entryId — it ends up in shell-adjacent
+          // navigateTree calls so reject control characters.
+          const name = body.name != null ? validateName(body.name) : undefined;
+          const entryId = body.entryId;
+          if (entryId != null && (typeof entryId !== "string" || /[\x00-\x1f\x7f]/.test(entryId))) {
+            error(res, 400, "entryId contains control characters");
+            return;
+          }
+          const child = await agentManager.forkAgent(agentId, { name, entryId });
           broadcast({ kind: "agent_created", agent: child });
           json(res, 201, child);
         } catch (err) {
@@ -469,7 +556,39 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
     }
   });
 
-  const wss = new WebSocketServer({ server, path: "/ws" });
+  // WS upgrades go through their own validation. Browsers always send
+  // an `Origin` header on WS upgrades; mismatched Origin (cross-origin
+  // attempt to attach to our event stream) is rejected here. We also
+  // re-check `Host` for symmetry with the HTTP path.
+  const wss = new WebSocketServer({
+    server,
+    path: "/ws",
+    verifyClient: (info, cb) => {
+      const allowed = getAllowedHosts();
+      const hostHeader = info.req.headers.host ?? "";
+      if (!allowed.has(hostHeader)) {
+        cb(false, 421, "misdirected request");
+        return;
+      }
+      const originHeader = info.req.headers.origin;
+      if (originHeader != null) {
+        // Origin is `<scheme>://<host>` (no path). Compare against
+        // both http and https for the allowed hosts. The dashboard
+        // is currently served HTTP only; once HTTPS lands the same
+        // allowlist applies for `https://`.
+        const okOrigins = new Set<string>();
+        for (const h of allowed) {
+          okOrigins.add(`http://${h}`);
+          okOrigins.add(`https://${h}`);
+        }
+        if (!okOrigins.has(originHeader)) {
+          cb(false, 403, "forbidden origin");
+          return;
+        }
+      }
+      cb(true);
+    },
+  });
   wss.on("connection", (ws: WebSocket) => {
     wsClients.add(ws);
     console.log(`[ws] client connected (${wsClients.size} total)`);

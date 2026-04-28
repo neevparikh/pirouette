@@ -28,6 +28,13 @@ async function git(
       cwd,
       timeout: opts.timeoutMs ?? 60_000,
       maxBuffer: 20 * 1024 * 1024,
+      // Defense against malformed remote URLs hanging on credential
+      // prompts: tell git to fail fast rather than open a TTY for input.
+      env: {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: "0",
+        GIT_ASKPASS: "/bin/false",
+      },
     });
     return { code: 0, stdout, stderr };
   } catch (err) {
@@ -39,6 +46,12 @@ async function git(
     };
   }
 }
+
+/** URL prefixes we accept for `git clone`. Rejects flag-like URLs
+ *  (`-c protocol.…`, `--upload-pack=…`, etc.) and bare paths that
+ *  could trigger surprising git behavior. Same set git itself supports
+ *  in modern versions; making it explicit here surfaces typos earlier. */
+const ALLOWED_REPO_URL_RE = /^(https?:\/\/|git@|ssh:\/\/)/;
 
 // ---- directory utilities -------------------------------------------------
 
@@ -78,11 +91,25 @@ export interface CloneOptions {
 
 export async function cloneRepo(opts: CloneOptions): Promise<void> {
   const { url, dest, branch, timeoutMs = 120_000 } = opts;
+
+  // Guard against attacker-supplied URLs that could be parsed as git
+  // flags. Modern git rejects `-`-leading positional URLs but several
+  // historical exploit chains used `--upload-pack=` or similar. We do
+  // both: a positive prefix check AND the `--` separator below.
+  if (!ALLOWED_REPO_URL_RE.test(url)) {
+    throw new Error(
+      `repoUrl must start with https://, git@, or ssh:// (got: ${url.slice(0, 60)})`,
+    );
+  }
+
   await mkdir(path.dirname(dest), { recursive: true });
 
+  // `--` separator stops git from interpreting `url` or `dest` as flags
+  // even if our prefix check above were bypassed somehow. Defense in
+  // depth, ~free.
   const args = ["clone"];
   if (branch) args.push("--branch", branch);
-  args.push(url, dest);
+  args.push("--", url, dest);
 
   const r = await git(path.dirname(dest), args, { timeoutMs });
   if (r.code !== 0) {

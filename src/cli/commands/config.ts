@@ -1,6 +1,6 @@
 /** `pru config show|path` — inspect effective merged configuration. */
 
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { loadConfig } from "../../config.js";
 
 export function configShow(): void {
@@ -28,10 +28,24 @@ export function configEdit(): void {
   const { sources } = loadConfig();
   // Prefer editing the user-level override, not the repo default.
   const target = sources.find((s) => s.path.includes(".pirouette")) ?? sources[0];
-  const editor = process.env.VISUAL ?? process.env.EDITOR ?? "vi";
-  try {
-    execSync(`${editor} "${target.path}"`, { stdio: "inherit" });
-  } catch {
-    // editor exit code != 0 is fine (e.g. user quit without saving)
+  const editorRaw = process.env.VISUAL ?? process.env.EDITOR ?? "vi";
+
+  // Run via spawnSync with an explicit arg array (shell: false) so that
+  // an EDITOR value containing shell metacharacters is parsed by us, not
+  // an intermediate shell. Splitting on whitespace handles common cases
+  // like `EDITOR="code -w"` or `EDITOR="vim --noplugin"`.
+  const parts = editorRaw.split(/\s+/).filter((p) => p.length > 0);
+  if (parts.length === 0) {
+    console.error("$EDITOR / $VISUAL is empty");
+    process.exitCode = 1;
+    return;
+  }
+  const [bin, ...args] = parts;
+  const result = spawnSync(bin, [...args, target.path], { stdio: "inherit", shell: false });
+  // exit-code != 0 (or signal) is fine — user may have quit without saving
+  // or the editor may have exited normally with a non-zero status.
+  if (result.error) {
+    console.error(`Failed to launch editor (${bin}): ${result.error.message}`);
+    process.exitCode = 1;
   }
 }

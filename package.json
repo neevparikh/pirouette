@@ -1,6 +1,6 @@
 {
   "name": "@neevparikh/pirouette",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Long-lived pi coding agents in the cloud, with a web dashboard and a CLI.",
   "license": "MIT",
   "type": "module",
@@ -22,11 +22,12 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node scripts/post-build.mjs",
+    "build": "npm run vendor && tsc -p tsconfig.build.json && node scripts/post-build.mjs",
+    "vendor": "node scripts/vendor.mjs",
     "clean": "rm -rf dist",
     "themes": "node scripts/generate-themes.mjs",
     "prepublishOnly": "npm run clean && npm run typecheck && npm test && npm run build",
-    "dev": "tsx src/cli/index.ts server",
+    "dev": "npm run vendor && tsx src/cli/index.ts server",
     "pru": "tsx src/cli/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -48,9 +49,12 @@
   "devDependencies": {
     "@types/jsdom": "^28.0.1",
     "@types/ws": "^8.18.1",
+    "dompurify": "^3.4.1",
+    "highlight.js": "^11.11.1",
     "isomorphic-dompurify": "^2.36.0",
     "jsdom": "^25.0.1",
     "marked": "^15.0.12",
+    "marked-highlight": "^2.2.4",
     "tsx": "^4.20.6",
     "typescript": "^5.7.3",
     "vitest": "^3.2.4"

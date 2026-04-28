@@ -4,15 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>pirouette</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/marked-highlight@2/lib/index.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
-    <!-- highlight.js for code blocks. Matches pi-coding-agent's markdown
-         rendering (which uses cli-highlight / highlight.js v11). The
-         "common" bundle covers ~35 top languages; we can swap for the full
-         bundle later if users work in more exotic languages. -->
-    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/common.min.js"></script>
+    <!-- All third-party browser deps are self-hosted under vendor/ so
+         the dashboard doesn't depend on CDN reachability or integrity
+         at runtime. See scripts/post-build.mjs and vendor/README.md
+         for the build / vendoring steps. -->
+    <script src="vendor/tailwindcss.min.js"></script>
+    <script src="vendor/marked.min.js"></script>
+    <script src="vendor/marked-highlight.umd.js"></script>
+    <script src="vendor/purify.min.js"></script>
+    <!-- highlight.js bundled (with esbuild) from highlight.js/lib/common.js,
+         which covers ~36 popular languages. Matches pi-coding-agent's
+         markdown renderer setup (auto-detect off; explicit-language only). -->
+    <script src="vendor/highlight.umd.js"></script>
 
     <!-- Font stack matches neevparikh.github.io:
            body   — Roboto Slab (variable serif)
