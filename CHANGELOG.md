@@ -5,6 +5,35 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.2.3 — first-boot \$HOME seed
+
+### Fixed
+
+- Container entrypoint now seeds `$HOME` from `/opt/home-skel/` on first
+  boot (idempotent via `$HOME/.pirouette-home-seeded` sentinel). The
+  pirouette container bind-mounts the host's per-user state dir over
+  `/home/<user>`, which previously masked anything the image baked into
+  `$HOME` — oh-my-zsh, zsh plugins, paru config, etc. all silently
+  disappeared on first boot. Images that ship a snapshot at
+  `/opt/home-skel/` now have those files seeded into the bind-mount
+  before yadm clone runs (so dotfiles still win on overlap).
+
+  Images without `/opt/home-skel/` see a one-line log warning and the
+  entrypoint continues unchanged — fully backwards-compatible. To
+  produce the snapshot in your own image, add this near the end of
+  the Dockerfile:
+
+  ```dockerfile
+  USER root
+  RUN cp -a /home/$username /opt/home-skel
+  USER $username
+  ```
+
+  To force a re-seed (e.g. after a base image update), `rm
+  $HOME/.pirouette-home-seeded` and restart the container.
+
+---
+
 ## 0.2.2 — CLI version fix
 
 ### Fixed

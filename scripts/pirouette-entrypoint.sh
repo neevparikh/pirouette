@@ -46,6 +46,26 @@ exec > >(tee -a "$LOG") 2>&1
 
 log "starting up  PWD=$PWD  USER=$(id -un)  HOME=$HOME"
 
+# ---- 0. First-boot $HOME seed -------------------------------------------
+# We bind-mount the host's per-user state dir over /home/<user>, which
+# masks anything the image baked into $HOME (oh-my-zsh, paru config,
+# language toolchains' default layouts, etc.). If the image left a
+# snapshot at /opt/home-skel, copy it into the bind-mount on first boot.
+# Done before yadm clone so dotfiles win on top.
+SEED_SRC="/opt/home-skel"
+SEED_SENTINEL="$HOME/.pirouette-home-seeded"
+if [ -d "$SEED_SRC" ] && [ ! -f "$SEED_SENTINEL" ]; then
+    log "first boot: seeding \$HOME from $SEED_SRC"
+    # -a preserves perms/ownership; -n won't overwrite anything yadm or
+    # the user has already put in place. Errors on stale dangling symlinks
+    # are non-fatal.
+    cp -an "$SEED_SRC"/. "$HOME"/ 2>/dev/null || true
+    touch "$SEED_SENTINEL"
+    log "seed complete"
+elif [ ! -d "$SEED_SRC" ]; then
+    log "no /opt/home-skel in image; skipping \$HOME seed (image-installed home files may be hidden by the bind-mount)"
+fi
+
 # ---- 1. Dotfiles over HTTPS (public repo; no SSH agent required) --------
 if [ -z "$PIROUETTE_DOTFILES_URL" ]; then
     log "no PIROUETTE_DOTFILES_URL set; skipping yadm clone"
