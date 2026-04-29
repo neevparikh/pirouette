@@ -228,8 +228,19 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
       extras.push(...envExtras.split(",").map((s) => s.trim()).filter(Boolean));
     }
     for (const raw of extras) {
-      const entry = raw.includes(":") ? raw : `${raw}:${portStr}`;
-      allowed.add(entry);
+      if (raw.includes(":")) {
+        // Explicit `<host>:<port>` — add as-is.
+        allowed.add(raw);
+      } else {
+        // Bare hostname — add both portless and `:<configured_port>`
+        // variants. Portless covers TLS proxies that terminate on default
+        // ports (e.g. `tailscale serve --https=443` rewrites the Host
+        // header to just the FQDN, no `:443`). The `:<port>` variant
+        // covers direct connections to our listener at the non-default
+        // pirouette port.
+        allowed.add(raw);
+        allowed.add(`${raw}:${portStr}`);
+      }
     }
 
     // Container path: the docker port mapping makes this listener

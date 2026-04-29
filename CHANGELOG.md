@@ -5,6 +5,56 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.2.7 — Portless Host header support (`tailscale serve --https`)
+
+### Fixed
+
+- `server.allowed_hosts` entries with no port no longer silently strip
+  the bare-host variant from the allowlist. Previously a config of
+  `["pirouette-neev"]` only generated the entry `pirouette-neev:7777`,
+  so requests with `Host: pirouette-neev` (no port) hit `421 Misdirected
+  Request`. Now bare entries generate **both** the portless and the
+  `:<configured_port>` variants. Explicit `<host>:<port>` entries still
+  pass through as-is.
+- This makes `tailscale serve --https=443 http://localhost:7777` work
+  end-to-end: the Tailscale TLS-terminating proxy forwards a Host
+  header of just the FQDN (port 443 is the HTTPS default and so is
+  omitted), which the server now accepts.
+
+### Recipe (HTTPS via `tailscale serve`)
+
+0.2.6 lets you reach the dashboard at `http://pirouette-neev:7777` over
+the tailnet. 0.2.7 adds the option of proper HTTPS with a real cert
+at `https://<host>.<tailnet>.ts.net/` (no port number, no warnings).
+
+On the EC2 host:
+
+```bash
+sudo tailscale serve --bg --https=443 http://localhost:7777
+```
+
+In `~/.pirouette/config.toml`:
+
+```toml
+[server]
+allowed_hosts = [
+  "pirouette-<you>",                         # bare HTTP via :7777
+  "pirouette-<you>.<tailnet>.ts.net",        # HTTPS via tailscale serve
+]
+```
+
+Then `pru setup` (idempotent) and use the new HTTPS URL. Both access
+paths stay live in parallel; nothing existing breaks. Tailscale's
+CA-issued cert is browser-trusted and auto-renews — no manual cert
+management.
+
+Prereqs (verify in your tailnet admin if `tailscale cert <fqdn>`
+fails): MagicDNS enabled + HTTPS Certificates enabled. Both default-on
+for newer tailnets. No ACL changes needed if your tailnet ACL already
+allows `:443` from your devices to this host.
+
+---
+
 ## 0.2.6 — Tailscale (and other non-loopback) access
 
 ### Added
