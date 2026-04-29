@@ -220,6 +220,27 @@ export class AgentManager {
     return this.stateManager.getAgent(id);
   }
 
+  /** Resolve a CLI/URL agent reference (id or human-friendly name) to a
+   *  single agent. Strategy:
+   *    1. Exact id match wins (canonical case).
+   *    2. Exact name match — only if there's a unique result. Multiple
+   *       agents can share a name (different projects), in which case
+   *       this returns null and the caller should report ambiguity.
+   *  Returns:
+   *    - the agent if uniquely resolvable
+   *    - { ambiguous: true, matches } if a name matches >1 agent
+   *    - null if nothing matches */
+  resolveAgentRef(
+    ref: string,
+  ): AgentConfig | { ambiguous: true; matches: AgentConfig[] } | null {
+    const byId = this.stateManager.getAgent(ref);
+    if (byId) return byId;
+    const byName = this.stateManager.getAgents().filter((a) => a.name === ref);
+    if (byName.length === 1) return byName[0];
+    if (byName.length > 1) return { ambiguous: true, matches: byName };
+    return null;
+  }
+
   isRunning(id: string): boolean {
     return this.handles.has(id);
   }

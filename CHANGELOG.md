@@ -5,6 +5,36 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.2.5 — `pru rm` accepts agent name (was silent no-op)
+
+### Fixed
+
+- `pru rm <name>` (and any HTTP API call referencing an agent by
+  human-friendly name rather than 8-char id) now actually removes the
+  agent. Previously `DELETE /api/agents/smoketest` returned `200 OK`
+  with `{removed: true}`, broadcast `agent_removed`, and did nothing,
+  because the underlying state-manager calls keyed by id silently
+  no-oped when the ref was a name. The same bug affected `pru stop`,
+  `pru send`, model switching, forking — anything that took an agent
+  ref. They all happened to look like they worked because the live
+  session in memory still served subsequent reads.
+- Unknown agent refs now return `404` instead of `200` (the silent
+  success that hid the original bug).
+- Ambiguous name refs (multi-project name collision) return `409` with
+  the list of candidate ids and project names; use the id in that
+  case.
+
+### Added
+
+- `agentManager.resolveAgentRef(ref)` — single canonical place that
+  turns a CLI/URL agent reference into either an agent, an ambiguity
+  marker, or null.
+- 6 new tests in `src/server/__tests__/agent-ref.test.ts` covering the
+  unknown-ref / control-chars / oversize-ref / wrong-method paths.
+  Total tests now 133 (was 127).
+
+---
+
 ## 0.2.4 — SSH ControlMaster + `pru tunnel`
 
 ### Added

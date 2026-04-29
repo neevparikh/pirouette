@@ -338,12 +338,47 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
 
     const agentMatch = pathname.match(/^\/api\/agents\/([^/]+)(\/.*)?$/);
     if (agentMatch) {
-      const agentId = agentMatch[1];
+      const ref = agentMatch[1];
       const sub = agentMatch[2] ?? "";
 
-      // Reject anything that's not a well-formed agent id outright.
-      // Same response as "agent not found" — don't leak whether the
-      // shape was valid but unknown vs unparseable.
+      // Reject control characters and absurd lengths up front. Mirror the
+      // checks in `validateName` so accept-by-name doesn't widen the
+      // attack surface beyond what create-agent already accepts.
+      if (
+        ref.length === 0 ||
+        ref.length > 200 ||
+        /[\x00-\x1f\x7f]/.test(ref)
+      ) {
+        error(res, 404, "Agent not found");
+        return;
+      }
+
+      // Resolve id-or-name to a canonical agent. From here on we use the
+      // resolved id so the underlying state-manager calls (which key by
+      // id) always succeed if the agent exists. This is also where we
+      // turn the long-standing silent-no-op bug into a 404 — previously,
+      // `pru rm <name>` would return 200 OK while doing nothing.
+      const resolved = agentManager.resolveAgentRef(ref);
+      if (!resolved) {
+        error(res, 404, "Agent not found");
+        return;
+      }
+      if ("ambiguous" in resolved) {
+        const list = resolved.matches
+          .map((a) => `${a.id} (${a.projectName}/${a.name})`)
+          .join(", ");
+        error(
+          res,
+          409,
+          `Ambiguous reference "${ref}" matches ${resolved.matches.length} agents: ${list}. Use the id.`,
+        );
+        return;
+      }
+      const agentId = resolved.id;
+
+      // Defensive: the resolved id should always satisfy AGENT_ID_RE
+      // (createAgent only emits 8-char hex ids), but if someone hand-edits
+      // the state file we'd rather 404 than pass a weird id downstream.
       if (!AGENT_ID_RE.test(agentId)) {
         error(res, 404, "Agent not found");
         return;
