@@ -5,6 +5,60 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.2.6 — Tailscale (and other non-loopback) access
+
+### Added
+
+- **`server.allowed_hosts` config** + `PIROUETTE_ALLOWED_HOSTS` env var
+  for extending the HTTP `Host` and WS `Origin` allowlist beyond the
+  default loopback set. Each entry is `<host>` (port appended
+  automatically using `container.pirouette_port`) or `<host>:<port>`
+  (explicit). Comma-separated for the env-var form.
+- **`pru setup` threads `server.allowed_hosts`** through to the
+  container's `docker run -e PIROUETTE_ALLOWED_HOSTS=...` so the
+  setting persists across container restarts.
+
+### Why
+
+Until 0.2.6 the only sanctioned access path to the dashboard was the
+SSH tunnel from `pru open` (laptop:7777 → container:7777). Reaching
+the dashboard via any other hostname (e.g. a Tailscale MagicDNS
+hostname like `pirouette-neev:7777`) hit `421 Misdirected Request`
+because our DNS-rebinding-defense allowlist only included
+`localhost:<port>` and `127.0.0.1:<port>`.
+
+### Recipe (Tailscale on EC2)
+
+On the EC2 host:
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sudo sh
+sudo tailscale up --ssh --hostname=pirouette-<you>
+# follow the auth URL it prints; admin approval may be required
+```
+
+On the laptop, in `~/.pirouette/config.toml`:
+
+```toml
+[server]
+allowed_hosts = ["pirouette-<you>"]
+```
+
+Then `pru setup` (idempotent — just rewrites docker run env). You can
+now reach the dashboard at `http://pirouette-<you>:7777` from any
+device on your tailnet, no SSH tunnel needed. The SSH-tunnel path
+(`pru open`) keeps working in parallel.
+
+### Trust note
+
+This broadens the access surface from "laptop's SSH key" to "anyone
+on the tailnet ACL'd to reach the host." pirouette still has no
+application-layer auth, so anyone who can reach `:7777` has shell
+through the agents. Make sure your tailnet ACL doesn't expose this
+box to people you wouldn't share `~/.ssh/` with.
+
+---
+
 ## 0.2.5 — `pru rm` accepts agent name (was silent no-op)
 
 ### Fixed

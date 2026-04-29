@@ -130,3 +130,17 @@ clone_url = ""
 # `/USER.keys` endpoint). The container's entrypoint curls this into
 # ~/.ssh/authorized_keys so you can `ssh` into it. Leave empty to skip.
 authorized_keys_url = ""
+
+[server]
+# Extra hostnames the server will accept in HTTP `Host` and WS `Origin`
+# headers. Default: empty (only loopback addresses, which is right for
+# the SSH-tunnel access path). Add entries when reaching the dashboard
+# at a non-loopback name — e.g. via Tailscale MagicDNS:
+#
+#   allowed_hosts = ["pirouette-neev"]
+#
+# Each entry can be `<host>` (port appended automatically using
+# container.pirouette_port) or `<host>:<port>` (explicit). You can also
+# set the PIROUETTE_ALLOWED_HOSTS env var (comma-separated) for the
+# same effect without editing this file.
+allowed_hosts = []

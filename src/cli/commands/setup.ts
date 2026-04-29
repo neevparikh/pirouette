@@ -355,6 +355,12 @@ async function bootstrapContainer(
   if (cfg.dotfiles.clone_url) env.PIROUETTE_DOTFILES_URL = cfg.dotfiles.clone_url;
   if (cfg.dotfiles.authorized_keys_url)
     env.PIROUETTE_AUTHORIZED_KEYS_URL = cfg.dotfiles.authorized_keys_url;
+  // Extra Host-header allowlist for non-loopback access paths (Tailscale
+  // hostname, custom DNS name, etc.). Comma-separated for the env-var
+  // representation; the server splits on "," and trims.
+  if (cfg.server?.allowed_hosts && cfg.server.allowed_hosts.length > 0) {
+    env.PIROUETTE_ALLOWED_HOSTS = cfg.server.allowed_hosts.join(",");
+  }
   await startContainer({ image: cfg.container.image, env });
 
   // Push laptop-local auth state into the container's persistent home.

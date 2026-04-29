@@ -217,6 +217,21 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
     if (host !== "0.0.0.0" && host !== "127.0.0.1") {
       allowed.add(`${host}:${portStr}`);
     }
+
+    // Extra hostnames from config or env. Used for non-loopback access
+    // paths (most commonly: a tailnet MagicDNS hostname when reaching
+    // the dashboard directly without an SSH tunnel). Each entry may be
+    // `<host>` (we append the port) or `<host>:<port>` (explicit).
+    const extras: string[] = [...(cfg.server?.allowed_hosts ?? [])];
+    const envExtras = process.env.PIROUETTE_ALLOWED_HOSTS;
+    if (envExtras) {
+      extras.push(...envExtras.split(",").map((s) => s.trim()).filter(Boolean));
+    }
+    for (const raw of extras) {
+      const entry = raw.includes(":") ? raw : `${raw}:${portStr}`;
+      allowed.add(entry);
+    }
+
     // Container path: the docker port mapping makes this listener
     // reachable as the container's hostname or any IP, but we only
     // accept connections we can recognize — same-origin only.

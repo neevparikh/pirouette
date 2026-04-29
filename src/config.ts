@@ -77,6 +77,15 @@ export interface PirouetteConfig {
      *  users. */
     authorized_keys_url: string;
   };
+  server: {
+    /** Extra hostnames the server will accept in the HTTP `Host` header
+     *  and the WS `Origin` header. Useful when reaching the dashboard via
+     *  a tailnet hostname (`pirouette-neev`) or any non-loopback name.
+     *  Each entry can be `<host>` (port appended automatically) or
+     *  `<host>:<port>` (explicit). Default: empty — only loopback addresses
+     *  are accepted, which is right for the SSH-tunnel path. */
+    allowed_hosts: string[];
+  };
 }
 
 /** Built-in fallback values. These are last-resort defaults for anything not
@@ -123,6 +132,9 @@ const BUILTIN_DEFAULTS: PirouetteConfig = {
   dotfiles: {
     clone_url: "",
     authorized_keys_url: "",
+  },
+  server: {
+    allowed_hosts: [],
   },
 };
 
