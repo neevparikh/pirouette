@@ -137,10 +137,21 @@ authorized_keys_url = ""
 # the SSH-tunnel access path). Add entries when reaching the dashboard
 # at a non-loopback name — e.g. via Tailscale MagicDNS:
 #
-#   allowed_hosts = ["pirouette-neev"]
+#   allowed_hosts = ["pirouette-neev", "pirouette-neev.<tailnet>.ts.net"]
 #
-# Each entry can be `<host>` (port appended automatically using
-# container.pirouette_port) or `<host>:<port>` (explicit). You can also
-# set the PIROUETTE_ALLOWED_HOSTS env var (comma-separated) for the
-# same effect without editing this file.
+# Each entry can be `<host>` (both bare and `:<configured_port>` variants
+# get added automatically — covers TLS proxies on default ports) or
+# `<host>:<port>` (explicit, added as-is). You can also set the
+# PIROUETTE_ALLOWED_HOSTS env var (comma-separated) for the same effect.
 allowed_hosts = []
+
+# Canonical URL where the dashboard is served. Used by `pru open` to
+# pick a browser target and by the CLI as the default API base. When
+# this is empty, `pru open` and CLI commands like `pru list` fail with
+# a useful error directing you to set this or PIROUETTE_URL.
+#
+# Typical value: the HTTPS Tailscale Serve URL once you've run
+#   sudo tailscale serve --bg --https=443 http://localhost:7777
+# on the EC2 host:
+#   public_url = "https://pirouette-neev.<tailnet>.ts.net"
+public_url = ""

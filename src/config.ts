@@ -81,10 +81,19 @@ export interface PirouetteConfig {
     /** Extra hostnames the server will accept in the HTTP `Host` header
      *  and the WS `Origin` header. Useful when reaching the dashboard via
      *  a tailnet hostname (`pirouette-neev`) or any non-loopback name.
-     *  Each entry can be `<host>` (port appended automatically) or
-     *  `<host>:<port>` (explicit). Default: empty — only loopback addresses
-     *  are accepted, which is right for the SSH-tunnel path. */
+     *  Each entry can be `<host>` (port appended automatically and the
+     *  bare-host variant added too — covers TLS proxies on default ports)
+     *  or `<host>:<port>` (explicit, added as-is). Default: empty — only
+     *  loopback addresses accepted. */
     allowed_hosts: string[];
+    /** Canonical URL where the dashboard lives — used by `pru open` to
+     *  pick a browser target and by the CLI as the default API base.
+     *  When set, the CLI talks to this directly (no SSH tunnel). When
+     *  empty, you'll get a `pru open` error directing you to set this
+     *  or the `PIROUETTE_URL` env var. Example:
+     *    public_url = "https://pirouette-neev.<your-tailnet>.ts.net"
+     */
+    public_url: string;
   };
 }
 
@@ -135,6 +144,7 @@ const BUILTIN_DEFAULTS: PirouetteConfig = {
   },
   server: {
     allowed_hosts: [],
+    public_url: "",
   },
 };
 

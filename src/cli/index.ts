@@ -23,7 +23,6 @@ import { teardown } from "./commands/teardown.js";
 import { destroy } from "./commands/destroy.js";
 import { logs } from "./commands/logs.js";
 import { sync } from "./commands/sync.js";
-import { close } from "./commands/open.js";
 import { tunnel } from "./commands/tunnel.js";
 
 /** Read pirouette's version straight from package.json so the CLI's
@@ -180,11 +179,6 @@ program
   .option("--delete-volume", "Also delete the persistent EBS data volume (destructive)")
   .option("-y, --yes", "Skip interactive confirmation")
   .action(destroy);
-
-program
-  .command("close")
-  .description("Close the SSH port-forward tunnel started by `pru open`")
-  .action(close);
 
 program
   .command("logs")

@@ -1,9 +1,31 @@
-/** Shared HTTP client for talking to the pirouette server. */
+/** Shared HTTP client for talking to the pirouette server.
+ *
+ *  Base URL precedence (highest to lowest):
+ *    1. `PIROUETTE_URL` env var \u2014 always wins; useful for local-dev (`npm
+ *       run dev` → `http://127.0.0.1:7777`) or for an emergency override.
+ *    2. `server.public_url` from the merged TOML config \u2014 the canonical
+ *       address you reach the dashboard at (typically a Tailscale HTTPS
+ *       URL set up via `tailscale serve`).
+ *    3. Refuse \u2014 throw a clear error directing the user to set one of
+ *       the above. There used to be a "fall back to localhost via an
+ *       SSH tunnel" default; we removed it because it relied on a
+ *       background `pru open` step that's easy to forget about and
+ *       silently produces "connection refused" when stale.
+ */
 
-const DEFAULT_BASE = "http://127.0.0.1:7777";
+import { getConfig } from "../config.js";
 
 function baseUrl(): string {
-  return process.env.PIROUETTE_URL ?? DEFAULT_BASE;
+  const fromEnv = process.env.PIROUETTE_URL;
+  if (fromEnv) return fromEnv.replace(/\/+$/, "");
+  const cfg = getConfig();
+  const fromConfig = cfg.server?.public_url ?? "";
+  if (fromConfig) return fromConfig.replace(/\/+$/, "");
+  throw new Error(
+    "No pirouette server URL configured. Set `server.public_url` in " +
+      "~/.pirouette/config.toml (e.g. \"https://pirouette-<you>.<tailnet>.ts.net\") " +
+      "or export PIROUETTE_URL for this shell.",
+  );
 }
 
 export async function apiGet<T = unknown>(path: string): Promise<T> {

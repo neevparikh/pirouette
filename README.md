@@ -43,27 +43,32 @@ npm install -g @neevparikh/pirouette   # provides both `pirouette` and `pru`
 
 The primary use case. Provisions an EC2 instance, attaches a 500 GiB
 EBS volume, runs your Docker image, installs pirouette inside it, and
-opens a browser to the dashboard via SSH tunnel.
+serves the dashboard at a Tailscale HTTPS URL.
 
 One-time setup:
 
 1. Install the AWS CLI and `aws sso login` (or otherwise authenticate)
    to a profile that can create EC2 + EBS in your target region.
-2. Create `~/.pirouette/config.toml` with your AWS network info — see
-   [Configuration](#configuration) below.
+2. Create `~/.pirouette/config.toml` with your AWS + tailnet info —
+   see [Configuration](#configuration) below.
 
 Then:
 
 ```bash
 pru preflight     # read-only: verify AWS config + resource discovery
 pru setup         # provision: instance + EBS + container + server
-pru open          # SSH-tunnel :7777 to the container, open browser
 ```
+
+The last step of `pru setup` prints a one-time bring-up recipe for
+Tailscale on the host (install + `tailscale up --ssh --hostname=...`
++ `tailscale serve --bg --https=443 http://localhost:7777`) which
+gives you `https://<host>.<tailnet>.ts.net/` as the dashboard URL.
+Drop that into `server.public_url` in your config and you're ready.
 
 Day-to-day:
 
 ```bash
-pru open          # tunnel + browser (idempotent — safe to re-run)
+pru open          # open the dashboard URL in your browser
 pru ssh           # shell into the container
 pru status        # instance state + server health
 pru logs -f       # tail server logs
@@ -91,9 +96,11 @@ pirouette server                # binds 127.0.0.1:7777
 open http://localhost:7777
 ```
 
-Local mode skips the entire AWS / Docker / SSH-tunnel layer — you're
+Local mode skips the entire AWS / Docker / Tailscale layer — you're
 just running the server process directly. Most useful for working on
-the dashboard or the server code.
+the dashboard or the server code. Set `PIROUETTE_URL=http://localhost:7777`
+in the same shell so the CLI talks to your local server instead of
+the cloud one.
 
 ## Configuration
 
@@ -188,7 +195,7 @@ in the input bar.
 | `pru setup` | Provision / resume the EC2 instance + start the container |
 | `pru teardown` | Stop the instance; EBS preserved |
 | `pru destroy [--delete-volume]` | Terminate; optionally delete EBS |
-| `pru open` / `pru close` | Manage the SSH port-forward to :7777 |
+| `pru open` | Open the dashboard (uses `server.public_url`) |
 | `pru ssh` / `pru ssh --host` | Shell into the container (agent forwarded) / the EC2 host |
 | `pru tunnel <port>` | Forward an extra port (mainly for OAuth loopback flows — see below) |
 | `pru logs [-f]` | Tail server logs (`--tmux`, `--entrypoint`, `--boot` for other sources) |
@@ -214,7 +221,7 @@ runtime values.
 | `PIROUETTE_HOST` | `127.0.0.1` (container path passes `0.0.0.0`) | Server bind host |
 | `PIROUETTE_PORT` | `7777` | Server port (or `container.pirouette_port` in config) |
 | `PIROUETTE_DATA_DIR` | `.pirouette/data` | Server data directory |
-| `PIROUETTE_URL` | `http://127.0.0.1:7777` | CLI → server URL (overrides tunnel) |
+| `PIROUETTE_URL` | `server.public_url` from config | CLI → server URL (overrides config; useful for local dev with `npm run dev`) |
 | `AWS_PROFILE` | — | Overrides `aws.profile` |
 
 ## Authenticating tools inside the container
@@ -261,6 +268,28 @@ Under the hood, `pru tunnel` reuses the SSH ControlMaster connection
 that pirouette sets up at `pru setup` time (`~/.pirouette/ssh-control/`),
 so adding/removing forwards is instant after the first SSH call. If no
 master exists it falls back to spawning a fresh `ssh -L …` process.
+
+## Troubleshooting
+
+### Tailnet outage — SSH-tunnel escape hatch
+
+The canonical access path goes through Tailscale. If your tailnet is
+unreachable (account issue, ACL change, Tailscale incident, etc.),
+you can fall back to a manual SSH tunnel as long as your AWS SG and
+SSH key still work:
+
+```bash
+# Start a port forward in one terminal:
+ssh -L 7777:localhost:7777 -N pirouette
+
+# In another terminal, point the CLI + browser at localhost:
+export PIROUETTE_URL=http://localhost:7777
+pru open
+```
+
+This is intentionally not wired up as a `pru` subcommand — if you're
+in this situation you're already debugging something out of band, and
+the two-line manual recipe is clearer than `pru open --tunnel` magic.
 
 ## Trust model
 

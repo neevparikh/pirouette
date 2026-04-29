@@ -5,6 +5,83 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.3.0 — Tailscale HTTPS as the canonical path; SSH tunnel removed
+
+Consolidates around a single dashboard URL: `server.public_url` from
+config, typically a Tailscale Serve HTTPS endpoint like
+`https://<host>.<tailnet>.ts.net`. The browser, the `pru` CLI, and the
+web dashboard's WebSocket all use this one URL. Two redundant access
+paths from earlier releases are gone.
+
+### Breaking
+
+- **`pru close` is removed** along with the `~/.pirouette/tunnel.pid`
+  bookkeeping. The SSH tunnel approach is no longer the default;
+  there's nothing to close.
+- **`pru open` no longer opens an SSH tunnel.** It opens
+  `server.public_url` (or `PIROUETTE_URL`) in your browser. If
+  neither is set, it refuses with a clear error pointing at the
+  config field. Previously, `pru open` would spawn `ssh -L
+  7777:localhost:7777 -N -f pirouette` and open `http://localhost:7777`.
+- **The CLI's default API base is now `server.public_url`** instead
+  of `http://127.0.0.1:7777`. `pru list`, `pru launch`, etc. now
+  talk to the dashboard URL directly. `PIROUETTE_URL` still
+  overrides for local-dev / emergency use.
+- If neither `server.public_url` nor `PIROUETTE_URL` is set, every
+  CLI command that hits the API throws "No pirouette server URL
+  configured" with a one-line fix.
+
+### Added
+
+- **`server.public_url` config field.** Canonical dashboard URL.
+  See `pirouette.toml` for an annotated example.
+
+### Why
+
+From 0.2.6 / 0.2.7 we had three working access paths to the dashboard:
+
+1. SSH tunnel → `http://localhost:7777` (via `pru open`)
+2. Plain HTTP over tailnet → `http://<host>:7777`
+3. HTTPS over tailnet via `tailscale serve` → `https://<host>.<tailnet>.ts.net/`
+
+(2) is strictly worse than (3) once HTTPS works (same trust boundary,
+worse UX). (1) is meaningfully different (uses SSH key, no tailnet
+dependency) but redundant in normal operation. Maintaining all three
+meant `pru open` had to keep the SSH-tunnel machinery alive for
+backwards compatibility, and the CLI talked to a different URL than
+the browser — confusing in failure modes.
+
+This release picks (3) as canonical and removes the rest of the
+bookkeeping. The SSH-tunnel path stays available as a manual
+escape-hatch for tailnet outages — documented in README
+"Troubleshooting" — but isn't a first-class CLI command anymore.
+
+### Migration
+
+If you've been using the SSH-tunnel access path, you'll need to:
+
+1. Set up `tailscale serve` on the host (one command, see CHANGELOG
+   for 0.2.6/0.2.7) and add the resulting URL to your config:
+
+   ```toml
+   [server]
+   allowed_hosts = ["<host>", "<host>.<tailnet>.ts.net"]
+   public_url    = "https://<host>.<tailnet>.ts.net"
+   ```
+
+2. Re-run `pru setup` (idempotent; rewrites the docker run env to pick
+   up the new `allowed_hosts`).
+
+3. Remove any aliases / scripts that called `pru close`. (`pru open`
+   no longer maintains state, so there's nothing to clean up.)
+
+If you're without tailnet access (laptop fell off, ACL change, etc.),
+the README "Troubleshooting" section has a 2-line `ssh -L …` recipe
+plus `PIROUETTE_URL=http://localhost:7777` to reach the dashboard
+from your laptop browser.
+
+---
+
 ## 0.2.7 — Portless Host header support (`tailscale serve --https`)
 
 ### Fixed
