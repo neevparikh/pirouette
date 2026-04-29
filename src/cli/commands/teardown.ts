@@ -10,6 +10,7 @@
 
 import { getConfig } from "../../config.js";
 import { getInstance, stopInstance } from "../remote/aws.js";
+import { killControlMasters } from "../remote/ssh.js";
 import { loadRemoteState } from "../remote/state.js";
 
 export async function teardown(): Promise<void> {
@@ -38,6 +39,12 @@ export async function teardown(): Promise<void> {
 
   console.log(`stopping ${inst.id} (${inst.privateIp})...`);
   await stopInstance(inst.id, cfg);
+
+  // Kill any live SSH control-master connections — the IP they're holding
+  // is about to disappear. Sockets get re-created automatically on the
+  // next ssh after `pru setup`.
+  killControlMasters([cfg.ssh.host_alias, `${cfg.ssh.host_alias}-container`]);
+
   console.log(`  stopped.  pru setup     # to resume`);
   console.log(`  EBS volume ${state.volumeId ?? "?"} preserved; agent state survives.`);
 }

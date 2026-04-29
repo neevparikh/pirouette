@@ -190,6 +190,7 @@ in the input bar.
 | `pru destroy [--delete-volume]` | Terminate; optionally delete EBS |
 | `pru open` / `pru close` | Manage the SSH port-forward to :7777 |
 | `pru ssh` / `pru ssh --host` | Shell into the container (agent forwarded) / the EC2 host |
+| `pru tunnel <port>` | Forward an extra port (mainly for OAuth loopback flows — see below) |
 | `pru logs [-f]` | Tail server logs (`--tmux`, `--entrypoint`, `--boot` for other sources) |
 | `pru sync` | Ship local changes to the remote container (dev loop) |
 | `pru sync --npm` | Upgrade the container from the npm registry |
@@ -215,6 +216,51 @@ runtime values.
 | `PIROUETTE_DATA_DIR` | `.pirouette/data` | Server data directory |
 | `PIROUETTE_URL` | `http://127.0.0.1:7777` | CLI → server URL (overrides tunnel) |
 | `AWS_PROFILE` | — | Overrides `aws.profile` |
+
+## Authenticating tools inside the container
+
+Most modern CLIs you'd run in the container support **device flow** —
+they print a URL and a short code, you approve on any device, the CLI
+polls a server until it sees the approval. No local callback, no port
+forwarding required:
+
+| tool | what to run |
+|---|---|
+| AWS SSO | `aws sso login` (default behavior) |
+| GitHub CLI | `gh auth login --web` |
+| gcloud | `gcloud auth login --no-launch-browser` |
+| Tailscale | `tailscale up` |
+
+For these you just `pru ssh`, run the command, copy the URL it prints
+into your laptop browser, approve, done.
+
+The exception is OAuth tools that **only** support the "loopback IP"
+flow — they spin up a local HTTP server on a random port and require the
+browser to redirect to `http://localhost:<port>`. `gws` (Google
+Workspace CLI) is one such tool. For these you need to forward the
+callback port from your laptop to the container:
+
+```bash
+# Terminal 1 — inside container
+pru ssh
+gws auth login --services drive,sheets
+# Note the port from the URL it prints, e.g. redirect_uri=http://localhost:42103
+
+# Terminal 2 — on laptop
+pru tunnel 42103
+# (foreground; ctrl-c to close when auth is done)
+
+# Terminal 3 (or just paste into your browser): open the URL gws printed
+```
+
+Use `LOCAL:REMOTE` syntax if you need different ports on each side
+(e.g. `pru tunnel 8080:42103`), or `--background` to add the forward
+and return immediately (close later with `pru tunnel --close 42103`).
+
+Under the hood, `pru tunnel` reuses the SSH ControlMaster connection
+that pirouette sets up at `pru setup` time (`~/.pirouette/ssh-control/`),
+so adding/removing forwards is instant after the first SSH call. If no
+master exists it falls back to spawning a fresh `ssh -L …` process.
 
 ## Trust model
 

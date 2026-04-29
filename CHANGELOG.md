@@ -5,6 +5,40 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.2.4 — SSH ControlMaster + `pru tunnel`
+
+### Added
+
+- **`pru tunnel <port>`** — forward a TCP port from laptop to container.
+  Primary use case: OAuth loopback-IP flows in CLI tools running inside
+  the container (most notably `gws`; most other tools like `aws sso`,
+  `gh`, `gcloud` use device flow and don't need this). Accepts `PORT`
+  or `LOCAL:REMOTE` syntax. Foreground by default (ctrl-c to close);
+  `--background` to daemonize and `--close` to remove a previously-added
+  forward.
+- **SSH ControlMaster** is now configured for both managed SSH aliases
+  (`pirouette` and `pirouette-container`). Sockets live in
+  `~/.pirouette/ssh-control/` (mode 700); `ControlPersist 10m` keeps
+  the master alive 10 minutes after the last channel closes. Effect:
+  every ssh-call-after-the-first to the container is ~30× faster (skips
+  ProxyJump re-handshake), and `pru tunnel` adds/removes forwards via
+  the master without spawning new connections.
+- New `sshControl()` and `killControlMasters()` helpers in
+  `src/cli/remote/ssh.ts`. The latter is invoked from `pru teardown`
+  and `pru destroy` so we don't leave masters pointing at unreachable IPs.
+
+### Changed
+
+- `upsertSshConfig()` now writes `ControlMaster auto`, `ControlPath`,
+  and `ControlPersist 10m` lines into the managed block. **Existing
+  installs need to re-run `pru setup` once** to pick this up
+  (idempotent; just rewrites local SSH config).
+- README: new "Authenticating tools inside the container" section
+  documenting both the device-flow path (most tools) and the loopback
+  path (`pru tunnel`).
+
+---
+
 ## 0.2.3 — first-boot \$HOME seed
 
 ### Fixed

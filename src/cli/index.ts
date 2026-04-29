@@ -24,6 +24,7 @@ import { destroy } from "./commands/destroy.js";
 import { logs } from "./commands/logs.js";
 import { sync } from "./commands/sync.js";
 import { close } from "./commands/open.js";
+import { tunnel } from "./commands/tunnel.js";
 
 /** Read pirouette's version straight from package.json so the CLI's
  *  `--version` output never drifts from the published package version.
@@ -99,6 +100,15 @@ program
   .command("open")
   .description("Open the web dashboard in your browser")
   .action(open);
+
+program
+  .command("tunnel <port>")
+  .description("Forward laptop:PORT ↔ container:PORT (or LOCAL:REMOTE). For OAuth loopback flows.")
+  .option("-d, --background", "Add the forward and return immediately (close with --close)")
+  .option("--close", "Remove a previously-added forward")
+  .action(async (port: string, opts: { background?: boolean; close?: boolean }) => {
+    await tunnel(port, opts);
+  });
 
 program
   .command("ssh")

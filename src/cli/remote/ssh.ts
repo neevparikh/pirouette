@@ -6,7 +6,7 @@
  */
 
 import { execFile, spawn } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -15,6 +15,16 @@ import { expandHome, getConfig, type PirouetteConfig } from "../../config.js";
 import { loadRemoteState, type RemoteState } from "./state.js";
 
 const pExecFile = promisify(execFile);
+
+/** Directory holding ControlMaster sockets. Created mode 700 so other users
+ *  on the laptop can't impersonate our SSH master. */
+export const SSH_CONTROL_DIR = path.join(homedir(), ".pirouette", "ssh-control");
+
+function ensureControlDir(): void {
+  if (!existsSync(SSH_CONTROL_DIR)) {
+    mkdirSync(SSH_CONTROL_DIR, { recursive: true, mode: 0o700 });
+  }
+}
 
 /** Shared SSH options used for every command. Disables host key prompts on
  *  first connect (the instance is freshly booted and has no known host fp);
@@ -182,8 +192,13 @@ export interface SshConfigEntry {
 /** Add or replace the pirouette-managed SSH config block. Idempotent:
  *  a single contiguous block is rewritten each time — never duplicates.
  *  Multiple entries can be passed so we can add both `pirouette` (host)
- *  and `pirouette-container` (container-via-jump) in one call. */
+ *  and `pirouette-container` (container-via-jump) in one call.
+ *
+ *  Every entry gets ControlMaster directives so subsequent ssh calls reuse
+ *  a single TCP connection (huge for `pirouette-container`, which otherwise
+ *  re-does ProxyJump every time). */
 export function upsertSshConfig(entries: SshConfigEntry[]): void {
+  ensureControlDir();
   const sshConfigPath = path.join(homedir(), ".ssh", "config");
   const existing = existsSync(sshConfigPath) ? readFileSync(sshConfigPath, "utf8") : "";
 
@@ -199,6 +214,12 @@ export function upsertSshConfig(entries: SshConfigEntry[]): void {
     lines.push(`  StrictHostKeyChecking accept-new`);
     lines.push(`  ServerAliveInterval 30`);
     lines.push(`  ServerAliveCountMax 3`);
+    // ControlMaster: any ssh becomes the master if no socket exists; keep
+    // the master alive 10 minutes after the last channel closes. %C is a
+    // hash of host+user+port so different aliases get distinct sockets.
+    lines.push(`  ControlMaster auto`);
+    lines.push(`  ControlPath ${SSH_CONTROL_DIR}/%C`);
+    lines.push(`  ControlPersist 10m`);
     for (const rf of e.remoteForwards ?? []) {
       lines.push(`  RemoteForward ${rf.remote} ${rf.local}`);
     }
@@ -231,6 +252,45 @@ export function removeSshConfig(): void {
     "g",
   );
   writeFileSync(sshConfigPath, existing.replace(beginRe, "\n"));
+}
+
+// ---- ControlMaster helpers ------------------------------------------------
+
+/** Send a control command to a host's master connection. Returns true if the
+ *  master responded successfully, false otherwise. Used to:
+ *  - check liveness (`check`)
+ *  - add forwards (`forward`)
+ *  - remove forwards (`cancel`)
+ *  - tear down master (`exit`)
+ *
+ *  Extra args go after the action: e.g. `["-L", "42103:localhost:42103"]`.
+ *
+ *  Doesn't throw on failure — returns false. Most callers want graceful
+ *  fallback (e.g. "if check fails, just open a fresh ssh"). */
+export async function sshControl(
+  hostAlias: string,
+  action: "check" | "forward" | "cancel" | "exit" | "stop",
+  extraArgs: string[] = [],
+): Promise<{ ok: boolean; stdout: string; stderr: string }> {
+  const args = ["-O", action, ...extraArgs, hostAlias];
+  try {
+    const { stdout, stderr } = await pExecFile("ssh", args, { timeout: 10_000 });
+    return { ok: true, stdout, stderr };
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
+    return { ok: false, stdout: e.stdout ?? "", stderr: e.stderr ?? String(err) };
+  }
+}
+
+/** Tear down any live ControlMaster connections (for the given aliases) and
+ *  remove their socket files. Best-effort — a stale socket left behind is
+ *  harmless because OpenSSH will overwrite on next master open. */
+export function killControlMasters(aliases: string[]): void {
+  // Tell each master to exit gracefully. We can't await here because this is
+  // called from sync teardown paths; spawn is fine since it's best-effort.
+  for (const alias of aliases) {
+    spawn("ssh", ["-O", "exit", alias], { stdio: "ignore" }).on("error", () => {});
+  }
 }
 
 function escapeRegex(s: string): string {

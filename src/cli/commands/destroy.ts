@@ -16,7 +16,7 @@ import {
   getInstance,
   terminateInstance,
 } from "../remote/aws.js";
-import { removeSshConfig } from "../remote/ssh.js";
+import { killControlMasters, removeSshConfig } from "../remote/ssh.js";
 import { clearRemoteState, loadRemoteState } from "../remote/state.js";
 
 async function confirm(prompt: string): Promise<boolean> {
@@ -79,6 +79,10 @@ export async function destroy(opts: { deleteVolume?: boolean; yes?: boolean }): 
     console.log(`  deleted.`);
   }
 
+  // Tear down any live SSH control-master connections before we drop the
+  // config block they reference. Best-effort — a stale socket left behind
+  // is harmless (the next master open will overwrite it).
+  killControlMasters([cfg.ssh.host_alias, `${cfg.ssh.host_alias}-container`]);
   removeSshConfig();
   clearRemoteState();
   console.log("  done.");
