@@ -103,15 +103,54 @@ log "starting sshd"
 touch "$HOME/logs/sshd.log"
 sudo /usr/sbin/sshd -E "$HOME/logs/sshd.log" &
 
-# ---- 3. Install pirouette if missing (idempotent) ------------------------
-# `npm install -g` writes to the node prefix (usually /usr/lib/node_modules
-# or similar), which requires root. The image's user has passwordless sudo,
-# so we shell out with sudo for the install only.
+# ---- 3. Configure user-local npm prefix ---------------------------------
+# Default npm prefix on this image is a system path (typically /usr) that
+# requires sudo to write to. That's a problem for any package pi tries to
+# `npm install -g` at runtime from settings.packages — those installs run
+# as the unprivileged container user and fail with EACCES.
+#
+# Switch npm to a user-local prefix so all `npm install -g` calls (this
+# entrypoint's, pi's at runtime, `pru sync`'s) write to the same
+# user-writable directory. Idempotent.
+NPM_PREFIX="$HOME/.npm-global"
+mkdir -p "$NPM_PREFIX/bin" "$NPM_PREFIX/lib"
+if [ "$(npm config get prefix 2>/dev/null)" != "$NPM_PREFIX" ]; then
+    log "setting npm prefix to $NPM_PREFIX"
+    npm config set prefix "$NPM_PREFIX"
+fi
+# Make the user-prefix bin findable for the rest of this script and any
+# subprocess (tmux server starts below; its panes inherit our env).
+export PATH="$NPM_PREFIX/bin:$PATH"
+
+# Persist PATH change for non-entrypoint shells. tmux panes started later
+# by `pru sync` (which kills + restarts the session) are non-interactive
+# subshells that skip .bashrc/.zshrc, so we cover .bash_profile, .zshenv,
+# and .profile too — those are sourced in non-interactive login / startup
+# modes. Idempotent via grep.
+for rc in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.profile"; do
+    if [ -e "$rc" ] && ! grep -qF "/.npm-global/bin" "$rc"; then
+        printf '\n# pirouette: user-local npm bin (added by pirouette-entrypoint.sh)\nexport PATH="$HOME/.npm-global/bin:$PATH"\n' >> "$rc"
+    fi
+done
+
+# Migrate away from a previous root-prefix pirouette install. Older
+# entrypoints used `sudo npm install -g`, which lands at
+# /usr/lib/node_modules/@neevparikh/pirouette and symlinks /usr/bin/pirouette
+# — both of which would shadow the user-prefix copy we're about to install.
+if [ -d /usr/lib/node_modules/@neevparikh/pirouette ]; then
+    log "removing legacy system-prefix pirouette install"
+    sudo npm uninstall -g @neevparikh/pirouette 2>&1 | tail -3 || true
+fi
+
+# ---- 4. Install pirouette if missing (idempotent) ------------------------
+# No sudo needed: `npm install -g` writes to $NPM_PREFIX, which the user
+# owns. Pi's runtime auto-installs from settings.packages now land in the
+# same place — they no longer fail with EACCES.
 if ! command -v pirouette > /dev/null; then
-    log "installing $PIROUETTE_PACKAGE"
-    sudo npm install -g "$PIROUETTE_PACKAGE" 2>&1 | tail -5
+    log "installing $PIROUETTE_PACKAGE into $NPM_PREFIX"
+    npm install -g "$PIROUETTE_PACKAGE" 2>&1 | tail -5
 else
-    log "pirouette already installed ($(pirouette --version 2>/dev/null || echo unknown))"
+    log "pirouette already installed at $(command -v pirouette) ($(pirouette --version 2>/dev/null || echo unknown))"
 fi
 
 # ---- 4. Start the pirouette server in a long-lived tmux session ---------

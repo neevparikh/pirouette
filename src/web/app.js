@@ -161,12 +161,49 @@ function setVimEnabled(enabled) {
 $vimToggle.addEventListener("click", () => setVimEnabled(!vim.isEnabled()));
 
 // Restore preference on load. Default off so first-time users get a
-// vanilla textarea.
-if (localStorage.getItem("pirouette-vim-mode") === "1") {
+// vanilla textarea. On narrow viewports (phones) we ignore a saved-on
+// preference and force vim off — the modal editor is actively hostile on
+// touch keyboards (no Esc, no easy modifiers, hjkl tiny). The user can
+// still re-enable explicitly via the vim toggle button if they want.
+function isMobileViewport() {
+  return window.matchMedia("(max-width: 767.98px)").matches;
+}
+if (localStorage.getItem("pirouette-vim-mode") === "1" && !isMobileViewport()) {
   setVimEnabled(true);
 } else {
   applyVimToggleStyle();
 }
+
+// --- mobile sidebar drawer ---
+//
+// Below `md` (768px) the sidebar is an off-canvas drawer: hidden by default,
+// slid in via the hamburger button in the agent header, dismissed by tapping
+// the backdrop or pressing Escape. At md+ this is all a no-op — the sidebar
+// is a regular flex child and these controls don't affect it.
+const $sidebar = document.getElementById("sidebar");
+const $sidebarBackdrop = document.getElementById("sidebar-backdrop");
+const $sidebarToggle = document.getElementById("sidebar-toggle");
+
+function openSidebar() {
+  $sidebar.classList.remove("-translate-x-full");
+  $sidebarBackdrop.classList.remove("hidden");
+}
+function closeSidebar() {
+  $sidebar.classList.add("-translate-x-full");
+  $sidebarBackdrop.classList.add("hidden");
+}
+$sidebarToggle?.addEventListener("click", openSidebar);
+$sidebarBackdrop?.addEventListener("click", closeSidebar);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$sidebarBackdrop.classList.contains("hidden")) {
+    closeSidebar();
+  }
+});
+// If the user resizes from mobile to desktop with the drawer open, drop the
+// drawer's transform/backdrop so we don't have phantom state at md+ widths.
+window.addEventListener("resize", () => {
+  if (!isMobileViewport()) closeSidebar();
+});
 
 // --- model picker ---
 //
@@ -804,11 +841,24 @@ function renderAgentHeader() {
     $agentInfo.textContent = "";
     $agentStats.textContent = "";
     $agentStats.classList.add("hidden");
+    // Hide every action pill when no agent is selected. Until now
+    // raw/model/fork stayed visible and competed for layout space with
+    // the placeholder agent name, which on a phone caused a 3-line wrap
+    // that overlapped the buttons.
     $stopBtn.classList.add("hidden");
     $resumeBtn.classList.add("hidden");
     $deleteBtn.classList.add("hidden");
+    $rawBtn.classList.add("hidden");
+    $forkBtn.classList.add("hidden");
+    $modelBtn.classList.add("hidden");
     return;
   }
+
+  // Re-show the always-applicable pills now that we have an agent.
+  // (stop/resume/delete still toggle below based on agent state.)
+  $rawBtn.classList.remove("hidden");
+  $forkBtn.classList.remove("hidden");
+  $modelBtn.classList.remove("hidden");
 
   $agentName.textContent = agent.name;
 
@@ -1076,7 +1126,14 @@ async function selectAgent(id) {
   // Kick off the live footer stats fetch; renderAgentHeader will re-run
   // when the response lands.
   if (id) fetchStats(id);
-  $input.focus();
+  // On mobile, the sidebar drawer covers the agent view. Picking an
+  // agent should immediately reveal the conversation, not leave the
+  // drawer on top of it.
+  if (id && isMobileViewport()) closeSidebar();
+  // Don't auto-focus the input on mobile — it would summon the on-screen
+  // keyboard the moment you tap an agent, which is jarring. Desktop users
+  // expect focus.
+  if (!isMobileViewport()) $input.focus();
 }
 
 /** Parse the input for an `@name ` prefix.

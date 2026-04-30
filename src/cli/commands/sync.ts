@@ -10,6 +10,13 @@
  *  `npm version && npm publish`. For production updates, publish normally
  *  and the container's next restart picks it up (or run `pru sync --npm`
  *  to force an in-place upgrade from the registry).
+ *
+ *  We wrap every container-side command in `bash -lc "..."`. That gives
+ *  bash login-shell semantics, which sources `.bash_profile` / `.profile`
+ *  and (for zsh users) `.zshenv` — the entrypoint persists the user's npm
+ *  prefix bin to those files. Without `-lc`, tmux panes started here
+ *  inherit only the bare docker-exec env and can't find `pirouette` in
+ *  PATH (it lives at `$HOME/.npm-global/bin/pirouette`).
  */
 
 import { execFileSync } from "node:child_process";
@@ -33,12 +40,14 @@ function findPackageRoot(): string {
 
 async function restartServerInContainer(): Promise<void> {
   await ssh(
-    `docker exec ${CONTAINER_NAME} tmux kill-session -t pirouette 2>/dev/null || true`,
+    `docker exec ${CONTAINER_NAME} bash -lc 'tmux kill-session -t pirouette 2>/dev/null || true'`,
   );
   // Keep tmux start line in sync with the entrypoint script.
+  // bash -lc sources login-shell rc files so `pirouette` (in user-local
+  // $HOME/.npm-global/bin) is on PATH for the tmux server we're starting.
+  // The tmux server inherits this PATH; its panes inherit it too.
   await ssh(
-    `docker exec ${CONTAINER_NAME} tmux new-session -d -s pirouette ` +
-      `'pirouette server 2>&1 | tee -a /data/logs/pirouette.log'`,
+    `docker exec ${CONTAINER_NAME} bash -lc "tmux new-session -d -s pirouette 'pirouette server 2>&1 | tee -a /data/logs/pirouette.log'"`,
   );
 }
 
@@ -59,12 +68,13 @@ export async function sync(opts: { npm?: boolean; secrets?: boolean }): Promise<
 
   if (opts.npm) {
     console.log(`upgrading to latest published @neevparikh/pirouette in container...`);
-    // `npm install -g` writes to /usr/lib/node_modules which requires root.
-    // The container's user has passwordless sudo (matches the entrypoint).
-    // We pipe through `tee /tmp/pir-install.log` so the *real* install exit
-    // code propagates (a `| tail -3` masks failures with exit 0).
+    // `npm install -g` writes to the user-local prefix the entrypoint
+    // configured ($HOME/.npm-global). No sudo needed. `bash -lc` sources
+    // the rc-file PATH export so `npm` and the resulting `pirouette` bin
+    // are both on PATH. `set -o pipefail` so an install failure isn't
+    // masked by `| tail -3`.
     await ssh(
-      `docker exec ${CONTAINER_NAME} bash -c 'set -o pipefail; sudo npm install -g @neevparikh/pirouette@latest 2>&1 | tail -3'`,
+      `docker exec ${CONTAINER_NAME} bash -lc 'set -o pipefail; npm install -g @neevparikh/pirouette@latest 2>&1 | tail -3'`,
     );
     await restartServerInContainer();
     console.log("  done. pirouette server restarted.");
@@ -94,10 +104,10 @@ export async function sync(opts: { npm?: boolean; secrets?: boolean }): Promise<
   await scp(onDisk, `${REMOTE_TARBALLS_DIR}/${remoteName}`);
 
   console.log("installing inside container...");
-  // sudo + pipefail so an install failure isn't silently swallowed by
-  // `| tail` (npm's error mode-of-failure is permission-denied here).
+  // No sudo: writes to user-local npm prefix configured by the entrypoint.
+  // pipefail so an install failure isn't silently swallowed by `| tail -3`.
   await ssh(
-    `docker exec ${CONTAINER_NAME} bash -c 'set -o pipefail; sudo npm install -g /data/tarballs/${remoteName} 2>&1 | tail -3'`,
+    `docker exec ${CONTAINER_NAME} bash -lc 'set -o pipefail; npm install -g /data/tarballs/${remoteName} 2>&1 | tail -3'`,
   );
 
   console.log("restarting server...");

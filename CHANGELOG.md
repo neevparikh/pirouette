@@ -5,6 +5,89 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.3.3 — Mobile-friendly dashboard + user-local npm prefix
+
+### Added — mobile-friendly dashboard
+
+The dashboard was desktop-only before this release. On a phone the
+256-px sidebar consumed most of the screen, the action pills wrapped
+and overlapped the agent name, and the input bar got clipped
+off-screen. Now:
+
+- **Sidebar becomes an off-canvas drawer below `md` (768 px).** Hidden
+  by default; a hamburger toggle in the agent header opens it. Tapping
+  the backdrop or pressing Escape closes it. Selecting an agent
+  auto-closes the drawer so the conversation is immediately visible.
+- **Agent header collapses on mobile.** Auto-height (no fixed 88px),
+  reduced padding, the info-strip and live-stats lines hidden
+  (still visible on desktop), action pills wrap to a second row when
+  needed.
+- **`raw` / `model ▾` / `fork` pills hidden when no agent is
+  selected.** Previously they sat next to the placeholder text and
+  caused a 3-line wrap on phones.
+- **Modal scales:** `w-full max-w-sm md:w-96` with outer `p-4` so
+  it never overflows narrow screens.
+- **Theme + model dropdowns** use `max-w-[calc(100vw-…)]` so they
+  don't extend past the viewport edge.
+- **`h-dvh` instead of `h-screen`** — iOS Safari's URL-bar-aware
+  viewport unit. The dashboard no longer gets cut off when the URL
+  bar shows.
+- **`viewport-fit=cover`** + `pb: max(…, env(safe-area-inset-bottom))`
+  on the input bar — textarea sits above the iOS home indicator.
+- **Vim mode auto-disabled below 768 px** even if `localStorage`
+  said "on." The modal editor is hostile on touch keyboards (no
+  Esc, no easy modifiers). Re-enable explicitly via the toggle if
+  you really want it on a tablet.
+- **No auto-focus on the textarea on mobile.** Tapping an agent
+  used to summon the on-screen keyboard immediately, hiding most
+  of the conversation.
+
+### Fixed — pi auto-installs from `settings.packages` no longer fail
+
+Pi auto-installs packages listed in `settings.packages` (e.g.
+`pi-tmux-window-name`) at server startup. On the container, those
+installs ran as the unprivileged user but tried to write to
+`/usr/lib/node_modules` (the system npm prefix), failing with
+`EACCES` and crashing the server.
+
+Fix: switch the container's npm prefix to `$HOME/.npm-global`
+(user-writable). All `npm install -g` calls — the entrypoint's
+pirouette install, pi's runtime auto-installs, `pru sync --npm`,
+and `pru sync` tarball installs — now write to the same
+user-local location. No sudo required anywhere.
+
+Mechanics:
+
+- `scripts/pirouette-entrypoint.sh` configures `npm config set
+  prefix $HOME/.npm-global`, persists `$PATH` in `.bashrc`,
+  `.bash_profile`, `.zshrc`, `.zshenv`, and `.profile` so any
+  shell mode picks it up, and migrates away from a previous
+  system-prefix install (`sudo npm uninstall -g
+  @neevparikh/pirouette` if present).
+- `src/cli/commands/sync.ts` wraps every `docker exec` in
+  `bash -lc "…"` so the rc-file `PATH` is sourced for tmux pane
+  subshells. Drops `sudo` from the install commands.
+
+### Migration
+
+Fresh containers (next `pru destroy && pru setup`) get the new
+flow automatically. Existing containers can migrate manually:
+
+```bash
+pru ssh
+npm config set prefix "$HOME/.npm-global"
+for rc in ~/.bashrc ~/.bash_profile ~/.zshrc ~/.zshenv ~/.profile; do
+  [ -e "$rc" ] && grep -qF '/.npm-global/bin' "$rc" || \
+    echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> "$rc"
+done
+sudo npm uninstall -g @neevparikh/pirouette
+npm install -g @neevparikh/pirouette@latest
+```
+
+Or just `pru destroy && pru setup` for a clean reprovision.
+
+---
+
 ## 0.3.2 — \$HOME ownership fixes
 
 ### Fixed
