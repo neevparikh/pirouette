@@ -5,6 +5,31 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.3.4 — Mobile UI iteration: shorter placeholder, header alignment
+
+Follow-ups from the first round of phone testing on 0.3.3:
+
+### Fixed
+
+- **Textarea placeholder no longer wraps + clips** on phone-width
+  viewports. The desktop strings (`@name your message (creates one in
+  scratchpad if new)` / `message <agent> — or @othername to redirect`)
+  are 50+ characters and Safari renders them across two lines inside a
+  `rows="1"` textarea, with the first line clipped above the visible
+  area. Mobile now uses short variants (`@name your message…` /
+  `message <agent>…`) that fit on one line. `updateInputPlaceholder()`
+  now also fires on window resize so rotating a phone switches between
+  the variants.
+- **Agent header alignment** below `md` was visibly off because
+  `items-start` top-aligned the agent name (Zilla Slab bold) and the
+  action pills (mono in pill containers), and their box-heights
+  differ. Now `items-center` on mobile (`items-start` preserved at
+  md+ where the multi-line info strip needs top-align). Removed the
+  `mt-0.5` nudge on the hamburger button — not needed once the
+  parent flex centers everything.
+
+---
+
 ## 0.3.3 — Mobile-friendly dashboard + user-local npm prefix
 
 ### Added — mobile-friendly dashboard

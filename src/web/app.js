@@ -201,8 +201,12 @@ document.addEventListener("keydown", (e) => {
 });
 // If the user resizes from mobile to desktop with the drawer open, drop the
 // drawer's transform/backdrop so we don't have phantom state at md+ widths.
+// Also re-run the placeholder logic so the long/short variant matches the
+// current viewport (rotating a phone or resizing the browser window
+// otherwise leaves a stale string).
 window.addEventListener("resize", () => {
   if (!isMobileViewport()) closeSidebar();
+  updateInputPlaceholder();
 });
 
 // --- model picker ---
@@ -1099,10 +1103,19 @@ function reconcileBlocks(container, blocks) {
 
 function updateInputPlaceholder() {
   const selectedAgent = agents.find((a) => a.id === selectedAgentId);
+  // Mobile gets shorter strings: the desktop versions are 50+ chars,
+  // which Safari wraps inside the textarea (rows="1") and renders with
+  // the first line clipped above the visible area. Shorter strings fit
+  // on one line on a phone-width viewport.
+  const mobile = isMobileViewport();
   if (selectedAgent) {
-    $input.placeholder = `message ${selectedAgent.name} — or @othername to redirect`;
+    $input.placeholder = mobile
+      ? `message ${selectedAgent.name}…`
+      : `message ${selectedAgent.name} — or @othername to redirect`;
   } else {
-    $input.placeholder = `@name your message (creates one in ${selectedProjectName} if new)`;
+    $input.placeholder = mobile
+      ? `@name your message…`
+      : `@name your message (creates one in ${selectedProjectName} if new)`;
   }
 }
 
