@@ -5,6 +5,42 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.3.2 — \$HOME ownership fixes
+
+### Fixed
+
+Two paths that ended up creating root-owned files inside the container's
+bind-mounted `$HOME`, breaking tools that expected to write under those
+directories.
+
+- **`pushSecrets()` left ancestor dirs root-owned.** When pushing
+  e.g. `~/.pi/agent/auth.json` to a fresh bind-mount, `sudo mkdir -p`
+  on the host created `.pi/` and `.pi/agent/` as root, and we only
+  `chown`'d the leaf. The user-owned auth file lived under a
+  root-owned `.pi/` (mode 755) — readable but not writable by the
+  container user, so pi-coding-agent broke when it tried to create
+  any sibling file/dir under `.pi/`. Same problem for `~/.cache/`.
+  Now `chown -R`s the top-level segment under `$HOME` (`.pi`,
+  `.cache`) so every level is `1000:1000`.
+- **Container entrypoint sshd log was root-owned.** `sudo sshd -E
+  $HOME/logs/sshd.log` opened the log file as root the first time,
+  so the file ended up `root:root 600` in the user's home. Pre-touch
+  the log file as the container user before sudo'ing sshd; sshd then
+  appends to an already-existing user-owned file.
+
+If you have an existing container with the broken state, fix it
+in-place:
+
+```bash
+pru ssh
+sudo chown -R neev:neev ~/.pi ~/.cache ~/logs/sshd.log
+```
+
+Fresh `pru setup` runs (and any future secrets push) on 0.3.2 land
+correctly without the fixup.
+
+---
+
 ## 0.3.1 — State file crash-consistency
 
 ### Fixed

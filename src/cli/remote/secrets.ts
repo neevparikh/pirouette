@@ -153,11 +153,18 @@ export async function pushSecrets(
 
     const remoteHostPath = path.posix.join(hostHome, spec.containerHomeRelative);
     const remoteDir = path.posix.dirname(remoteHostPath);
+    // First path segment under $HOME -- e.g. ".pi" for ".pi/agent/auth.json".
+    // sudo mkdir -p creates ALL intermediate dirs as root, so chowning just
+    // the leaf leaves ".pi" itself root-owned (mode 755). The container user
+    // can read+traverse but can't create siblings under ".pi" -- pi-agent
+    // breaks. We chown -R the top-level segment to fix every level at once.
+    const topSegment = spec.containerHomeRelative.split("/")[0];
+    const topAncestor = path.posix.join(hostHome, topSegment);
 
     // mkdir on the host (uid 1000 owns the bind-mount, but we run ssh
     // as ubuntu/root -- sudo so the dir is created and chowned to 1000).
     await ssh(
-      `sudo mkdir -p ${remoteDir} && sudo chown 1000:1000 ${remoteDir} && sudo chmod 700 ${remoteDir}`,
+      `sudo mkdir -p ${remoteDir} && sudo chown -R 1000:1000 ${topAncestor} && sudo chmod 700 ${remoteDir}`,
       { target },
     );
     await scp(local, remoteHostPath, { target });

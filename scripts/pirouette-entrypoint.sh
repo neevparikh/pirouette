@@ -96,6 +96,11 @@ elif [ ! -s "$HOME/.ssh/authorized_keys" ]; then
 fi
 
 log "starting sshd"
+# Pre-create the log file so sshd (running as root via sudo) opens an
+# already-existing user-owned file and just appends to it. Without this,
+# sshd creates the file as root and we end up with a root-owned file in
+# $HOME -- which the user can't manage.
+touch "$HOME/logs/sshd.log"
 sudo /usr/sbin/sshd -E "$HOME/logs/sshd.log" &
 
 # ---- 3. Install pirouette if missing (idempotent) ------------------------
