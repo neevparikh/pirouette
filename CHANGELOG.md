@@ -5,6 +5,57 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.3.1 — State file crash-consistency
+
+### Fixed
+
+Two interacting bugs in `src/server/state.ts` that could silently lose
+all agent + project state:
+
+- **`save()` was non-atomic.** It used `writeFile()` directly, so a
+  process killed mid-save (`tmux kill-session` SIGHUP, OOM, container
+  restart, host reboot) left a half-written, unparseable JSON file on
+  disk.
+- **`load()` swallowed every error silently** with a bare `catch {}`
+  and fell back to empty state. The next `save()` then overwrote the
+  corrupted file with a valid empty one — no log line, no warning,
+  permanent data loss.
+
+The interaction was the worst case: any process kill that landed
+inside a save's write window erased state on the next server start,
+invisibly.
+
+### Now
+
+- **`save()` is atomic.** Writes to `<file>.tmp`, then `rename()` into
+  place. Rename is atomic on POSIX same-filesystem moves; readers see
+  either the previous file or the new one, never a partial.
+- **`load()` distinguishes ENOENT from corruption.** First-run
+  (no file) still works fine. On parse failure or any other read
+  error, the bad file is renamed to
+  `pirouette-state.json.broken-<ISO-timestamp>` so its bytes are
+  preserved for forensics, and `load()` throws — the server refuses
+  to start with ambiguous state. The error message includes the
+  quarantine path:
+
+  ```
+  state file /data/state/pirouette-state.json is corrupted:
+  Expected property name or '}' in JSON at position 12.
+  Quarantined copy preserved at /data/state/pirouette-state.json.broken-2026-04-30T00-06-46-450Z.
+  Inspect it, or remove it to start fresh.
+  ```
+
+  If the broken file isn't recoverable, deleting it makes the next
+  start a clean first-run.
+
+### Tests
+
+7 new tests in `src/server/__tests__/state.test.ts` covering the
+ENOENT, corruption, EISDIR, atomic-rename, stale-tmp-recovery, and
+round-trip paths. Total 140 (was 133).
+
+---
+
 ## 0.3.0 — Tailscale HTTPS as the canonical path; SSH tunnel removed
 
 Consolidates around a single dashboard URL: `server.public_url` from
