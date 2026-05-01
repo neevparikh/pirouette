@@ -168,6 +168,147 @@ $vimToggle.addEventListener("click", () => setVimEnabled(!vim.isEnabled()));
 function isMobileViewport() {
   return window.matchMedia("(max-width: 767.98px)").matches;
 }
+
+// --- browser notifications ---
+//
+// Standard Notification API (NOT Web Push). Fires while the dashboard
+// tab is open (foreground or background). Doesn't fire when the tab is
+// closed or the browser is killed — that requires Web Push + a service
+// worker + server-side push delivery, which is its own project.
+//
+// Trigger: agent transitions from a running-ish state to `waiting_input`
+// (the agent has produced its response and is waiting for you), OR to
+// `error`. We don't fire if the tab is currently visible AND focused
+// because the user can already see what's happening.
+//
+// Mobile note: iOS Safari only delivers notifications when the page is
+// added to the home screen as a PWA. In a regular Safari tab the API
+// exists but doesn't reliably fire. Android Chrome works in regular
+// tabs.
+const NOTIFY_PREF_KEY = "pirouette-notifications";
+const $notifyBtn = document.getElementById("notify-btn");
+
+function notificationsAvailable() {
+  return typeof window !== "undefined" && "Notification" in window;
+}
+
+function notificationsEnabled() {
+  return (
+    notificationsAvailable() &&
+    Notification.permission === "granted" &&
+    localStorage.getItem(NOTIFY_PREF_KEY) === "1"
+  );
+}
+
+function applyNotifyToggleStyle() {
+  if (!notificationsAvailable()) {
+    $notifyBtn.textContent = "notify: n/a";
+    $notifyBtn.title = "Notification API not supported in this browser";
+    $notifyBtn.disabled = true;
+    return;
+  }
+  if (Notification.permission === "denied") {
+    $notifyBtn.textContent = "notify: blocked";
+    $notifyBtn.title =
+      "Browser blocked notifications. Re-enable in your browser settings, then click again.";
+    return;
+  }
+  const enabled = notificationsEnabled();
+  $notifyBtn.textContent = `notify: ${enabled ? "on" : "off"}`;
+  if (enabled) {
+    $notifyBtn.classList.add("bg-base16-blue/20", "text-base16-blue");
+    $notifyBtn.classList.remove("bg-base16-300/40", "text-base16-500");
+  } else {
+    $notifyBtn.classList.remove("bg-base16-blue/20", "text-base16-blue");
+    $notifyBtn.classList.add("bg-base16-300/40", "text-base16-500");
+  }
+}
+
+async function toggleNotifications() {
+  if (!notificationsAvailable()) return;
+  if (Notification.permission === "denied") {
+    // Browsers don't show the prompt again once denied — user must clear
+    // the site setting in browser preferences. Tell them.
+    alert(
+      "Notifications were blocked for this site. To enable, open your browser's site settings for this URL and reset the notification permission.",
+    );
+    return;
+  }
+  const currentlyEnabled = notificationsEnabled();
+  if (currentlyEnabled) {
+    localStorage.setItem(NOTIFY_PREF_KEY, "0");
+    applyNotifyToggleStyle();
+    return;
+  }
+  // Not enabled yet — either need permission or already have it.
+  if (Notification.permission === "default") {
+    const result = await Notification.requestPermission();
+    if (result !== "granted") {
+      applyNotifyToggleStyle();
+      return;
+    }
+  }
+  localStorage.setItem(NOTIFY_PREF_KEY, "1");
+  applyNotifyToggleStyle();
+  // Confirm-fire so the user can see what notifications will look like.
+  try {
+    const n = new Notification("pirouette notifications enabled", {
+      body: "You'll get a ping when an agent finishes its turn.",
+      tag: "pirouette-test",
+    });
+    setTimeout(() => n.close(), 3000);
+  } catch {
+    /* some platforms throw if not in a secure context, etc. */
+  }
+}
+
+$notifyBtn.addEventListener("click", toggleNotifications);
+applyNotifyToggleStyle();
+
+/** Decide whether to suppress a notification. We don't notify if the
+ *  user is actively viewing the dashboard — they can already see what
+ *  happened. "Actively viewing" means tab is visible AND window has
+ *  focus (a backgrounded-but-focused tab still counts as "watching"
+ *  because the user could be looking at the OS notifications instead). */
+function shouldFireNotification() {
+  if (!notificationsEnabled()) return false;
+  if (document.visibilityState === "visible" && document.hasFocus()) return false;
+  return true;
+}
+
+function maybeNotifyStateChange(agent, prevState, newState) {
+  // Only the meaningful transitions. Filter out boot/startup runs of
+  // "running" -> "waiting_input" that happen before we have a prevState
+  // (e.g. on first-load WS replay).
+  if (!prevState) return;
+  if (prevState === newState) return;
+
+  let title = null;
+  let body = null;
+  if (newState === "waiting_input") {
+    title = `${agent.name} — your turn`;
+    body = "Agent finished its turn and is waiting for input.";
+  } else if (newState === "error") {
+    title = `${agent.name} — error`;
+    body = agent.errorMessage || "Agent hit an error. Open the dashboard to see details.";
+  }
+  if (!title) return;
+  if (!shouldFireNotification()) return;
+
+  try {
+    const n = new Notification(title, {
+      body,
+      tag: `pirouette-agent-${agent.id}`, // collapses repeated notifs for the same agent
+    });
+    n.onclick = () => {
+      window.focus();
+      selectAgent(agent.id);
+      n.close();
+    };
+  } catch {
+    /* ignore — notifications can fail in non-secure contexts, etc. */
+  }
+}
 if (localStorage.getItem("pirouette-vim-mode") === "1" && !isMobileViewport()) {
   setVimEnabled(true);
 } else {
@@ -457,6 +598,7 @@ function handleWsMessage(envelope) {
 
     case "agent_state_change": {
       const agent = agents.find((a) => a.id === envelope.agentId);
+      const prevState = agent?.state;
       if (agent) {
         agent.state = envelope.state;
         renderAgentList();
@@ -469,6 +611,11 @@ function handleWsMessage(envelope) {
           fetchStats(envelope.agentId);
         }
       }
+      // Browser notification: agent just transitioned from "running" (or
+      // similar in-progress state) to "waiting_input" (turn complete).
+      // Or to "error". The notify helper itself decides whether to fire
+      // based on permission + visibility — see app.js notification block.
+      if (agent) maybeNotifyStateChange(agent, prevState, envelope.state);
       break;
     }
 

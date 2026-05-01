@@ -174,7 +174,22 @@
           "Times New Roman",
           serif;
         line-height: 1.55;
+        /* Wrap long unbreakable strings (URLs, file paths, hashes) so
+           they don't push the message bubble (and thereby the page)
+           past the viewport edge on narrow screens. `anywhere` only
+           breaks where it would otherwise overflow, so normal prose
+           flow is unaffected. Code blocks (`pre`, `table`) opt out
+           below because they have their own `overflow-x: auto`. */
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }
+      .md pre, .md pre code, .md table { overflow-wrap: normal; word-break: normal; }
+
+      /* Same wrap behaviour for the user-message and assistant-fallback
+         bubbles, which use a plain `<pre class="whitespace-pre-wrap">`
+         instead of the markdown renderer. `whitespace-pre-wrap` already
+         wraps spaces; this lets us also break unbreakable runs. */
+      #messages pre.whitespace-pre-wrap { overflow-wrap: anywhere; word-break: break-word; }
       /* Color palette for markdown elements — matches pi-coding-agent's
        * theme/dark.json semantics: headings yellow, code accent cyan,
        * code blocks green, links blue, list markers accent cyan. Uses
@@ -347,6 +362,22 @@
       <div class="min-h-[56px] md:h-[88px] px-4 py-3 border-b border-base16-300 flex items-center justify-between gap-2">
         <h1 class="text-xl font-bold text-base16-600 font-display">pirouette</h1>
 
+        <div class="flex gap-1.5 flex-none">
+        <!-- Browser-notification toggle. Click to request permission +
+             toggle. When enabled, an agent finishing its turn (transition
+             to `waiting_input`) fires a `Notification` if the dashboard
+             tab isn't currently visible-and-focused. Uses the standard
+             Notification API — fires only while the tab is open (foreground
+             or background). For "notify even when the tab is closed" you
+             want Web Push, which is a bigger build-out. -->
+        <button
+          id="notify-btn"
+          class="text-xs px-2 py-1 rounded bg-base16-300/40 text-base16-500 hover:bg-base16-300/70 cursor-pointer font-mono"
+          title="Notify when an agent finishes its turn (only fires while this tab is open)"
+        >
+          notify: off
+        </button>
+
         <!-- Theme picker. Ported from neevparikh.github.io: clicking `theme`
              opens a search + list panel; scheme buttons flip the active
              light/dark slot and persist to localStorage. "system dark mode"
@@ -379,6 +410,7 @@
             </button>
             <div id="theme-list" class="overflow-y-auto flex-1"></div>
           </div>
+        </div>
         </div>
       </div>
 

@@ -5,6 +5,37 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.3.5 — Browser notifications + mobile message wrap
+
+### Added
+
+- **Browser notifications** when an agent finishes its turn (transitions
+  to `waiting_input`) or hits an error. Suppressed when the dashboard
+  tab is currently visible-and-focused (you can already see). Same-agent
+  notifications collapse via the Notification `tag` attribute. Clicking
+  a notification focuses the dashboard tab and selects the agent.
+  - Toggle: new `notify: off/on/blocked/n/a` button next to `theme` in
+    the sidebar header. First click requests permission and fires a
+    one-shot confirmation notification so you can see what they look
+    like. Persists in `localStorage` (key `pirouette-notifications`).
+  - Uses the standard `Notification` API — fires only while the
+    dashboard tab is open (foreground or background). For "alert me
+    even when the tab is closed," you'd need Web Push (service worker
+    + VAPID keys + server-side delivery + iOS PWA install). That's a
+    separate, larger build that we deliberately punted.
+
+### Fixed
+
+- **Long unbreakable strings (URLs, file paths, hashes) in messages
+  no longer push the bubble past the viewport** on narrow screens.
+  Added `overflow-wrap: anywhere; word-break: break-word` to `.md`
+  content and the user/assistant `<pre class="whitespace-pre-wrap">`
+  fallbacks. Code blocks (`pre`, `pre code`) and tables explicitly
+  opt out via `overflow-wrap: normal` so they keep their existing
+  inner `overflow-x: auto` behaviour rather than wrapping mid-token.
+
+---
+
 ## 0.3.4 — Mobile UI iteration: shorter placeholder, header alignment
 
 Follow-ups from the first round of phone testing on 0.3.3:
