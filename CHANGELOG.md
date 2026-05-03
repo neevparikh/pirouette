@@ -5,6 +5,20 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.3.6 — Notify button fits the sidebar
+
+### Fixed
+
+- The 0.3.5 notify button used a multi-word label (`notify: off` /
+  `notify: on` / `notify: blocked` / `notify: n/a`) that varied enough
+  in width to push the sidebar header (`pirouette` heading + `notify`
+  + `theme`) past the 256-px sidebar at md+ widths. Now uses a single
+  `notify` label with state expressed through background color (gray
+  off / blue on / red blocked / faded n/a) and the title attribute,
+  matching the pattern of the other action pills.
+
+---
+
 ## 0.3.5 — Browser notifications + mobile message wrap
 
 ### Added

@@ -201,25 +201,42 @@ function notificationsEnabled() {
 }
 
 function applyNotifyToggleStyle() {
+  // Single-word label ("notify") with state expressed through color
+  // and the title attribute. The earlier multi-word "notify: off" /
+  // "notify: blocked" labels varied enough in width that, combined with
+  // "pirouette" + "theme" in the same row, the group could overflow the
+  // 256-px sidebar. Matches the pattern of the `raw` action pill.
+  $notifyBtn.textContent = "notify";
+
+  // Reset state classes each time — simpler than tracking what was
+  // previously applied. We toggle between three visual states: blue
+  // (enabled), red (blocked at browser level), default-gray (off).
+  $notifyBtn.classList.remove(
+    "bg-base16-blue/20", "text-base16-blue",
+    "bg-base16-red/20", "text-base16-red",
+    "bg-base16-300/40", "text-base16-500",
+    "opacity-50", "cursor-not-allowed",
+  );
+
   if (!notificationsAvailable()) {
-    $notifyBtn.textContent = "notify: n/a";
     $notifyBtn.title = "Notification API not supported in this browser";
+    $notifyBtn.classList.add("bg-base16-300/40", "text-base16-500", "opacity-50", "cursor-not-allowed");
     $notifyBtn.disabled = true;
     return;
   }
   if (Notification.permission === "denied") {
-    $notifyBtn.textContent = "notify: blocked";
     $notifyBtn.title =
       "Browser blocked notifications. Re-enable in your browser settings, then click again.";
+    $notifyBtn.classList.add("bg-base16-red/20", "text-base16-red");
     return;
   }
   const enabled = notificationsEnabled();
-  $notifyBtn.textContent = `notify: ${enabled ? "on" : "off"}`;
+  $notifyBtn.title = enabled
+    ? "Notifications enabled. Click to disable."
+    : "Click to enable browser notifications when an agent finishes its turn.";
   if (enabled) {
     $notifyBtn.classList.add("bg-base16-blue/20", "text-base16-blue");
-    $notifyBtn.classList.remove("bg-base16-300/40", "text-base16-500");
   } else {
-    $notifyBtn.classList.remove("bg-base16-blue/20", "text-base16-blue");
     $notifyBtn.classList.add("bg-base16-300/40", "text-base16-500");
   }
 }
