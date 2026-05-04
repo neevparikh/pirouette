@@ -396,7 +396,7 @@ function renderModelList(filter = "") {
   const matches = modelList.filter((m) => m.qualifiedId.toLowerCase().includes(f));
   if (matches.length === 0) {
     $modelList.innerHTML =
-      '<div class="px-3 py-2 text-xs italic text-base16-400">no matches</div>';
+      '<div class="px-3 py-2 text-xs italic text-base16-500">no matches</div>';
     return;
   }
   // Group by provider so the dropdown is easier to scan.
@@ -412,7 +412,7 @@ function renderModelList(filter = "") {
     for (const m of grouped[provider]) {
       const isCurrent = m.qualifiedId === modelPickerCurrent;
       const reasoning = m.reasoning ? ' <span class="text-[9px] text-base16-purple ml-1">reasoning</span>' : "";
-      const ctx = m.contextWindow > 0 ? ` <span class="text-[9px] text-base16-400">${formatTokens(m.contextWindow)}</span>` : "";
+      const ctx = m.contextWindow > 0 ? ` <span class="text-[9px] text-base16-500">${formatTokens(m.contextWindow)}</span>` : "";
       const checkmark = isCurrent ? '<span class="text-base16-green mr-1">✓</span>' : '<span class="mr-1"> </span>';
       const activeClass = isCurrent
         ? "bg-base16-green/10 text-base16-700"
@@ -798,7 +798,7 @@ function renderAgentRow(a, depth = 0) {
     subline = `<div class="text-xs text-base16-cyan truncate">▶ ${escHtml(activity.tool)}${activity.subtitle ? " · " + escHtml(activity.subtitle).slice(0, 40) : ""}</div>`;
   } else {
     const label = a.state === "waiting_input" ? "your turn" : a.state;
-    subline = `<div class="text-xs text-base16-400 truncate">${escHtml(label)} · <span class="text-base16-500">${escHtml(shortModel)}</span></div>`;
+    subline = `<div class="text-xs text-base16-500 truncate">${escHtml(label)} · <span class="text-base16-500">${escHtml(shortModel)}</span></div>`;
   }
   const dot = isActiveState(a.state)
     ? `${statusColor(a.state)} pulse-dot`
@@ -863,7 +863,7 @@ function orderAgentsAsTree(projectAgents) {
 function renderAgentList() {
   if (projects.length === 0) {
     $agentList.innerHTML =
-      '<div class="p-4 text-base16-400 text-sm italic">no projects yet</div>';
+      '<div class="p-4 text-base16-500 text-sm italic">no projects yet</div>';
     return;
   }
 
@@ -902,11 +902,11 @@ function renderAgentList() {
           ? orderAgentsAsTree(as)
               .map(({ agent, depth }) => renderAgentRow(agent, depth))
               .join("")
-          : `<div class="pl-6 pr-4 py-2 text-xs text-base16-400 italic">no agents — type <code class="text-base16-orange">@name</code> below</div>`;
+          : `<div class="pl-6 pr-4 py-2 text-xs text-base16-500 italic">no agents — type <code class="text-base16-orange">@name</code> below</div>`;
       const delBtn =
         p.name === "scratchpad"
           ? ""
-          : `<button class="text-base16-400 hover:text-base16-red text-sm ml-1 cursor-pointer" data-project-delete="${escHtml(p.name)}" title="delete project">×</button>`;
+          : `<button class="text-base16-500 hover:text-base16-red text-sm ml-1 cursor-pointer" data-project-delete="${escHtml(p.name)}" title="delete project">×</button>`;
       return `
         <div>
           <div class="flex items-center justify-between pl-2 pr-3 py-2 ${isSelected ? "bg-base16-300/30" : ""} hover:bg-base16-300/20">
@@ -914,7 +914,7 @@ function renderAgentList() {
               <span class="text-base16-500 text-xs w-3 flex-none" data-project-toggle="${escHtml(p.name)}">${arrow}</span>
               <div class="min-w-0 flex-1">
                 <div class="text-sm text-base16-700 font-bold truncate font-display">${escHtml(p.name)}</div>
-                <div class="text-xs text-base16-400 truncate">${subtitle} · ${as.length} agent${as.length === 1 ? "" : "s"}</div>
+                <div class="text-xs text-base16-500 truncate">${subtitle} · ${as.length} agent${as.length === 1 ? "" : "s"}</div>
               </div>
             </button>
             ${delBtn}
@@ -995,10 +995,10 @@ function formatStatsLine(stats) {
 
 /** Matches pi's color bands: error > 90%, warning > 70%, neutral otherwise. */
 function statsColorClass(pct) {
-  if (pct == null) return "text-base16-400";
+  if (pct == null) return "text-base16-500";
   if (pct > 90) return "text-base16-red";
   if (pct > 70) return "text-base16-orange";
-  return "text-base16-400";
+  return "text-base16-500";
 }
 
 function renderAgentHeader() {
@@ -1032,7 +1032,7 @@ function renderAgentHeader() {
 
   const activity = currentActivity[agent.id];
   let statusText = agent.state;
-  let statusColorClass = "text-base16-400";
+  let statusColorClass = "text-base16-500";
   if (agent.state === "running" && activity) {
     const elapsed = Math.floor((Date.now() - activity.since) / 1000);
     const elapsedStr = elapsed > 1 ? ` · ${elapsed}s` : "";
@@ -1110,7 +1110,7 @@ function renderMessages() {
   if (!selectedAgentId) {
     blocks = [{
       key: PLACEHOLDER_SELECT_KEY,
-      html: '<div data-msg-key="placeholder:select" class="text-base16-400 text-xs italic text-center mt-8">select an agent from the sidebar, or type <code class="text-base16-orange">@name your message</code> below</div>',
+      html: '<div data-msg-key="placeholder:select" class="text-base16-500 text-xs italic text-center mt-8">select an agent from the sidebar, or type <code class="text-base16-orange">@name your message</code> below</div>',
     }];
   } else {
     const state = stateFor(selectedAgentId);
@@ -1119,7 +1119,7 @@ function renderMessages() {
     if (isEmpty) {
       blocks = [{
         key: PLACEHOLDER_EMPTY_KEY,
-        html: '<div data-msg-key="placeholder:empty" class="text-base16-400 text-xs italic text-center mt-8">no messages yet — send one below</div>',
+        html: '<div data-msg-key="placeholder:empty" class="text-base16-500 text-xs italic text-center mt-8">no messages yet — send one below</div>',
       }];
     } else {
       blocks = renderTranscriptBlocks(state, expandedItems, { rawAssistant: rawView });
@@ -1202,7 +1202,7 @@ function renderSendModeButton() {
   $sendModeBtn.className =
     sendMode === "steer"
       ? "text-[10px] px-1 py-0.5 rounded text-base16-blue hover:bg-base16-blue/10 cursor-pointer font-mono whitespace-nowrap"
-      : "text-[10px] px-1 py-0.5 rounded text-base16-400 hover:bg-base16-300/30 cursor-pointer font-mono whitespace-nowrap";
+      : "text-[10px] px-1 py-0.5 rounded text-base16-500 hover:bg-base16-300/30 cursor-pointer font-mono whitespace-nowrap";
 }
 
 function toggleSendMode() {
@@ -1577,13 +1577,13 @@ function renderMentionPopup() {
         return `<button class="w-full text-left px-3 py-2 flex items-center gap-2 hover:bg-base16-300/40 cursor-pointer ${active}" data-idx="${i}">
           <span class="text-base16-green text-xs">+</span>
           <span class="text-xs text-base16-700">create <span class="text-base16-orange">@${escHtml(m.name)}</span></span>
-          <span class="text-[10px] text-base16-400 ml-auto">in ${escHtml(m.project)}</span>
+          <span class="text-[10px] text-base16-500 ml-auto">in ${escHtml(m.project)}</span>
         </button>`;
       }
       return `<button class="w-full text-left px-3 py-2 flex items-center gap-2 hover:bg-base16-300/40 cursor-pointer ${active}" data-idx="${i}">
         <span class="w-1.5 h-1.5 rounded-full flex-none ${statusColor(m.state)}"></span>
         <span class="text-xs text-base16-700"><span class="text-base16-orange">@</span>${escHtml(m.name)}</span>
-        <span class="text-[10px] text-base16-400 ml-auto">${escHtml(m.project)}</span>
+        <span class="text-[10px] text-base16-500 ml-auto">${escHtml(m.project)}</span>
       </button>`;
     })
     .join("");

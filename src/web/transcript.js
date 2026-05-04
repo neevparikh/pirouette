@@ -274,12 +274,12 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     const isExpanded = expanded.has(key);
     const preview = msg.content.split("\n")[0].slice(0, 120);
     const hasMore = msg.content.length > preview.length;
-    const chevron = hasMore ? `<span class="text-[9px] text-base16-400 ml-auto">${isExpanded ? "▼" : "▶"}</span>` : "";
+    const chevron = hasMore ? `<span class="text-[9px] text-base16-500 ml-auto">${isExpanded ? "▼" : "▶"}</span>` : "";
     return `
       <div class="message-enter px-2 py-0.5" data-msg-key="${key}">
         <div class="flex items-baseline gap-2 text-xs italic cursor-pointer hover:bg-base16-200/50 rounded px-1 py-0.5" data-toggle="${hasMore ? key : ""}">
           <span class="text-base16-500">thinking</span>
-          <span class="text-base16-400 truncate italic font-sans">${escHtml(preview)}${hasMore && !isExpanded ? "…" : ""}</span>
+          <span class="text-base16-500 truncate italic font-sans">${escHtml(preview)}${hasMore && !isExpanded ? "…" : ""}</span>
           ${chevron}
         </div>
         ${hasMore ? `<pre class="mt-1 text-[11px] text-base16-500 italic bg-base16-100 rounded p-2 overflow-x-auto whitespace-pre-wrap font-sans ${isExpanded ? "" : "hidden"}" data-expand="${key}">${escHtml(msg.content)}</pre>` : ""}
@@ -291,7 +291,7 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     const key = messageKey(msg, idx);
     const isExpanded = expanded.has(key);
     const hasBody = desc.body && desc.body.length > 0;
-    const chevron = hasBody ? `<span class="text-[9px] text-base16-400 ml-auto">${isExpanded ? "▼" : "▶"}</span>` : "";
+    const chevron = hasBody ? `<span class="text-[9px] text-base16-500 ml-auto">${isExpanded ? "▼" : "▶"}</span>` : "";
     const bodyHtml = !hasBody
       ? ""
       : desc.bodyIsRich
@@ -303,7 +303,7 @@ export function renderMessage(msg, idx, expandedItems, opts) {
         <div class="flex items-baseline gap-2 text-xs font-mono ${clickable} rounded px-1 py-0.5" data-toggle="${hasBody ? key : ""}">
           <span class="text-base16-cyan">▶</span>
           <span class="text-base16-600 font-semibold">${escHtml(desc.header)}</span>
-          ${desc.subtitle ? `<span class="text-base16-400 truncate">${escHtml(desc.subtitle)}</span>` : ""}
+          ${desc.subtitle ? `<span class="text-base16-500 truncate">${escHtml(desc.subtitle)}</span>` : ""}
           ${chevron}
         </div>
         ${bodyHtml}
@@ -323,7 +323,7 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     const label = summary
       ? `${icon} ${msg.toolName || "done"} — ${summary}`
       : `${icon} ${msg.toolName || "done"}`;
-    const chevron = hasBody ? `<span class="text-[9px] text-base16-400 ml-auto">${isExpanded ? "▼" : "▶"}</span>` : "";
+    const chevron = hasBody ? `<span class="text-[9px] text-base16-500 ml-auto">${isExpanded ? "▼" : "▶"}</span>` : "";
     const bodyHtml = hasBody
       ? `<pre class="mt-1 text-[11px] text-base16-500 bg-base16-100 rounded p-2 overflow-x-auto whitespace-pre-wrap max-h-64 ${isExpanded ? "" : "hidden"}" data-expand="${key}">${escHtml(contentStr)}</pre>`
       : "";
@@ -388,7 +388,7 @@ function renderToolRun(run, firstIdx, expanded, renderOpts) {
   return `
     <div class="message-enter px-2 py-0.5" data-msg-key="${key}">
       <div class="flex items-baseline gap-2 text-xs font-mono cursor-pointer hover:bg-base16-200/50 rounded px-1 py-0.5" data-toggle="${key}">
-        <span class="text-base16-400">${arrow}</span>
+        <span class="text-base16-500">${arrow}</span>
         <span class="${errColor}">${escHtml(header)}</span>
       </div>
       ${isExpanded ? `<div class="ml-3 border-l border-base16-300/50 pl-2" data-expand="${key}">${bodyHtml}</div>` : ""}

@@ -5,6 +5,40 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.3.7 — Readable muted text on light themes
+
+### Fixed
+
+Muted text was invisible on some light base16/base24 themes (notably
+`base24-softstack-light`). All 31 `text-base16-400` / `placeholder-
+base16-400` usages bumped to `text-base16-500` / `placeholder-base16-
+500`.
+
+The root cause: `text-base16-400` resolves to `base03` from the
+source scheme, which by base16 convention is "comments" and varies a
+lot between themes. Some themes (softstack-light) use it as a deeper
+bg-tint that's essentially indistinguishable from `base00` (the bg)—
+render any text in that color and you get an invisible row. The
+`base04` slot (= our `text-base16-500`) is the conventional
+"secondary foreground" and reliably contrasts with the bg across
+light and dark themes.
+
+Net effect:
+
+- Light themes: muted text actually visible. Big improvement on
+  softstack-light, gruvbox-light, and any other theme with a
+  bg-tinted base03.
+- Dark themes: muted text slightly more prominent than before (e.g.
+  on softstack-dark, 400 was a medium gray; 500 is light cream). Still
+  visibly muted relative to primary text (base16-700), just less
+  recessed. If you preferred the subtler look we can introduce a
+  `text-base16-muted` token with per-theme contrast checking later.
+
+`bg-base16-400` and `border-base16-400` (2 usages) preserved — their
+contrast against the bg is intentional in those contexts.
+
+---
+
 ## 0.3.6 — Notify button fits the sidebar
 
 ### Fixed

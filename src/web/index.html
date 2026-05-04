@@ -419,7 +419,7 @@
            one step from the original `text-xs` / `text-[10px]` after the
            sidebar felt too dense. -->
       <div class="flex-1 overflow-y-auto" id="agent-list">
-        <div class="p-4 text-base16-400 text-sm italic">loading…</div>
+        <div class="p-4 text-base16-500 text-sm italic">loading…</div>
       </div>
 
       <!-- Footer: new-project button (agents are created via the input bar) -->
@@ -457,15 +457,15 @@
         <div class="min-w-0 flex-1">
           <div class="flex items-baseline gap-2">
             <span id="agent-name" class="text-base16-600 font-bold font-display">select an agent</span>
-            <span id="agent-status" class="text-xs text-base16-400 truncate"></span>
+            <span id="agent-status" class="text-xs text-base16-500 truncate"></span>
           </div>
-          <div id="agent-info" class="text-[10px] text-base16-400 mt-1 font-mono truncate hidden md:block"></div>
+          <div id="agent-info" class="text-[10px] text-base16-500 mt-1 font-mono truncate hidden md:block"></div>
           <!-- Live footer: tokens / context / cost / thinking. Populated by
                fetchStats() whenever the agent state changes or an agent is
                selected. Same data pi's TUI footer shows.
                Hidden on mobile to keep the header compact — you can still
                see the data on desktop or via the agent's own session. -->
-          <div id="agent-stats" class="text-[10px] text-base16-400 mt-0.5 font-mono truncate hidden md:block"></div>
+          <div id="agent-stats" class="text-[10px] text-base16-500 mt-0.5 font-mono truncate hidden md:block"></div>
         </div>
         <div class="flex gap-1 md:gap-2 flex-none flex-wrap justify-end">
           <!-- Global raw-view toggle. Off = rendered markdown (default).
@@ -506,7 +506,7 @@
 
       <!-- Messages -->
       <div id="messages" class="flex-1 overflow-y-auto px-3 md:px-6 py-3 md:py-4 space-y-3">
-        <div class="text-base16-400 text-xs italic text-center mt-8">
+        <div class="text-base16-500 text-xs italic text-center mt-8">
           select an agent from the sidebar or create a new one
         </div>
       </div>
@@ -531,7 +531,7 @@
         <div class="flex items-stretch gap-2">
           <textarea
             id="message-input"
-            class="flex-1 bg-base16-200 text-base16-700 border border-base16-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:border-base16-blue placeholder-base16-400"
+            class="flex-1 bg-base16-200 text-base16-700 border border-base16-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:border-base16-blue placeholder-base16-500"
             placeholder="@name your message — or select an agent"
             rows="1"
           ></textarea>
@@ -547,7 +547,7 @@
             </button>
             <button
               id="send-mode-btn"
-              class="hidden text-[10px] px-1 py-0.5 rounded text-base16-400 hover:text-base16-600 cursor-pointer font-mono whitespace-nowrap"
+              class="hidden text-[10px] px-1 py-0.5 rounded text-base16-500 hover:text-base16-600 cursor-pointer font-mono whitespace-nowrap"
               title="Click to switch between steer (interrupt) and follow-up (queue)"
             >mode: steer</button>
           </div>
@@ -557,7 +557,7 @@
              and a small toggle. Hidden text-only when vim is off so the
              input bar stays compact. -->
         <div class="flex items-center justify-between mt-1 text-[10px] font-mono">
-          <div id="vim-mode-label" class="text-base16-400">
+          <div id="vim-mode-label" class="text-base16-500">
             <!-- populated by VimMode.onModeChange — e.g. "-- NORMAL [2d] --" -->
           </div>
           <button
@@ -585,11 +585,11 @@
           class="w-full bg-base16-100 text-base16-700 border border-base16-300 rounded-lg px-3 py-2 text-sm mb-1 focus:outline-none focus:border-base16-blue"
           placeholder="https://github.com/user/repo"
         />
-        <p class="text-[10px] text-base16-400 mb-4">
+        <p class="text-[10px] text-base16-500 mb-4">
           Leave empty for a bare workspace (git-init'd). Agents in this project share this repo; each gets its own worktree + branch.
         </p>
         <div class="flex gap-2 justify-end">
-          <button id="proj-modal-cancel" class="px-4 py-2 rounded-lg text-base16-400 hover:text-base16-600 cursor-pointer text-sm">cancel</button>
+          <button id="proj-modal-cancel" class="px-4 py-2 rounded-lg text-base16-500 hover:text-base16-600 cursor-pointer text-sm">cancel</button>
           <button id="proj-modal-create" class="px-4 py-2 rounded-lg bg-base16-green/20 text-base16-green hover:bg-base16-green/30 cursor-pointer text-sm">create</button>
         </div>
       </div>
