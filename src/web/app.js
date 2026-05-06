@@ -913,7 +913,7 @@ function renderAgentList() {
             <button class="flex-1 flex items-center gap-1.5 text-left cursor-pointer min-w-0" data-project-select="${escHtml(p.name)}">
               <span class="text-base16-500 text-xs w-3 flex-none" data-project-toggle="${escHtml(p.name)}">${arrow}</span>
               <div class="min-w-0 flex-1">
-                <div class="text-sm text-base16-700 font-bold truncate font-display">${escHtml(p.name)}</div>
+                <div class="text-base text-base16-700 font-bold truncate font-display tracking-wider">${escHtml(p.name)}</div>
                 <div class="text-xs text-base16-500 truncate">${subtitle} · ${as.length} agent${as.length === 1 ? "" : "s"}</div>
               </div>
             </button>

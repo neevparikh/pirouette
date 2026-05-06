@@ -216,7 +216,7 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     return `
       <div class="message-enter flex justify-end" data-msg-key="${wrapKey}">
         <div class="max-w-[80%] bg-base16-blue/15 border border-base16-blue/20 rounded-xl px-4 py-2">
-          <pre class="whitespace-pre-wrap text-base16-700 text-sm font-sans">${escHtml(msg.content)}</pre>
+          <pre class="whitespace-pre-wrap text-base16-700 text-base font-sans">${escHtml(msg.content)}</pre>
         </div>
       </div>`;
   }
@@ -239,7 +239,7 @@ export function renderMessage(msg, idx, expandedItems, opts) {
       return `
         <div class="message-enter flex justify-start" data-msg-key="${wrapKey}">
           <div class="max-w-[90%] bg-base16-200 border border-base16-green/40 rounded-xl px-4 py-2">
-            <pre id="streaming-body" class="whitespace-pre-wrap text-base16-600 text-sm font-sans">${escHtml(msg.content)}<span class="animate-pulse text-base16-green streaming-cursor">▊</span></pre>
+            <pre id="streaming-body" class="whitespace-pre-wrap text-base16-600 text-base font-sans">${escHtml(msg.content)}<span class="animate-pulse text-base16-green streaming-cursor">▊</span></pre>
           </div>
         </div>`;
     }
@@ -247,8 +247,8 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     // — flipped via the `raw` button in the agent header. When on, every
     // assistant message renders as plain escaped markdown source.
     const body = rawAssistant
-      ? `<pre class="whitespace-pre-wrap text-base16-600 text-sm font-mono">${escHtml(msg.content)}</pre>`
-      : `<div class="md text-base16-600 text-sm">${renderMarkdown(msg.content)}</div>`;
+      ? `<pre class="whitespace-pre-wrap text-base16-600 text-base font-mono">${escHtml(msg.content)}</pre>`
+      : `<div class="md text-base16-600 text-base">${renderMarkdown(msg.content)}</div>`;
     return `
       <div class="message-enter flex justify-start" data-msg-key="${wrapKey}">
         <div class="max-w-[90%] bg-base16-200 border border-base16-300 rounded-xl px-4 py-2">

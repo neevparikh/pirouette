@@ -5,6 +5,25 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.3.8 — Roomier chat bubbles + sidebar project names
+
+### Changed
+
+Chat message bubbles bumped from `text-sm` (14px) to `text-base` (16px).
+Applies to user messages, assistant streaming bubbles, and finalized
+assistant messages (both the rendered-markdown and raw-source views).
+The previous size felt cramped relative to the bubble padding; 16px
+reads as a chat app rather than a TUI shrunken into a webview.
+
+Sidebar project names bumped to `text-base` (from `text-sm`) and got
+`tracking-wider` (0.05em letter-spacing). Zilla Slab Bold runs tight at
+small sizes — the extra spacing relaxes it so multi-character project
+names don't read as a solid wedge of glyphs.
+
+No behavioural changes; pure typography tuning.
+
+---
+
 ## 0.3.7 — Readable muted text on light themes
 
 ### Fixed
