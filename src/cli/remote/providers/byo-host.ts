@@ -291,18 +291,37 @@ export class ByoHostProvider implements HostProvider {
       `  home dir   ${state.homeDir ?? "\u2014"}`,
     ];
 
-    // Probe whether the tmux session is running on the remote. Quick
-    // best-effort check; don't fail status() on transient SSH errors.
+    // Probe several things in one round-trip:
+    //   1. is the home symlink intact and pointing at the persistent target?
+    //   2. is the pirouette tmux session running?
+    //   3. does the data dir exist and is the log file written?
+    // Output is line-by-line; we parse and emit health icons. Best-effort:
+    // don't fail status() on transient SSH errors.
     let coarse: ProviderStatus["state"] = "unknown";
-    try {
-      const { stdout } = await runSsh(
-        `tmux has-session -t pirouette 2>/dev/null && echo running || echo stopped`,
-        { target: this.target(), timeoutMs: 15_000 },
-      );
-      coarse = stdout.trim() === "running" ? "running" : "stopped";
-      extra.push(`  tmux       ${coarse}`);
-    } catch (err) {
-      extra.push(`  tmux       unreachable (${err instanceof Error ? err.message : err})`);
+    if (state.sshUser && state.homeDir && state.dataDir) {
+      const home = `/home/${state.sshUser}`;
+      const probe =
+        `if [ -L ${shellQuote(home)} ] && [ "$(readlink ${shellQuote(home)})" = ${shellQuote(state.homeDir)} ]; then echo SYMLINK_OK; else echo SYMLINK_BAD; fi; ` +
+        `tmux has-session -t pirouette 2>/dev/null && echo TMUX_RUNNING || echo TMUX_STOPPED; ` +
+        `if [ -d ${shellQuote(state.dataDir)} ]; then echo DATA_DIR_OK; else echo DATA_DIR_MISSING; fi`;
+      try {
+        const { stdout } = await runSsh(probe, {
+          target: this.target(),
+          timeoutMs: 15_000,
+        });
+        const lines = stdout.trim().split("\n").map((l) => l.trim());
+        const symlinkOk = lines.includes("SYMLINK_OK");
+        const tmuxRunning = lines.includes("TMUX_RUNNING");
+        const dataDirOk = lines.includes("DATA_DIR_OK");
+        coarse = tmuxRunning ? "running" : "stopped";
+        extra.push(
+          `  home swap  ${symlinkOk ? "\u2705 ok" : "\u26a0 not symlinked to home_dir (run \`pru setup\`?)"}`,
+        );
+        extra.push(`  data dir   ${dataDirOk ? "\u2705 present" : "\u26a0 missing"} (${state.dataDir})`);
+        extra.push(`  tmux       ${tmuxRunning ? "\u2705 running" : "\u26a0 stopped"}`);
+      } catch (err) {
+        extra.push(`  health     unreachable (${err instanceof Error ? err.message : err})`);
+      }
     }
 
     return {

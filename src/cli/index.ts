@@ -111,8 +111,8 @@ program
 
 program
   .command("ssh")
-  .description("Shell into the pirouette container (agent-forwarded). --host for the EC2 host.")
-  .option("--host", "SSH into the EC2 host instead of the container")
+  .description("Shell into the pirouette host (agent-forwarded). EC2: lands in container; --host for the EC2 host. byo-host: lands on the configured SSH alias.")
+  .option("--host", "EC2 only: SSH into the host instead of the container")
   .action(ssh);
 
 const projectCmd = program
@@ -165,17 +165,17 @@ program
 
 program
   .command("setup")
-  .description("Provision / resume the pirouette EC2 instance")
+  .description("Provision / resume the pirouette host (EC2 or byo-host, per provider.kind)")
   .action(setup);
 
 program
   .command("teardown")
-  .description("Stop the EC2 instance (EBS data volume preserved)")
+  .description("Stop the host. EC2: stops the instance (EBS preserved). byo-host: kills the tmux session.")
   .action(teardown);
 
 program
   .command("destroy")
-  .description("Terminate the EC2 instance (optionally delete EBS volume)")
+  .description("Destroy the host. EC2: terminates the instance. byo-host: clears local state. --delete-volume nukes the persistent volume on both.")
   .option("--delete-volume", "Also delete the persistent EBS data volume (destructive)")
   .option("-y, --yes", "Skip interactive confirmation")
   .action(destroy);
@@ -187,7 +187,7 @@ program
   .option("-n, --lines <n>", "Number of lines to show", "200")
   .option("--tmux", "Show the current pirouette tmux pane")
   .option("--entrypoint", "Show the container entrypoint startup log")
-  .option("--boot", "Show EC2 cloud-init output (host-level bootstrap)")
+  .option("--boot", "EC2 only: show cloud-init output (host-level bootstrap)")
   .action(logs);
 
 program

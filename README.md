@@ -14,12 +14,19 @@ its own git worktree so they can work on different branches in parallel.
   features, no public access path.
 - **Long-running.** Agents survive across SSH disconnects, browser
   refreshes, container restarts, even instance reboots (state lives on
-  a persistent EBS volume).
+  a persistent volume).
 - **Pi-native.** Uses [pi-coding-agent](https://github.com/badlogic/pi-mono)
   directly — same session format, same extensions, same provider plumbing.
   If you've used pi locally you'll recognize the model.
 - **Web + CLI.** Browser dashboard for chatting; `pru` for provisioning,
   shelling in, viewing logs, shipping local changes.
+- **Provider-pluggable.** Two host providers today:
+  - `ec2` (default): pirouette owns the lifecycle — provisions an EC2
+    instance, attaches an EBS data volume, runs the container.
+  - `byo-host`: you provide an SSH-reachable Linux host (e.g. a METR
+    k8s devpod); pirouette installs itself there over SSH. No AWS calls,
+    no Docker.
+  Toggle via `provider.kind` in `~/.pirouette/config.toml`.
 
 ## What this isn't
 
@@ -86,10 +93,85 @@ To rebuild from scratch:
 pru destroy [--delete-volume]   # terminate; optionally also delete EBS
 ```
 
+## Quick start (byo-host)
+
+If you already have an SSH-reachable Linux box you want to use — a
+METR k8s devpod, a long-running personal VM, your team's shared
+researcher box — the byo-host provider points pirouette at it without
+any provisioning. Pirouette uploads a bootstrap script over SSH that
+handles the home migration, pirouette install, and tmux session.
+
+The remote needs `node`, `npm`, `git`, `tmux`, `sshd`, a non-root
+sudo-able user, and (recommended) `yadm` for dotfiles. Use the same
+image you'd use for `pru setup` — the entrypoint contract is
+identical (see [Container image requirements](#container-image-requirements)).
+
+One-time setup:
+
+1. Make sure you have an `~/.ssh/config` entry for the host (e.g.
+   `Host gpu` with `HostName`, `User`, etc.). Test it: `ssh gpu echo ok`.
+2. Write `~/.pirouette/config.toml`:
+
+   ```toml
+   [provider]
+   kind = "byo-host"
+
+   [provider.byo-host]
+   ssh_alias       = "gpu"             # entry in ~/.ssh/config
+   persistent_root = "/data"           # mount-point of the persistent volume
+   user            = "neev"            # SSH login user
+   # home_dir = ""                     # optional override; default ${persistent_root}/home/${user}
+   # data_dir = ""                     # optional override; default ${persistent_root}/pirouette/data
+
+   [container]
+   npm_package = "@neevparikh/pirouette@latest"
+
+   [dotfiles]
+   clone_url           = "https://github.com/you/dotfiles.git"  # optional
+   authorized_keys_url = "https://github.com/you.keys"          # recommended
+   ```
+
+Then:
+
+```bash
+pru preflight     # ssh alias resolves, ssh probe, persistent root exists, tooling present
+pru setup         # upload bootstrap, run it, push secrets, wait for /api/health
+```
+
+Laptop access goes through an SSH tunnel (the server binds `127.0.0.1`
+on the remote — see [Trust model](#trust-model)):
+
+```bash
+# Easiest: add a LocalForward line to your ssh_config:
+#   Host gpu
+#     LocalForward 7777 localhost:7777
+# Then any `ssh gpu` opens the tunnel as a side-effect.
+export PIROUETTE_URL=http://localhost:7777
+pru open          # dashboard
+pru list          # CLI
+```
+
+Day-to-day (same commands as the EC2 path; provider-aware under the hood):
+
+```bash
+pru ssh           # shell on the remote (no host/container split)
+pru logs -f       # tail the server log
+pru status        # ssh probe + home-symlink health + tmux state
+pru sync          # local rebuild -> remote install -> tmux restart
+pru sync --npm    # upgrade to latest published package
+pru sync --secrets   # re-push laptop pi auth state
+pru teardown      # kill the pirouette tmux session (host stays up)
+pru destroy       # clear local state (use --delete-volume to also rm -rf the persistent dirs)
+```
+
+Provisioning the devpod itself, GPU allocation, etc. — those are your
+responsibility (use whatever you already use, e.g. METR's `devpod` TUI).
+Pirouette doesn't touch the pod lifecycle.
+
 ## Quick start (local dev)
 
-For developing pirouette itself, or running agents locally without an
-EC2 box:
+For developing pirouette itself, or running agents locally without any
+remote host:
 
 ```bash
 pirouette server                # binds 127.0.0.1:7777
@@ -295,23 +377,28 @@ the two-line manual recipe is clearer than `pru open --tunnel` magic.
 
 Pirouette has no application-layer authentication. The HTTP and WebSocket
 APIs are wide open to anyone who can reach the listener. What keeps that
-narrow today:
+narrow today depends on the provider:
 
-- **AWS security group** — only port 22 inbound, only from the source
-  SG you configure (e.g. a Tailscale subnet router).
-- **SSH key** — required to open the port-forward to the container.
+- **`ec2` provider:** AWS security group (only port 22 inbound, only
+  from the source SG you configure, e.g. a Tailscale subnet router) +
+  the SSH key required to open the port-forward to the container. The
+  container binds `0.0.0.0:7777` (Docker port-mapping needs it); the SG
+  + SSH layer is the actual perimeter.
+- **`byo-host` provider:** the bootstrap binds the server to
+  `127.0.0.1` on the remote. The only way in is an SSH tunnel from
+  your laptop; the remote's network can't reach the listener at all.
+  No 0.0.0.0 exposure even on a shared k8s pod network.
+- **`pirouette server` (local-dev):** binds `127.0.0.1` for the same
+  reason.
 - **Same-origin web app** — the dashboard is served from the same
   listener as the API. Cross-origin requests are rejected by `Host`
   validation (HTTP) and `Origin` validation (WebSocket); there are no
-  `Access-Control-Allow-*` headers.
-- **Loopback bind by default** — `pirouette server` (local-dev) binds
-  `127.0.0.1` only. The container path explicitly opts into `0.0.0.0`
-  via `PIROUETTE_HOST` because Docker port-mapping requires it; the SG
-  is what gates external reachability there.
+  `Access-Control-Allow-*` headers. (DNS-rebinding defense; not auth.)
 
-In practice: **anyone who can establish a TCP connection to the dashboard
-port has shell access on your container.** The agents have full
-bash/edit/write tools by design. The SG + SSH tunnel are the perimeter.
+In practice: **anyone who can establish a TCP connection to the
+dashboard port has shell access on the host pirouette runs on.** The
+agents have full bash/edit/write tools by design. The SG + SSH tunnel
+(EC2) or SSH-tunnel-only access (byo-host) is the perimeter.
 
 ### Things you're trusting (the supply chain)
 
