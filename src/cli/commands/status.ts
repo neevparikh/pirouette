@@ -1,7 +1,6 @@
-/** pru status — show remote instance + local server + agent status. */
+/** pru status — show host (provider-specific) + local server + agent status. */
 import { apiGet } from "../api.js";
-import { getConfig } from "../../config.js";
-import { getInstance } from "../remote/aws.js";
+import { getProvider } from "../remote/provider.js";
 import { loadRemoteState } from "../remote/state.js";
 
 interface Agent {
@@ -12,24 +11,24 @@ interface Agent {
 }
 
 export async function status(): Promise<void> {
-  // ---- remote (best-effort; skip if no state / no AWS creds) ----
+  // ---- remote host (provider-specific; best-effort) ----
   const state = loadRemoteState();
-  if (state.instanceId) {
+  const provisioned = Boolean(state.instanceId || state.volumeId);
+  if (provisioned) {
     try {
-      const inst = await getInstance(state.instanceId, getConfig());
-      if (inst) {
+      const s = await getProvider().status();
+      // Multi-line format only when we have real instance info to show.
+      // "absent" / "unknown" (AWS query error) get the one-liner with the
+      // detail message inline — matches pre-refactor behaviour.
+      if (s.extraLines && s.extraLines.length > 0) {
         console.log(`remote:`);
-        console.log(`  instance   ${inst.id}  (${inst.state})`);
-        console.log(`  ip         ${inst.privateIp ?? "—"}`);
-        console.log(`  az         ${inst.availabilityZone}`);
-        console.log(`  type       ${inst.instanceType}`);
-        if (state.volumeId) console.log(`  volume     ${state.volumeId}`);
+        for (const line of s.extraLines) console.log(line);
         console.log("");
       } else {
-        console.log(`remote:    instance ${state.instanceId} not found\n`);
+        console.log(`remote:    ${s.detail}\n`);
       }
     } catch (err) {
-      console.log(`remote:    AWS query failed (${err instanceof Error ? err.message : err})\n`);
+      console.log(`remote:    ${err instanceof Error ? err.message : err}\n`);
     }
   }
 
@@ -47,7 +46,7 @@ export async function status(): Promise<void> {
       }
     }
   } catch (err) {
-    if (state.instanceId) {
+    if (provisioned) {
       console.log(`server:    unreachable (${err instanceof Error ? err.message : err})`);
       console.log("           try:  pru open    # set up SSH port-forward");
     } else {
