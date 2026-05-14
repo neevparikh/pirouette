@@ -14,6 +14,15 @@ import { fileURLToPath } from "node:url";
 import { parse as parseToml } from "smol-toml";
 
 export interface PirouetteConfig {
+  /** Which host-provider implementation to use. "ec2" (default) means
+   *  the AWS+Docker path: `pru setup` provisions an EC2 instance, mounts
+   *  an EBS data volume, runs the container, etc. New providers (e.g.
+   *  "byo-host") plug in here in later phases without breaking back-compat
+   *  for existing configs — an absent `[provider]` table reads as "ec2".
+   *  See docs/plans/2026-05-13-provider-abstraction.md. */
+  provider: {
+    kind: "ec2";
+  };
   aws: {
     profile: string;
     region: string;
@@ -105,6 +114,7 @@ export interface PirouetteConfig {
  *  Deliberately empty for values that tie the tool to a specific AWS
  *  environment — those must come from `~/.pirouette/config.toml`. */
 const BUILTIN_DEFAULTS: PirouetteConfig = {
+  provider: { kind: "ec2" },
   aws: {
     profile: "default",
     region: "us-west-2",
