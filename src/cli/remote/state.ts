@@ -19,29 +19,43 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { homedir } from "node:os";
 import path from "node:path";
 
-/** Provider kinds that can stamp a record. Extended in Phase 2 to include
- *  `"byo-host"`. Kept as a string union (not just `"ec2"`) so the migration
- *  shim can read forward-compatible state files without choking. */
-export type ProviderKind = "ec2";
+/** Provider kinds that can stamp a record. Kept as a string union so the
+ *  migration shim can read forward-compatible state files without choking. */
+export type ProviderKind = "ec2" | "byo-host";
 
 export interface RemoteState {
   /** Provider that wrote this record. Defaults to `"ec2"` for records
    *  migrated from the old `ec2.json` file (which had no `kind` field).
-   *  Phase 2 promotes this into a discriminator for a proper union. */
+   *  Per-kind fields below are only meaningful when `kind` matches. */
   kind?: ProviderKind;
+
+  // ---- EC2-kind fields ----
   /** EC2 instance id (i-...). Set once created; persists across stop/start. */
   instanceId?: string;
-  /** Current private IP of the instance. Updated on every `pru setup` since
-   *  stopping a non-Elastic-IP instance can rotate it. */
+  /** Current IP of the host (private IP for EC2, IP/alias for byo-host).
+   *  Updated on every `pru setup` since stopping a non-Elastic-IP instance
+   *  can rotate it. */
   privateIp?: string;
-  /** AZ where the instance and volume live. Fixed once created (EBS volumes
-   *  can't move AZs; instance launch must match). */
+  /** AZ where the instance and volume live. EC2-only. */
   availabilityZone?: string;
-  /** Persistent EBS data volume id (vol-...). Survives instance termination
-   *  unless the user passes `--delete-volume` to `pru destroy`. */
+  /** Persistent EBS data volume id (vol-...). EC2-only. */
   volumeId?: string;
   /** Local SSH config alias; matches config.ssh.host_alias at creation time. */
   sshHostAlias?: string;
+
+  // ---- byo-host-kind fields ----
+  /** SSH alias from ~/.ssh/config (e.g. "gpu"). byo-host. */
+  sshAlias?: string;
+  /** SSH login user on the remote. byo-host. */
+  sshUser?: string;
+  /** Mount-point of the persistent volume on the remote (e.g. "/data"). */
+  persistentRoot?: string;
+  /** Resolved `$HOME` on the remote (after symlink swap). byo-host. */
+  homeDir?: string;
+  /** Resolved `$PIROUETTE_DATA_DIR` on the remote. byo-host. */
+  dataDir?: string;
+
+  // ---- shared ----
   /** ISO timestamp when the host was first provisioned. */
   createdAt?: string;
   /** ISO timestamp of the last state write. */

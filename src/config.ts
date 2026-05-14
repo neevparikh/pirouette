@@ -14,14 +14,36 @@ import { fileURLToPath } from "node:url";
 import { parse as parseToml } from "smol-toml";
 
 export interface PirouetteConfig {
-  /** Which host-provider implementation to use. "ec2" (default) means
-   *  the AWS+Docker path: `pru setup` provisions an EC2 instance, mounts
-   *  an EBS data volume, runs the container, etc. New providers (e.g.
-   *  "byo-host") plug in here in later phases without breaking back-compat
-   *  for existing configs — an absent `[provider]` table reads as "ec2".
+  /** Which host-provider implementation to use. Absent `[provider]` table
+   *  reads as "ec2" — the AWS+Docker path (`pru setup` provisions an EC2
+   *  instance, mounts an EBS data volume, runs the container). "byo-host"
+   *  targets an existing SSH-reachable Linux host (a METR devpod, a
+   *  long-running personal VM, etc.) with a persistent volume mounted
+   *  somewhere; pirouette uploads a bootstrap script over SSH.
    *  See docs/plans/2026-05-13-provider-abstraction.md. */
   provider: {
-    kind: "ec2";
+    kind: "ec2" | "byo-host";
+    /** Settings consumed when `kind = "byo-host"`. Ignored otherwise.
+     *  Key with bracket-quotes in TOML: `[provider.byo-host]`. */
+    "byo-host": {
+      /** Entry in `~/.ssh/config` the user already has (e.g. "gpu").
+       *  Pirouette doesn't write anything to ssh_config for this
+       *  provider; it just runs `ssh <alias>`. */
+      ssh_alias: string;
+      /** Where on the remote the persistent volume is mounted. Anything
+       *  under this dir survives across pod/instance recreates. */
+      persistent_root: string;
+      /** SSH login user on the remote (also the user owning `$HOME`). */
+      user: string;
+      /** Override the persistent `$HOME` path. Default:
+       *  `${persistent_root}/home/${user}`. The bootstrap symlinks
+       *  `/home/${user}` -> this path. Empty = use default. */
+      home_dir: string;
+      /** Override `$PIROUETTE_DATA_DIR`. Default:
+       *  `${persistent_root}/pirouette/data`. Server state lives here.
+       *  Empty = use default. */
+      data_dir: string;
+    };
   };
   aws: {
     profile: string;
@@ -114,7 +136,16 @@ export interface PirouetteConfig {
  *  Deliberately empty for values that tie the tool to a specific AWS
  *  environment — those must come from `~/.pirouette/config.toml`. */
 const BUILTIN_DEFAULTS: PirouetteConfig = {
-  provider: { kind: "ec2" },
+  provider: {
+    kind: "ec2",
+    "byo-host": {
+      ssh_alias: "",
+      persistent_root: "",
+      user: "",
+      home_dir: "",
+      data_dir: "",
+    },
+  },
   aws: {
     profile: "default",
     region: "us-west-2",
@@ -258,13 +289,18 @@ export function containerHome(config: PirouetteConfig = getConfig()): string {
   return config.container.container_home || `/home/${config.container.container_user}`;
 }
 
-/** Fields that are environment-specific and have no safe default. `pru setup`
- *  and related remote commands call `requireConfigured()` before touching AWS;
- *  it errors with a pointer to the exact keys that need filling in. */
-const REQUIRED_FIELDS: Array<{
+/** Fields that are environment-specific and have no safe default. Each
+ *  provider has its own required-fields list — the EC2 path needs AWS +
+ *  container config; byo-host needs an SSH alias + persistent root.
+ *  `pru setup` and related remote commands call `requireConfigured()`
+ *  before touching the host; it errors with a pointer to the exact keys
+ *  that need filling in. */
+type RequiredField = {
   path: string;
   get: (c: PirouetteConfig) => string;
-}> = [
+};
+
+const EC2_REQUIRED_FIELDS: RequiredField[] = [
   { path: "aws.network.vpc_name", get: (c) => c.aws.network.vpc_name },
   { path: "aws.network.subnet_name_pattern", get: (c) => c.aws.network.subnet_name_pattern },
   { path: "aws.network.security_group_name", get: (c) => c.aws.network.security_group_name },
@@ -275,39 +311,113 @@ const REQUIRED_FIELDS: Array<{
   { path: "container.npm_package", get: (c) => c.container.npm_package },
 ];
 
+const BYO_HOST_REQUIRED_FIELDS: RequiredField[] = [
+  { path: "provider.byo-host.ssh_alias", get: (c) => c.provider["byo-host"]?.ssh_alias ?? "" },
+  { path: "provider.byo-host.persistent_root", get: (c) => c.provider["byo-host"]?.persistent_root ?? "" },
+  { path: "provider.byo-host.user", get: (c) => c.provider["byo-host"]?.user ?? "" },
+  { path: "container.npm_package", get: (c) => c.container.npm_package },
+];
+
+function requiredFieldsFor(kind: PirouetteConfig["provider"]["kind"]): RequiredField[] {
+  switch (kind) {
+    case "ec2":
+      return EC2_REQUIRED_FIELDS;
+    case "byo-host":
+      return BYO_HOST_REQUIRED_FIELDS;
+    default: {
+      // Exhaustiveness check so adding a new kind here errors at compile
+      // time if its required-fields list is forgotten.
+      const _exhaustive: never = kind;
+      void _exhaustive;
+      return [];
+    }
+  }
+}
+
+const EXAMPLE_EC2 = [
+  `[aws]`,
+  `profile = "your-aws-profile"`,
+  `region  = "us-west-2"`,
+  ``,
+  `[aws.network]`,
+  `vpc_name            = "your-vpc"`,
+  `subnet_name_pattern = "your-private-subnet-*"`,
+  `security_group_name = "your-dev-sg"`,
+  ``,
+  `[aws.tags]`,
+  `Owner = "you@example.com"`,
+  ``,
+  `[instance]`,
+  `key_name = "your-ec2-keypair-name"`,
+  ``,
+  `[container]`,
+  `image          = "your-dev-container:latest"`,
+  `container_user = "you"                # non-root user inside the image`,
+  `npm_package    = "@your-scope/pirouette@latest"`,
+].join("\n");
+
+const EXAMPLE_BYO_HOST = [
+  `[provider]`,
+  `kind = "byo-host"`,
+  ``,
+  `[provider.byo-host]`,
+  `ssh_alias       = "gpu"           # entry in ~/.ssh/config`,
+  `persistent_root = "/data"         # mount-point of your persistent volume`,
+  `user            = "your-username" # SSH login user`,
+  `# home_dir = ""                   # optional: default "\${persistent_root}/home/\${user}"`,
+  `# data_dir = ""                   # optional: default "\${persistent_root}/pirouette/data"`,
+  ``,
+  `[container]`,
+  `npm_package = "@your-scope/pirouette@latest"`,
+].join("\n");
+
 /** Throw with a helpful message if required fields are empty. Used by remote
- *  commands (`pru setup`, etc.) that actually hit AWS. */
+ *  commands (`pru setup`, etc.) before they touch the host. The error
+ *  message lists the missing keys and an example block scoped to the
+ *  current `provider.kind`. */
 export function requireConfigured(config: PirouetteConfig = getConfig()): void {
-  const missing = REQUIRED_FIELDS.filter(
-    ({ get }) => !get(config) || get(config) === "UNSET",
-  ).map(({ path }) => path);
+  const kind = config.provider?.kind ?? "ec2";
+  const fields = requiredFieldsFor(kind);
+  const missing = fields
+    .filter(({ get }) => !get(config) || get(config) === "UNSET")
+    .map(({ path }) => path);
   if (missing.length === 0) return;
 
-  const example = [
-    `[aws]`,
-    `profile = "your-aws-profile"`,
-    `region  = "us-west-2"`,
-    ``,
-    `[aws.network]`,
-    `vpc_name            = "your-vpc"`,
-    `subnet_name_pattern = "your-private-subnet-*"`,
-    `security_group_name = "your-dev-sg"`,
-    ``,
-    `[aws.tags]`,
-    `Owner = "you@example.com"`,
-    ``,
-    `[instance]`,
-    `key_name = "your-ec2-keypair-name"`,
-    ``,
-    `[container]`,
-    `image          = "your-dev-container:latest"`,
-    `container_user = "you"                # non-root user inside the image`,
-    `npm_package    = "@your-scope/pirouette@latest"`,
-  ].join("\n");
+  const example = kind === "ec2" ? EXAMPLE_EC2 : EXAMPLE_BYO_HOST;
 
   throw new Error(
-    `Missing required config values:\n` +
+    `Missing required config values for provider.kind="${kind}":\n` +
       missing.map((k) => `  - ${k}`).join("\n") +
       `\n\nSet them in ${userConfigPath()}. Example:\n\n${example}\n`,
   );
+}
+
+/** Effective byo-host config with computed defaults applied for empty
+ *  override fields. Only meaningful when `provider.kind === "byo-host"`. */
+export interface EffectiveByoHostConfig {
+  ssh_alias: string;
+  persistent_root: string;
+  user: string;
+  home_dir: string;
+  data_dir: string;
+}
+
+/** Resolve byo-host config with default home_dir/data_dir computed from
+ *  persistent_root + user when not explicitly set. Throws if the
+ *  required fields are missing (call `requireConfigured` first to get a
+ *  better error message). */
+export function resolveByoHostConfig(config: PirouetteConfig = getConfig()): EffectiveByoHostConfig {
+  const b = config.provider["byo-host"];
+  if (!b || !b.ssh_alias || !b.persistent_root || !b.user) {
+    throw new Error(
+      "byo-host provider not configured; set provider.byo-host.{ssh_alias, persistent_root, user}",
+    );
+  }
+  return {
+    ssh_alias: b.ssh_alias,
+    persistent_root: b.persistent_root,
+    user: b.user,
+    home_dir: b.home_dir || `${b.persistent_root}/home/${b.user}`,
+    data_dir: b.data_dir || `${b.persistent_root}/pirouette/data`,
+  };
 }

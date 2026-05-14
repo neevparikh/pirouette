@@ -1,0 +1,225 @@
+#!/bin/bash
+# Pirouette byo-host bootstrap.
+#
+# Runs over SSH from the laptop on every `pru setup` against a byo-host
+# (and re-run on `pru sync --npm` / `pru sync`). Idempotent end-to-end:
+# the slow work (skel seed, yadm clone, npm install) happens once; later
+# runs detect the previous state and short-circuit.
+#
+# Mirrors the EC2 entrypoint (scripts/pirouette-entrypoint.sh) so EC2 and
+# byo-host deployments have the same "what's in $HOME, what's on the
+# persistent volume" mental model.
+#
+# Required env (set by ByoHostProvider before invoking us over SSH):
+#   PIROUETTE_PERSISTENT_ROOT   mount-point of the persistent volume
+#                               (e.g. /data on a METR k8s devpod, /srv on
+#                               a long-running EC2 you set up by hand).
+#   PIROUETTE_HOME_DIR          target of the $HOME symlink. Defaults to
+#                               ${PIROUETTE_PERSISTENT_ROOT}/home/$USER if
+#                               unset.
+#   PIROUETTE_DATA_DIR          where pirouette's server state lives.
+#                               Defaults to ${PIROUETTE_PERSISTENT_ROOT}/
+#                               pirouette/data if unset.
+#   PIROUETTE_PACKAGE           npm package spec to install (e.g.
+#                               @neevparikh/pirouette@latest).
+#   PIROUETTE_PORT              port pirouette server binds. Default 7777.
+#
+# Optional env:
+#   PIROUETTE_DOTFILES_URL          HTTPS clone URL for yadm dotfiles.
+#                                   Empty -> skip clone.
+#   PIROUETTE_AUTHORIZED_KEYS_URL   URL serving an authorized_keys body.
+#                                   Re-fetched on every run for key
+#                                   rotation. Empty -> fall back to
+#                                   copying the image's pre-swap ~/.ssh/.
+#   PIROUETTE_FORCE_REINSTALL=1     force `npm install -g` even if pirouette
+#                                   appears to already be installed.
+#
+# Output goes to $HOME/logs/bootstrap.log via `tee` after we set up $HOME.
+
+set -euo pipefail
+
+log() { echo "[pirouette-bootstrap] $*"; }
+
+# ---- 0. Defaults + validation ---------------------------------------------
+: "${PIROUETTE_PERSISTENT_ROOT:?PIROUETTE_PERSISTENT_ROOT not set}"
+: "${PIROUETTE_PACKAGE:?PIROUETTE_PACKAGE not set}"
+export PIROUETTE_PORT="${PIROUETTE_PORT:-7777}"
+export PIROUETTE_HOME_DIR="${PIROUETTE_HOME_DIR:-$PIROUETTE_PERSISTENT_ROOT/home/$(id -un)}"
+export PIROUETTE_DATA_DIR="${PIROUETTE_DATA_DIR:-$PIROUETTE_PERSISTENT_ROOT/pirouette/data}"
+
+# Sanity: persistent_root must look like a real mountpoint / writable dir.
+# The first-mount case (PVC just attached, root-owned) is handled below
+# via sudo chown; this catches genuinely bad config.
+if [ ! -d "$PIROUETTE_PERSISTENT_ROOT" ]; then
+    echo "[pirouette-bootstrap] ERROR: $PIROUETTE_PERSISTENT_ROOT is not a directory." >&2
+    echo "  Check provider.byo-host.persistent_root in ~/.pirouette/config.toml." >&2
+    exit 1
+fi
+
+log "starting on $(hostname) as $(id -un)"
+log "  persistent_root = $PIROUETTE_PERSISTENT_ROOT"
+log "  home_dir        = $PIROUETTE_HOME_DIR"
+log "  data_dir        = $PIROUETTE_DATA_DIR"
+log "  package         = $PIROUETTE_PACKAGE"
+
+# ---- 1. Take ownership of $PIROUETTE_PERSISTENT_ROOT ---------------------
+# First-mount case: a freshly-attached PVC is root:root 0755 and our SSH
+# user can't write to it. Use sudo (image contract: NOPASSWD sudo) once.
+# Idempotent: skip the chown when we already own it.
+if [ ! -w "$PIROUETTE_PERSISTENT_ROOT" ]; then
+    log "claiming $PIROUETTE_PERSISTENT_ROOT (first-mount sudo chown)"
+    sudo chown "$(id -u):$(id -g)" "$PIROUETTE_PERSISTENT_ROOT"
+fi
+
+# Make sure the dirs we're about to write to exist.
+mkdir -p "$PIROUETTE_DATA_DIR" "$(dirname "$PIROUETTE_HOME_DIR")"
+
+# ---- 2. Whole-home migration ---------------------------------------------
+# $HOME -> $PIROUETTE_HOME_DIR via symlink, seeded once from /opt/home-skel.
+# Same source the EC2 entrypoint uses (scripts/pirouette-entrypoint.sh:46-63)
+# so image-baked $HOME state ends up in the persistent volume on first boot
+# and survives pod/instance recreates.
+#
+# Safety notes:
+#   - We cd /tmp before mv'ing /home/<user> so we don't orphan our own CWD.
+#   - The pre-swap $HOME gets stashed (not deleted) at $HOME.pre-pirouette-<ts>
+#     so a botched run is recoverable. Cleanup is manual today.
+#   - Refuses to clobber if /home/<user> is already a symlink to a DIFFERENT
+#     target (someone else's setup). Surface the conflict; require manual fix.
+ensure_persistent_home() {
+    local user persistent_home current_home
+    user="$(id -un)"
+    persistent_home="$PIROUETTE_HOME_DIR"
+    current_home="$HOME"
+
+    # Already migrated to OUR target? Idempotent fast path.
+    if [ -L "$current_home" ] \
+       && [ "$(readlink "$current_home")" = "$persistent_home" ]; then
+        log "$current_home already symlinked to $persistent_home; skipping migration"
+        return 0
+    fi
+
+    # Symlink exists but points somewhere else. Refuse to clobber.
+    if [ -L "$current_home" ]; then
+        local existing
+        existing="$(readlink "$current_home")"
+        echo "[pirouette-bootstrap] ERROR: $current_home is a symlink to $existing," >&2
+        echo "  but pirouette expects it to point to $persistent_home." >&2
+        echo "  Either set provider.byo-host.home_dir = \"$existing\" in your config" >&2
+        echo "  to adopt the existing layout, or manually fix and re-run." >&2
+        exit 1
+    fi
+
+    sudo install -d -o "$user" -g "$user" "$(dirname "$persistent_home")"
+    mkdir -p "$persistent_home"
+
+    # First-boot seeding from /opt/home-skel. Sentinel prevents re-seed on
+    # subsequent boots (matches EC2 behaviour: image bumps don't re-seed,
+    # which is the price of persistent home).
+    local seed_src="/opt/home-skel"
+    local seed_sentinel="$persistent_home/.pirouette-home-seeded"
+    if [ -d "$seed_src" ] && [ ! -f "$seed_sentinel" ]; then
+        log "first boot: seeding $persistent_home from $seed_src"
+        cp -an "$seed_src/." "$persistent_home/" 2>/dev/null || true
+        touch "$seed_sentinel"
+    elif [ ! -d "$seed_src" ]; then
+        log "no /opt/home-skel in image; persistent home will start empty"
+    fi
+
+    # Foot-gun (C) mitigation. If PIROUETTE_AUTHORIZED_KEYS_URL is unset
+    # we'll have no way to populate $HOME/.ssh/authorized_keys after the
+    # swap, and the next SSH connect fails. Copy the image's pre-swap
+    # .ssh/ into the persistent target as a fallback. (If URL IS set,
+    # the fetch step below idempotently overwrites this anyway.)
+    if [ -z "${PIROUETTE_AUTHORIZED_KEYS_URL:-}" ] \
+       && [ -d "$current_home/.ssh" ] \
+       && [ ! -e "$persistent_home/.ssh/authorized_keys" ]; then
+        log "no PIROUETTE_AUTHORIZED_KEYS_URL set; copying pre-swap ~/.ssh/ into persistent target"
+        sudo install -d -o "$user" -g "$user" -m 700 "$persistent_home/.ssh"
+        cp -an "$current_home/.ssh/." "$persistent_home/.ssh/" 2>/dev/null || true
+    fi
+
+    # cd out of $HOME so we don't orphan our own CWD (foot-gun B).
+    cd /tmp
+
+    local stash="${current_home}.pre-pirouette-$(date +%s)"
+    log "swapping: mv $current_home -> $stash; ln -s $persistent_home -> $current_home"
+    sudo mv "$current_home" "$stash" 2>/dev/null || true
+    sudo ln -sfn "$persistent_home" "$current_home"
+    sudo chown -h "$user:$user" "$current_home"
+    log "migration complete (pre-pirouette stash at $stash; manual cleanup if you want)"
+}
+ensure_persistent_home
+
+# Now that $HOME is the persistent target, start logging there too.
+mkdir -p "$HOME/logs" "$PIROUETTE_DATA_DIR/logs"
+exec > >(tee -a "$HOME/logs/bootstrap.log") 2>&1
+
+# ---- 3. authorized_keys ---------------------------------------------------
+# Idempotent overwrite on every run, mirroring scripts/pirouette-entrypoint.sh:
+# 117-127. Key rotation Just Works (rotate at the URL, re-run `pru setup`).
+if [ -n "${PIROUETTE_AUTHORIZED_KEYS_URL:-}" ]; then
+    log "fetching authorized_keys from $PIROUETTE_AUTHORIZED_KEYS_URL"
+    mkdir -p "$HOME/.ssh"
+    chmod 700 "$HOME/.ssh"
+    curl -fsSL "$PIROUETTE_AUTHORIZED_KEYS_URL" -o "$HOME/.ssh/authorized_keys" || true
+    chmod 600 "$HOME/.ssh/authorized_keys"
+fi
+
+# ---- 4. npm prefix --------------------------------------------------------
+# Same logic as scripts/pirouette-entrypoint.sh. user-local npm prefix so
+# `npm install -g` doesn't need sudo. Idempotent.
+NPM_PREFIX="$HOME/.npm-global"
+mkdir -p "$NPM_PREFIX/bin" "$NPM_PREFIX/lib"
+if [ "$(npm config get prefix 2>/dev/null)" != "$NPM_PREFIX" ]; then
+    log "setting npm prefix to $NPM_PREFIX"
+    npm config set prefix "$NPM_PREFIX"
+fi
+for rc in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zshrc" \
+          "$HOME/.zshenv" "$HOME/.profile"; do
+    if [ -e "$rc" ] && ! grep -qF "/.npm-global/bin" "$rc"; then
+        printf '\n# pirouette: user-local npm bin (added by pirouette-bootstrap.sh)\nexport PATH="$HOME/.npm-global/bin:$PATH"\n' >> "$rc"
+    fi
+done
+export PATH="$NPM_PREFIX/bin:$PATH"
+
+# ---- 5. Dotfiles (yadm) ---------------------------------------------------
+if [ -z "${PIROUETTE_DOTFILES_URL:-}" ]; then
+    log "no PIROUETTE_DOTFILES_URL set; skipping yadm clone"
+elif [ -d "$HOME/.local/share/yadm/repo.git" ]; then
+    log "dotfiles already present; skipping yadm clone"
+elif command -v yadm >/dev/null 2>&1; then
+    log "cloning dotfiles from $PIROUETTE_DOTFILES_URL"
+    if yadm clone --depth 1 "$PIROUETTE_DOTFILES_URL"; then
+        yadm alt || true
+        yadm checkout -f -- "$HOME" || true
+        log "dotfiles in place"
+    else
+        log "WARN: yadm clone failed; continuing without dotfiles"
+    fi
+else
+    log "WARN: yadm not on PATH; skipping dotfiles clone"
+fi
+
+# ---- 6. Install pirouette --------------------------------------------------
+HAVE="$(pirouette --version 2>/dev/null || true)"
+if [ -z "$HAVE" ] || [ "${PIROUETTE_FORCE_REINSTALL:-0}" = "1" ]; then
+    log "installing $PIROUETTE_PACKAGE into $NPM_PREFIX"
+    npm install -g "$PIROUETTE_PACKAGE" 2>&1 | tail -5
+else
+    log "pirouette $HAVE already installed at $(command -v pirouette)"
+fi
+
+# ---- 7. Start the server in tmux ------------------------------------------
+# Idempotent: only spawn if not already running. Bind 127.0.0.1 (loopback
+# only) -- access from laptop is via SSH tunnel. Decision 6 in the plan.
+SESSION_NAME="pirouette"
+if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+    log "tmux session '$SESSION_NAME' already running; not restarting"
+else
+    log "starting tmux session '$SESSION_NAME' (binding 127.0.0.1:$PIROUETTE_PORT)"
+    tmux new-session -d -s "$SESSION_NAME" \
+        "PIROUETTE_DATA_DIR='$PIROUETTE_DATA_DIR' PIROUETTE_PORT='$PIROUETTE_PORT' PIROUETTE_HOST='127.0.0.1' pirouette server 2>&1 | tee -a '$PIROUETTE_DATA_DIR/logs/pirouette.log'"
+fi
+
+log "bootstrap complete."

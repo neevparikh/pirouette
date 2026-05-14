@@ -26,9 +26,10 @@ function ensureControlDir(): void {
   }
 }
 
-/** Shared SSH options used for every command. Disables host key prompts on
- *  first connect (the instance is freshly booted and has no known host fp);
- *  keeps a short ServerAlive so dropped tailnet connections surface quickly.
+/** Shared SSH options used for every command targeting a literal host
+ *  (EC2 private IP, etc.). Disables host-key prompts on first connect
+ *  (the instance is freshly booted and has no known host fp); keeps a
+ *  short ServerAlive so dropped tailnet connections surface quickly.
  *  ControlMaster multiplexing amortises TCP setup across multiple calls. */
 function sshOptions(keyPath: string): string[] {
   return [
@@ -40,10 +41,33 @@ function sshOptions(keyPath: string): string[] {
   ];
 }
 
+/** Build the destination + option args list for a target. Two shapes:
+ *   - literal host: returns `[...sshOptions(keyPath), user@host]` so we
+ *     fully specify identity / known-hosts / keepalives.
+ *   - alias (byo-host): returns `[alias]` only. The user's ssh_config
+ *     owns identity, user, port, and any keepalive settings; we deliberately
+ *     don't pass our defaults so we don't shadow theirs. The same applies
+ *     to scp: `[alias:path]` only. */
+function targetArgs(t: RemoteTarget): { opts: string[]; dest: string } {
+  if (t.useAlias) {
+    return { opts: [], dest: t.host };
+  }
+  return { opts: sshOptions(t.keyPath!), dest: `${t.user}@${t.host}` };
+}
+
 export interface RemoteTarget {
   user: string;
-  host: string; // private IP
-  keyPath: string;
+  /** Literal host (IP / hostname) when `useAlias` is false, otherwise a
+   *  `Host` alias from `~/.ssh/config`. */
+  host: string;
+  /** Identity file. Required when `useAlias` is false; ignored otherwise
+   *  (the alias handles its own identity). */
+  keyPath?: string;
+  /** Custom port. Ignored when `useAlias` is true. */
+  port?: number;
+  /** If true, `host` is an ssh_config alias and we skip our default
+   *  options so the user's ssh_config wins. Used by byo-host. */
+  useAlias?: boolean;
 }
 
 /** Resolve the remote target from config + state; throw if there's no
@@ -74,10 +98,11 @@ export async function ssh(
   } = {},
 ): Promise<{ stdout: string; stderr: string }> {
   const t = opts.target ?? currentTarget();
+  const { opts: sshOpts, dest } = targetArgs(t);
   const args = [
-    ...sshOptions(t.keyPath),
+    ...sshOpts,
     ...(opts.forwardAgent ? ["-A"] : []),
-    `${t.user}@${t.host}`,
+    dest,
     command,
   ];
   const { stdout, stderr } = await pExecFile("ssh", args, {
@@ -93,11 +118,12 @@ export function sshInteractive(
   opts: { target?: RemoteTarget; forwardAgent?: boolean } = {},
 ): Promise<number> {
   const t = opts.target ?? currentTarget();
+  const { opts: sshOpts, dest } = targetArgs(t);
   const args = [
-    ...sshOptions(t.keyPath),
+    ...sshOpts,
     "-t",
     ...(opts.forwardAgent ? ["-A"] : []),
-    `${t.user}@${t.host}`,
+    dest,
   ];
   if (remoteCommand) args.push(remoteCommand);
   return new Promise<number>((resolve) => {
@@ -113,10 +139,11 @@ export async function scp(
   opts: { target?: RemoteTarget } = {},
 ): Promise<void> {
   const t = opts.target ?? currentTarget();
+  const { opts: sshOpts, dest } = targetArgs(t);
   const args = [
-    ...sshOptions(t.keyPath),
+    ...sshOpts,
     localPath,
-    `${t.user}@${t.host}:${remotePath}`,
+    `${dest}:${remotePath}`,
   ];
   await pExecFile("scp", args, { timeout: 5 * 60 * 1000 });
 }
@@ -133,13 +160,16 @@ export async function rsync(
   } = {},
 ): Promise<void> {
   const t = opts.target ?? currentTarget();
-  const sshCmd = ["ssh", ...sshOptions(t.keyPath)].join(" ");
+  const { opts: sshOpts, dest } = targetArgs(t);
+  // rsync needs the inner ssh command as a single string. Build it the
+  // same way as the ssh() function above: option flags + nothing else.
+  const sshCmd = ["ssh", ...sshOpts].join(" ");
   const args = ["-az", "--info=stats1", "-e", sshCmd];
   for (const e of opts.excludes ?? []) args.push("--exclude", e);
   if (opts.deleteExtraneous) args.push("--delete");
   // Trailing / on src means "contents of", not the dir itself
   const local = localDir.endsWith("/") ? localDir : localDir + "/";
-  args.push(local, `${t.user}@${t.host}:${remoteDir}`);
+  args.push(local, `${dest}:${remoteDir}`);
   await pExecFile("rsync", args, { timeout: 10 * 60 * 1000, maxBuffer: 50 * 1024 * 1024 });
 }
 

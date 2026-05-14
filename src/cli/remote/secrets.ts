@@ -115,18 +115,38 @@ function hostHomeBindMount(): string {
   return "/var/lib/pirouette/home-neev";
 }
 
-/** Push the standard set of laptop-local auth secrets into the container.
- *  Called from `pru setup` and `pru sync --secrets`. Returns a tally so
- *  the caller can log a one-line summary. */
+/** Push mode controls scp target + ownership fix-ups.
+ *
+ *    - `ec2-bindmount`: scp to the host's bind-mount path
+ *      (`/var/lib/pirouette/home-<user>/...`), then sudo chown 1000:1000.
+ *      This is what `pru setup` on the EC2 provider has always done; the
+ *      container's uid-1000 user reads through the bind-mount.
+ *
+ *    - `plain-ssh`: scp directly to `$HOME/...` on the remote, as the SSH
+ *      user. No sudo, no chown -- we connect as the user that already
+ *      owns the file. Used by byo-host and any future provider where
+ *      pirouette runs natively on the remote (not in a separate container).
+ */
+export type PushMode = "ec2-bindmount" | "plain-ssh";
+
+/** Push the standard set of laptop-local auth secrets to the remote.
+ *  Called from `pru setup` (via the provider) and `pru sync --secrets`.
+ *  Returns a tally so the caller can log a one-line summary. */
 export async function pushSecrets(
   cfg: PirouetteConfig,
-  opts: { specs?: SecretSpec[]; quiet?: boolean } = {},
+  opts: {
+    specs?: SecretSpec[];
+    quiet?: boolean;
+    mode?: PushMode;
+    /** Required for `plain-ssh` mode. SSH target to scp into. For
+     *  `ec2-bindmount` we keep using `currentTarget(cfg)` to talk to the
+     *  EC2 host. */
+    target?: { user: string; host: string; keyPath?: string; useAlias?: boolean };
+  } = {},
 ): Promise<{ pushed: number; skipped: number; missing: string[] }> {
   const specs = opts.specs ?? DEFAULT_SECRETS;
   const log = opts.quiet ? () => {} : (msg: string) => console.log(msg);
-
-  const target = currentTarget(cfg);
-  const hostHome = hostHomeBindMount();
+  const mode: PushMode = opts.mode ?? "ec2-bindmount";
 
   let pushed = 0;
   let skipped = 0;
@@ -151,33 +171,70 @@ export async function pushSecrets(
       continue;
     }
 
-    const remoteHostPath = path.posix.join(hostHome, spec.containerHomeRelative);
-    const remoteDir = path.posix.dirname(remoteHostPath);
-    // First path segment under $HOME -- e.g. ".pi" for ".pi/agent/auth.json".
-    // sudo mkdir -p creates ALL intermediate dirs as root, so chowning just
-    // the leaf leaves ".pi" itself root-owned (mode 755). The container user
-    // can read+traverse but can't create siblings under ".pi" -- pi-agent
-    // breaks. We chown -R the top-level segment to fix every level at once.
-    const topSegment = spec.containerHomeRelative.split("/")[0];
-    const topAncestor = path.posix.join(hostHome, topSegment);
-
-    // mkdir on the host (uid 1000 owns the bind-mount, but we run ssh
-    // as ubuntu/root -- sudo so the dir is created and chowned to 1000).
-    await ssh(
-      `sudo mkdir -p ${remoteDir} && sudo chown -R 1000:1000 ${topAncestor} && sudo chmod 700 ${remoteDir}`,
-      { target },
-    );
-    await scp(local, remoteHostPath, { target });
-    // scp lands as ubuntu:ubuntu on host -- fix to uid 1000 + 0600 so
-    // the container user can read but nobody else.
-    await ssh(
-      `sudo chown 1000:1000 ${remoteHostPath} && sudo chmod 600 ${remoteHostPath}`,
-      { target },
-    );
+    if (mode === "ec2-bindmount") {
+      await pushOneToBindMount(cfg, spec, local);
+    } else {
+      if (!opts.target) {
+        throw new Error("plain-ssh push mode requires opts.target");
+      }
+      await pushOneViaPlainSsh(opts.target, spec, local);
+    }
 
     log(`  push  ${spec.label.padEnd(28)} -> ${spec.containerHomeRelative}`);
     pushed += 1;
   }
 
   return { pushed, skipped, missing };
+}
+
+/** ec2-bindmount mode: scp to host's bind-mount path, chown to uid 1000. */
+async function pushOneToBindMount(
+  cfg: PirouetteConfig,
+  spec: SecretSpec,
+  local: string,
+): Promise<void> {
+  const target = currentTarget(cfg);
+  const hostHome = hostHomeBindMount();
+  const remoteHostPath = path.posix.join(hostHome, spec.containerHomeRelative);
+  const remoteDir = path.posix.dirname(remoteHostPath);
+  // First path segment under $HOME -- e.g. ".pi" for ".pi/agent/auth.json".
+  // sudo mkdir -p creates ALL intermediate dirs as root, so chowning just
+  // the leaf leaves ".pi" itself root-owned (mode 755). The container user
+  // can read+traverse but can't create siblings under ".pi" -- pi-agent
+  // breaks. We chown -R the top-level segment to fix every level at once.
+  const topSegment = spec.containerHomeRelative.split("/")[0];
+  const topAncestor = path.posix.join(hostHome, topSegment);
+
+  await ssh(
+    `sudo mkdir -p ${remoteDir} && sudo chown -R 1000:1000 ${topAncestor} && sudo chmod 700 ${remoteDir}`,
+    { target },
+  );
+  await scp(local, remoteHostPath, { target });
+  await ssh(
+    `sudo chown 1000:1000 ${remoteHostPath} && sudo chmod 600 ${remoteHostPath}`,
+    { target },
+  );
+}
+
+/** plain-ssh mode: scp as the SSH user directly into $HOME/<relative>.
+ *  No sudo, no chown -- the file lands owned by the connecting user, which
+ *  is the same user the pirouette server runs as. After byo-host's home
+ *  swap, $HOME is a symlink onto the persistent volume, so files written
+ *  here automatically persist across pod/instance recreates. */
+async function pushOneViaPlainSsh(
+  target: { user: string; host: string; keyPath?: string; useAlias?: boolean },
+  spec: SecretSpec,
+  local: string,
+): Promise<void> {
+  // Path on the remote, resolved through $HOME (which on byo-host is the
+  // symlink onto the PVC). We pass it as `~/...` to let the remote shell
+  // expand -- avoids hard-coding the absolute home path on the laptop.
+  const remotePath = `~/${spec.containerHomeRelative}`;
+  const remoteDir = path.posix.dirname(spec.containerHomeRelative);
+
+  // Ensure parent dir exists with 700 perms. Quoted so `~` expands but the
+  // path itself doesn't word-split.
+  await ssh(`mkdir -p "$HOME/${remoteDir}" && chmod 700 "$HOME/${remoteDir}"`, { target });
+  await scp(local, remotePath, { target });
+  await ssh(`chmod 600 "$HOME/${spec.containerHomeRelative}"`, { target });
 }

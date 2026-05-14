@@ -19,7 +19,8 @@
  *  setup.ts can shrink to a dispatcher.
  */
 
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { readFileSync, readdirSync, renameSync, unlinkSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,6 +54,7 @@ import {
 } from "../aws.js";
 import {
   AGENT_SOCK_MOUNT,
+  CONTAINER_NAME,
   CONTAINER_SSH_PORT,
   PIROUETTE_PORT,
   containerHomeMount,
@@ -61,11 +63,12 @@ import {
   uploadEntrypointScript,
   waitForServerReady,
 } from "../container.js";
-import { checkLocalAuth, pushSecrets } from "../secrets.js";
+import { checkLocalAuth, pushSecrets as pushSecretsLib } from "../secrets.js";
 import {
   ensureKnownHostsEntry,
   killControlMasters,
   removeSshConfig,
+  scp as runScp,
   ssh as runSsh,
   upsertSshConfig,
   waitForSsh,
@@ -192,7 +195,7 @@ async function bootstrapContainer(
   await startContainer({ image: cfg.container.image, env });
 
   console.log("pushing local auth secrets...");
-  const sec = await pushSecrets(cfg);
+  const sec = await pushSecretsLib(cfg);
   if (sec.pushed === 0 && sec.missing.length > 0) {
     console.log(
       `  (none pushed; pi providers will need /login on first use. Missing: ${sec.missing.join(", ")})`,
@@ -647,6 +650,105 @@ export class EC2Provider implements HostProvider {
 
     return { command, sshAlias: cfg.ssh.host_alias };
   }
+
+  shellAlias(): string {
+    return process.env.PIROUETTE_SSH_HOST ?? `${this.cfg.ssh.host_alias}-container`;
+  }
+
+  async pushSecrets(): Promise<{ pushed: number; skipped: number; missing: string[] }> {
+    // EC2 path uses the host-bind-mount scp target (`/var/lib/pirouette/
+    // home-<user>/.pi/agent/auth.json` etc) and sudo chowns to uid 1000
+    // inside pushSecretsLib. Idempotent overwrite.
+    return pushSecretsLib(this.cfg);
+  }
+
+  async syncFromNpm(): Promise<void> {
+    console.log(`upgrading to latest published ${this.cfg.container.npm_package} in container...`);
+    // bash -lc sources the rc-file PATH export so `npm` and the resulting
+    // `pirouette` bin are both on PATH. pipefail so an install failure
+    // isn't masked by `| tail -3`.
+    await runSsh(
+      `docker exec ${CONTAINER_NAME} bash -lc 'set -o pipefail; npm install -g ${this.cfg.container.npm_package} 2>&1 | tail -3'`,
+    );
+    await this.restartServer();
+    console.log("  done. pirouette server restarted.");
+  }
+
+  async syncFromLocalBuild(): Promise<void> {
+    const repoRoot = findPackageRoot();
+    console.log("building package...");
+    execFileSync("npm", ["run", "build"], { cwd: repoRoot, stdio: "inherit" });
+
+    console.log("npm pack...");
+    const packOut = execFileSync("npm", ["pack", "--json"], {
+      cwd: repoRoot,
+      stdio: ["ignore", "pipe", "inherit"],
+    }).toString();
+    const parsed = JSON.parse(packOut) as Array<{ filename: string }>;
+    const tarballName = parsed[0]?.filename;
+    if (!tarballName) throw new Error("npm pack did not report a filename");
+    const onDisk = findTarball(repoRoot, tarballName);
+
+    const REMOTE_TARBALLS_DIR = "/var/lib/pirouette/tarballs";
+    console.log(`scp ${path.basename(onDisk)} \u2192 ${REMOTE_TARBALLS_DIR}/`);
+    await runSsh(`mkdir -p ${REMOTE_TARBALLS_DIR}`);
+    const remoteName = path.basename(onDisk);
+    await runScp(onDisk, `${REMOTE_TARBALLS_DIR}/${remoteName}`);
+
+    console.log("installing inside container...");
+    await runSsh(
+      `docker exec ${CONTAINER_NAME} bash -lc 'set -o pipefail; npm install -g /data/tarballs/${remoteName} 2>&1 | tail -3'`,
+    );
+
+    console.log("restarting server...");
+    await this.restartServer();
+
+    try {
+      unlinkSync(onDisk);
+    } catch {
+      /* best effort */
+    }
+
+    console.log("  sync complete.");
+    console.log("  pru logs     # verify it came back up");
+  }
+
+  private async restartServer(): Promise<void> {
+    await runSsh(
+      `docker exec ${CONTAINER_NAME} bash -lc 'tmux kill-session -t pirouette 2>/dev/null || true'`,
+    );
+    // Keep tmux start line in sync with the entrypoint script.
+    await runSsh(
+      `docker exec ${CONTAINER_NAME} bash -lc "tmux new-session -d -s pirouette 'pirouette server 2>&1 | tee -a /data/logs/pirouette.log'"`,
+    );
+  }
+}
+
+/** npm pack for scoped packages writes to cwd with the flattened filename
+ *  `neevparikh-pirouette-0.1.0.tgz`, but reports the scoped form in --json.
+ *  Look for both. */
+function findTarball(dir: string, reported: string): string {
+  const reportedPath = path.join(dir, reported);
+  const flat = reported.replace(/^@/, "").replace("/", "-");
+  const flatPath = path.join(dir, flat);
+  for (const p of [reportedPath, flatPath]) {
+    try {
+      readdirSync(path.dirname(p));
+      renameSync(p, p);  // stat-by-rename trick
+      return p;
+    } catch {
+      /* keep looking */
+    }
+  }
+  throw new Error(`could not locate npm pack output (tried ${reportedPath}, ${flatPath})`);
+}
+
+/** Find the repo root from this file's URL. Works in both dev and built
+ *  layouts (5 levels up from src/cli/remote/providers/ec2.ts → repo root;
+ *  same from dist/cli/remote/providers/ec2.js → package root). */
+function findPackageRoot(): string {
+  const here = fileURLToPath(import.meta.url);
+  return path.resolve(path.dirname(here), "..", "..", "..", "..");
 }
 
 /** Validate `--lines` for `pru logs`. Shared between providers; lifted out

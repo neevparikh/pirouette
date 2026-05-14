@@ -23,7 +23,7 @@
 import { spawn } from "node:child_process";
 import net from "node:net";
 
-import { getConfig } from "../../config.js";
+import { getProvider } from "../remote/provider.js";
 import { loadRemoteState } from "../remote/state.js";
 import { sshControl } from "../remote/ssh.js";
 
@@ -61,13 +61,18 @@ async function isLocalPortFree(port: number): Promise<boolean> {
   });
 }
 
+/** Resolve the SSH alias to forward through. Provider-aware:
+ *  EC2 returns `<host_alias>-container` (ProxyJump'd to the container's
+ *  sshd); byo-host returns the user's single alias. Throws if no
+ *  state — forwarding requires a provisioned host. */
 function ensureRemote(): string {
   const state = loadRemoteState();
-  if (!state.instanceId) {
-    throw new Error("no remote instance configured. Run `pru setup` first.");
+  // Both providers stamp at least one identifier on first provision; if
+  // neither is set we haven't run `pru setup` yet.
+  if (!state.instanceId && !state.sshAlias) {
+    throw new Error("no remote host configured. Run `pru setup` first.");
   }
-  const cfg = getConfig();
-  return `${cfg.ssh.host_alias}-container`;
+  return getProvider().shellAlias();
 }
 
 function forwardSpec(p: PortSpec): string {

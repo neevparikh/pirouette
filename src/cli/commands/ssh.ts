@@ -1,22 +1,27 @@
-/** `pru ssh` — shell into the pirouette container (with agent forwarding).
+/** `pru ssh` — shell into the pirouette host (with agent forwarding).
  *
- *  Default: `ssh pirouette-container` (jumps through the EC2 host into the
- *  container's sshd on port 2222). You land as the configured
- *  `container.container_user` with your forwarded agent.
- *
- *  Use `pru ssh --host` to skip the jump and get a shell on the EC2 host
- *  (useful for ops, docker debugging, etc.).
+ *  Provider-aware:
+ *    - EC2: default is `ssh pirouette-container` (jumps through host into
+ *      container sshd on port 2222). `--host` lands on the EC2 host instead.
+ *    - byo-host: lands directly on the user's SSH alias. `--host` is a no-op
+ *      (there's no host/container split).
  */
 
 import { execSync } from "node:child_process";
 
 import { getConfig } from "../../config.js";
+import { getProvider } from "../remote/provider.js";
 
 export async function ssh(opts: { host?: boolean }): Promise<void> {
   const cfg = getConfig();
-  const target = opts.host
-    ? cfg.ssh.host_alias
-    : process.env.PIROUETTE_SSH_HOST ?? `${cfg.ssh.host_alias}-container`;
+  const provider = getProvider();
+
+  // EC2 supports a "host shell" mode (skip the ProxyJump). On byo-host
+  // host/shell are the same alias so --host is a harmless override.
+  const target =
+    opts.host && provider.kind === "ec2"
+      ? cfg.ssh.host_alias
+      : provider.shellAlias();
 
   console.log(`ssh ${target}`);
   try {

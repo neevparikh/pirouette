@@ -20,11 +20,12 @@
  */
 
 import { getConfig, type PirouetteConfig } from "../../config.js";
+import { ByoHostProvider } from "./providers/byo-host.js";
 import { EC2Provider } from "./providers/ec2.js";
 
 /** Identifier kinds. Stringly-typed `kind` in the state file uses this
  *  union; new providers add their literal here. */
-export type ProviderKind = "ec2";
+export type ProviderKind = "ec2" | "byo-host";
 
 /** Where SSH should connect to reach the host. Either a literal IP/hostname
  *  with explicit user+key+port, or an alias in `~/.ssh/config` that handles
@@ -122,6 +123,27 @@ export interface HostProvider {
   /** Build the remote command (and target alias) for `pru logs`. EC2 wraps
    *  in `docker exec pirouette …`; other providers run directly. */
   buildLogsCommand(opts: LogsOptions): LogsCommand;
+
+  /** ssh alias the user lands on when running `pru ssh` (interactive shell)
+   *  and `pru tunnel` (port forward). For EC2 this is the ProxyJump'd
+   *  container alias (`pirouette-container`); for byo-host it's the
+   *  user's existing `~/.ssh/config` alias. */
+  shellAlias(): string;
+
+  /** Push laptop-local pi auth state to the remote. Idempotent;
+   *  skip-if-missing. EC2 scp's to the host bind-mount and chowns to
+   *  uid 1000; byo-host scp's directly to `$HOME/.pi/agent/auth.json`
+   *  as the SSH user. */
+  pushSecrets(): Promise<{ pushed: number; skipped: number; missing: string[] }>;
+
+  /** Implements `pru sync --npm` — install the latest npm package on the
+   *  remote and restart the pirouette server. */
+  syncFromNpm(): Promise<void>;
+
+  /** Implements `pru sync` (no flag) — `npm pack` locally, upload the
+   *  tarball to the remote, install from the tarball, restart the server.
+   *  Provider decides where the tarball lands and how the install runs. */
+  syncFromLocalBuild(): Promise<void>;
 }
 
 /** Provider factory. Reads `provider.kind` from config and instantiates
@@ -132,10 +154,12 @@ export function getProvider(cfg: PirouetteConfig = getConfig()): HostProvider {
   switch (kind) {
     case "ec2":
       return new EC2Provider(cfg);
+    case "byo-host":
+      return new ByoHostProvider(cfg);
     default:
       throw new Error(
         `Unknown provider.kind: ${JSON.stringify(kind)}. ` +
-          `Edit ~/.pirouette/config.toml; supported values: "ec2".`,
+          `Edit ~/.pirouette/config.toml; supported values: "ec2", "byo-host".`,
       );
   }
 }

@@ -1,16 +1,18 @@
-/** `pru preflight` — validate AWS config and resource discovery without
- *  creating anything. Cheap read-only calls that confirm:
- *
- *    1. AWS CLI is installed and the profile has valid credentials.
- *    2. The VPC, subnets, and security group exist as configured.
- *    3. The keypair exists (or can be imported).
- *    4. A compatible AMI is available.
- *    5. Any existing EBS volume for pirouette is in a usable state.
+/** `pru preflight` — validate provider config + resource discovery without
+ *  creating anything. Provider-aware: EC2 checks AWS resources, byo-host
+ *  checks SSH reachability + the persistent root.
  *
  *  Run this before `pru setup` on a fresh checkout. Safe to run anytime.
  */
 
-import { requireConfigured, loadConfig } from "../../config.js";
+import { execFileSync } from "node:child_process";
+
+import {
+  loadConfig,
+  requireConfigured,
+  resolveByoHostConfig,
+  type PirouetteConfig,
+} from "../../config.js";
 import {
   AwsError,
   findEbsVolume,
@@ -23,11 +25,18 @@ import {
   readPublicKey,
   whoami,
 } from "../remote/aws.js";
+import { ssh as runSsh } from "../remote/ssh.js";
 
 type CheckResult = { label: string; ok: boolean; detail: string };
 
 async function runChecks(): Promise<CheckResult[]> {
   const { config } = loadConfig();
+  const kind = config.provider?.kind ?? "ec2";
+  if (kind === "byo-host") return runByoHostChecks(config);
+  return runEc2Checks(config);
+}
+
+async function runEc2Checks(config: PirouetteConfig): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
 
   // 1. required config
@@ -188,6 +197,138 @@ async function runChecks(): Promise<CheckResult[]> {
   }
 
   return results;
+}
+
+/** byo-host preflight: SSH-alias resolution, SSH probe, persistent_root
+ *  reachability. Much smaller surface than EC2 because pirouette doesn't
+ *  own the host — if SSH works and `/persistent_root` is writable (or
+ *  becomes writable via sudo chown on first mount), provision will
+ *  succeed. */
+async function runByoHostChecks(config: PirouetteConfig): Promise<CheckResult[]> {
+  const results: CheckResult[] = [];
+
+  // 1. required config
+  try {
+    requireConfigured(config);
+    results.push({ label: "config", ok: true, detail: "required fields present" });
+  } catch (err) {
+    results.push({
+      label: "config",
+      ok: false,
+      detail: err instanceof Error ? err.message.split("\n")[0] : String(err),
+    });
+    return results;
+  }
+
+  const b = resolveByoHostConfig(config);
+  results.push({
+    label: "resolved paths",
+    ok: true,
+    detail: `ssh_alias=${b.ssh_alias}, persistent_root=${b.persistent_root}, home_dir=${b.home_dir}, data_dir=${b.data_dir}`,
+  });
+
+  // 2. ssh alias resolves in ~/.ssh/config
+  try {
+    execFileSync("ssh", ["-G", b.ssh_alias], { stdio: ["ignore", "ignore", "pipe"] });
+    results.push({
+      label: "ssh alias",
+      ok: true,
+      detail: `${b.ssh_alias} resolves via ~/.ssh/config`,
+    });
+  } catch (err) {
+    results.push({
+      label: "ssh alias",
+      ok: false,
+      detail: `${b.ssh_alias} not found in ~/.ssh/config (${err instanceof Error ? err.message : err})`,
+    });
+    return results;
+  }
+
+  // 3. ssh echo probe
+  const target = { user: b.user, host: b.ssh_alias, useAlias: true as const };
+  try {
+    const { stdout } = await runSsh("echo ok", { target, timeoutMs: 15_000 });
+    if (stdout.trim() === "ok") {
+      results.push({ label: "ssh probe", ok: true, detail: `echo ok from ${b.ssh_alias}` });
+    } else {
+      results.push({
+        label: "ssh probe",
+        ok: false,
+        detail: `unexpected response: ${JSON.stringify(stdout)}`,
+      });
+      return results;
+    }
+  } catch (err) {
+    results.push({
+      label: "ssh probe",
+      ok: false,
+      detail: err instanceof Error ? err.message : String(err),
+    });
+    return results;
+  }
+
+  // 4. persistent_root exists (writable or sudo-chown-able). Refuse if
+  //    the path doesn't exist at all — that's almost always a config typo.
+  try {
+    const { stdout } = await runSsh(
+      `if [ -d ${shellQuote(b.persistent_root)} ]; then echo ok; else echo missing; fi`,
+      { target, timeoutMs: 15_000 },
+    );
+    if (stdout.trim() === "ok") {
+      results.push({
+        label: "persistent root",
+        ok: true,
+        detail: `${b.persistent_root} present on ${b.ssh_alias}`,
+      });
+    } else {
+      results.push({
+        label: "persistent root",
+        ok: false,
+        detail: `${b.persistent_root} does not exist on ${b.ssh_alias} — check provider.byo-host.persistent_root`,
+      });
+    }
+  } catch (err) {
+    results.push({
+      label: "persistent root",
+      ok: false,
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // 5. Tooling sanity check on the remote (node, npm, git, tmux must exist).
+  try {
+    const { stdout } = await runSsh(
+      `for t in node npm git tmux; do command -v "$t" >/dev/null && echo "$t ok" || echo "$t MISSING"; done`,
+      { target, timeoutMs: 15_000 },
+    );
+    const lines = stdout.trim().split("\n").map((l) => l.trim());
+    const missing = lines.filter((l) => l.includes("MISSING"));
+    if (missing.length === 0) {
+      results.push({
+        label: "remote tooling",
+        ok: true,
+        detail: `node, npm, git, tmux present`,
+      });
+    } else {
+      results.push({
+        label: "remote tooling",
+        ok: false,
+        detail: `missing on ${b.ssh_alias}: ${missing.join(", ")}`,
+      });
+    }
+  } catch (err) {
+    results.push({
+      label: "remote tooling",
+      ok: false,
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  return results;
+}
+
+function shellQuote(s: string): string {
+  return "'" + s.replace(/'/g, `'\\''`) + "'";
 }
 
 export async function preflight(): Promise<void> {
