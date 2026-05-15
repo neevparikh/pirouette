@@ -5,6 +5,33 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.5.2 — fix: yadm clone over SSH in byo-host bootstrap
+
+### Fixed
+
+The bootstrap's `yadm clone` step couldn't authenticate when the
+user's `dotfiles.clone_url` pointed at a private repo over HTTPS
+(github prompts for username; non-interactive bootstrap fails). The
+workaround is to use the SSH form (`git@github.com:user/repo.git`)
+so the clone uses the user's ssh-agent (forwarded via the byo-host
+alias's `ForwardAgent yes`).
+
+But SSH-form URLs hit a second problem: the devpod has never SSH'd
+to `github.com` before, so the first connection wants to confirm
+the host key. Non-interactive bootstrap can't answer the prompt and
+the clone hangs / fails.
+
+Fix: when `clone_url` is in SSH form (matches `^[^@]+@([^:]+):`),
+extract the host and `ssh-keyscan -H <host> >> ~/.ssh/known_hosts`
+before invoking yadm. Idempotent (skips if `ssh-keygen -F <host>`
+already finds an entry). For HTTPS URLs the new block is a no-op.
+
+Also added a hint in the clone-failure log message pointing at the
+two most common causes (no ForwardAgent in ssh_config; ssh-agent
+key not authorised on the dotfiles repo).
+
+---
+
 ## 0.5.1 — fix: scp $HOME expansion in byo-host dir-push
 
 ### Fixed

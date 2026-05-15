@@ -189,6 +189,25 @@ if [ -z "${PIROUETTE_DOTFILES_URL:-}" ]; then
 elif [ -d "$HOME/.local/share/yadm/repo.git" ]; then
     log "dotfiles already present; skipping yadm clone"
 elif command -v yadm >/dev/null 2>&1; then
+    # Pre-seed the git host's key into known_hosts when the URL is in
+    # SSH form (git@HOST:owner/repo.git). Without this, the first ssh
+    # to that host -- which yadm clone -> git clone -> ssh shells out
+    # to -- hits a host-key prompt that the non-interactive bootstrap
+    # can't answer, and the clone hangs or fails. ssh-keyscan +
+    # appending to known_hosts is exactly what `accept-new` does at
+    # connect time, just done eagerly. Idempotent: ssh-keygen -F bails
+    # if the host's already trusted.
+    if [[ "$PIROUETTE_DOTFILES_URL" =~ ^[^@]+@([^:]+): ]]; then
+        git_host="${BASH_REMATCH[1]}"
+        mkdir -p "$HOME/.ssh"
+        chmod 700 "$HOME/.ssh"
+        touch "$HOME/.ssh/known_hosts"
+        chmod 600 "$HOME/.ssh/known_hosts"
+        if ! ssh-keygen -F "$git_host" -f "$HOME/.ssh/known_hosts" >/dev/null 2>&1; then
+            log "seeding known_hosts for $git_host"
+            ssh-keyscan -H "$git_host" >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
+        fi
+    fi
     log "cloning dotfiles from $PIROUETTE_DOTFILES_URL"
     if yadm clone --depth 1 "$PIROUETTE_DOTFILES_URL"; then
         yadm alt || true
@@ -196,6 +215,10 @@ elif command -v yadm >/dev/null 2>&1; then
         log "dotfiles in place"
     else
         log "WARN: yadm clone failed; continuing without dotfiles"
+        log "  (if URL is SSH-form, check that ForwardAgent yes is in"
+        log "   your ~/.ssh/config for the byo-host alias, and that the"
+        log "   key your local ssh-agent has access to is also a deploy"
+        log "   key / collaborator on the dotfiles repo.)"
     fi
 else
     log "WARN: yadm not on PATH; skipping dotfiles clone"
