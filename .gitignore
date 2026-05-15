@@ -221,3 +221,6 @@ src/web/vendor/
 
 # Design docs / planning notes are kept local only — not pushed publicly.
 docs/
+
+# Git worktrees (used for parallel feature work).
+.worktrees/

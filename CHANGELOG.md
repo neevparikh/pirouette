@@ -5,6 +5,84 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.4.0 — byo-host provider (install pirouette onto any SSH host)
+
+### Added
+
+A second host provider, `byo-host`, that points pirouette at any
+SSH-reachable Linux box you already manage (a METR k8s devpod is the
+intended use case, but any host that satisfies the existing
+[container image requirements](README.md#container-image-requirements)
+works). Pirouette uploads a bootstrap script over SSH; no AWS calls, no
+Docker, no separate `pirouette-container` SSH alias.
+
+Toggle via `~/.pirouette/config.toml`:
+
+```toml
+[provider]
+kind = "byo-host"
+
+[provider.byo-host]
+ssh_alias       = "my-devpod"
+persistent_root = "/data"
+user            = "me"
+```
+
+See README's "Quick start (byo-host)" for the full recipe.
+
+Mechanics that mirror the EC2 path exactly so muscle memory carries over:
+
+- `/home/<user>` becomes a symlink to `${persistent_root}/home/<user>`,
+  seeded once from `/opt/home-skel` on first boot. Same skel pattern as
+  the EC2 entrypoint (`scripts/pirouette-entrypoint.sh:46-63`); image
+  bumps don't re-seed.
+- `authorized_keys` is re-fetched from `dotfiles.authorized_keys_url` on
+  every `pru setup` so key rotation Just Works.
+- yadm dotfiles, npm prefix, pi auth secrets, tmux session for
+  `pirouette server` — same as today's container entrypoint, just over
+  SSH instead of `docker run`.
+- Server binds `127.0.0.1` on the remote (loopback only); access from
+  laptop is via SSH tunnel. The README's "Trust model" section now
+  describes per-provider perimeter.
+
+### Changed
+
+The internals were refactored around a `HostProvider` interface so the
+two providers can share `pru setup` / `teardown` / `destroy` / `status`
+/ `ssh` / `logs` / `tunnel` / `sync` plumbing. Behaviour on the EC2 path
+is byte-identical to 0.3.8.
+
+State file `~/.pirouette/ec2.json` is renamed to `~/.pirouette/host.json`
+and picks up a `kind` discriminator. Migration is automatic on first
+read; the legacy filename will be removed in a future release.
+
+`requireConfigured()` is now provider-aware. `kind = "byo-host"` no
+longer demands AWS keys; `kind = "ec2"` is unchanged.
+
+`pru preflight` dispatches on kind: EC2 keeps its detailed AWS resource
+checks; byo-host validates the SSH alias, runs an SSH probe, confirms
+`persistent_root` exists, and checks the remote has `node`, `npm`,
+`git`, `tmux`.
+
+`pru status` on byo-host now reports home-symlink health
+(✅ / ⚠ next to symlink, data dir, tmux state) in one SSH round-trip,
+making partial-setup states obvious.
+
+CLI help text updated where commands referenced "EC2" only.
+
+### Tests
+
++19 tests covering provider-aware `requireConfigured`, byo-host config
+resolution with default vs. override paths, and `host.json` migration
+from legacy `ec2.json`. Total: 159 passing.
+
+### Design doc
+
+Local at `docs/plans/2026-05-13-provider-abstraction.md` (gitignored
+like the rest of `docs/`).
+
+---
+
 ## 0.3.8 — Roomier chat bubbles + sidebar project names
 
 ### Changed
