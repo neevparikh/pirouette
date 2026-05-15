@@ -5,6 +5,113 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.5.0 — slash commands + AGENTS.md auto-injection + AWS SSO push
+
+All the agent-side QoL that piled up after v0.4.0 ships in one go. No
+breaking config changes; existing deployments pick everything up on the
+next `pru sync --npm` (or a fresh `pru setup`).
+
+### Added
+
+**Slash-command popup in the dashboard.** Type `/` in the message input
+to open an autocomplete popup that mirrors the existing `@`-mention
+popup (mutually exclusive via disjoint anchor regexes). Lists
+pirouette's client + server commands plus `/skill:<name>` entries
+discovered by the shared `ResourceLoader`.
+
+Three new server endpoints back the new commands:
+
+- `GET /api/skills` — `{ skills: [{name, description}, ...] }`. Drives
+  the slash-popup autocomplete.
+- `POST /api/agents/:id/compact` with optional `{instructions}` body —
+  fire-and-forget manual compaction. Wraps pi's `session.compact()`;
+  progress surfaces via existing `compaction_start` / `compaction_end`
+  events.
+- `POST /api/agents/:id/new` — discard the current session, create a
+  fresh JSONL in the same worktree/branch. Broadcasts a new WS
+  envelope `agent_session_reset` so clients clear cached transcripts.
+
+**Per-worktree pivot/DVC auto-setup.** For repos that use
+[pivot](https://github.com/METR/pivot) or DVC, every new agent's git
+worktree gets symlinks to the source repo's cache + config so the
+agent can run pipeline commands immediately instead of re-downloading
+gigabytes from S3. Auto-detected from `.pivot/` / `.dvc/` in the
+source repo; idempotent; non-fatal on failure. Specifically symlinks:
+
+  - `.pivot/cache` — content-addressed, append-only
+  - `.pivot/config.yaml` + `.pivot/config.lock`
+  - `.pivot/locks` — cross-process locking; sharing is REQUIRED for
+    correctness with concurrent worktrees
+  - `.pivot/state.lmdb` — stage+params -> output hash; content-
+    addressed so sharing is correct
+  - `.dvc/cache`
+
+Lives in `src/server/worktree-setup.ts`. Wired into
+`AgentManager.startSession` so it runs on resume too — pre-existing
+agents created before this shipped retroactively get fixed on their
+next start.
+
+**AWS SSO + CLI cred push via `pru sync --secrets`.** Agents on the
+remote can now hit S3 / STS with the same credentials your laptop has.
+Default `DEFAULT_SECRETS` now includes:
+
+  - `~/.aws/config` (file)
+  - `~/.aws/sso/cache/*.json` (dir, `.json`-only; `session.db` excluded)
+  - `~/.aws/cli/cache/*.json` (dir, `.json`-only)
+
+The `SecretSpec` shape becomes a discriminated union
+(`SecretFileSpec` | `SecretDirSpec`) so the dir flavour can stage flat
+directories with an optional include filter and replace semantics
+(default: wipe stale tokens before push). Four push paths cover the
+file/dir × ec2-bindmount/plain-ssh cross-product, so AWS push works
+on both EC2 and byo-host. Workflow: `aws sso login` on the laptop,
+then `pru sync --secrets` to refresh.
+
+### Fixed
+
+**Stop button now actually works.** `stopAgent()` was acquiring the
+agent lock first and *then* calling `session.abort()` inside the
+lock. But `sendMessage()` holds the same lock across
+`await session.prompt()`, which doesn't resolve until the turn ends
+naturally — so stopping a streaming agent deadlocked: the stop
+waiter never ran because the holder was waiting for a turn that
+would never end. Fix: call `session.abort()` *before* taking the
+lock. Pi's `abort()` is explicitly designed to be called concurrently
+with `prompt()`. Lengthy comment in `agent-manager.ts` explains the
+invariant for future maintainers.
+
+**AGENTS.md / CLAUDE.md context auto-injection.** Agents weren't
+seeing their project's `AGENTS.md` because pirouette uses one shared
+`DefaultResourceLoader` with `cwd = dataDir`. That loader's
+`getAgentsFiles()` scans up from cwd, so an agent working in
+`/data/worktrees/<proj>/<agent>` never saw the project's `AGENTS.md`.
+Fix: per-agent `ResourceLoader` wrapper that delegates everything to
+the shared loader except `getAgentsFiles()`, which we recompute on
+every call against the agent's `worktreePath` via pi's own
+`loadProjectContextFiles` helper. Behaviour now matches
+`pi --cwd=<worktreePath>` in a fresh TUI.
+
+### Changed
+
+`compaction_start` / `compaction_end` events now flow through the
+transcript state machine (`compaction.active` / `lastResult`), with
++42 lines of test coverage in
+`src/web/__tests__/transcript.test.js`. UI rendering of the
+compaction indicator badge is still a follow-up.
+
+### Known follow-ups
+
+- Compaction UI indicator: state is wired but the in-transcript badge
+  / footer chip isn't rendered yet. State plumbing in `transcript.js`
+  is ready; just needs the markup in `app.js` / `index.html`.
+- End-to-end smoke test against a live container for the three new
+  endpoints and the slash popup.
+- First exercise of `pushDirViaPlainSsh` (AWS-on-byo-host) on the
+  next `pru setup --kind byo-host` cycle. Bind-mount variants are
+  battle-tested; plain-ssh dir push is new code.
+
+---
+
 ## 0.4.0 — byo-host provider (install pirouette onto any SSH host)
 
 ### Added
