@@ -94,6 +94,7 @@ const $rawBtn = document.getElementById("agent-raw-btn");
 const $vimLabel = document.getElementById("vim-mode-label");
 const $vimToggle = document.getElementById("vim-toggle-btn");
 const $mentionPopup = document.getElementById("mention-popup");
+const $slashPopup = document.getElementById("slash-popup");
 const $modelBtn = document.getElementById("agent-model-btn");
 const $modelPicker = document.getElementById("model-picker");
 const $modelSearch = document.getElementById("model-search");
@@ -140,7 +141,8 @@ const vim = new VimMode($input, {
     sendMessage();
     return true;
   },
-  shouldSkip: () => !$mentionPopup.classList.contains("hidden"),
+  shouldSkip: () =>
+    !$mentionPopup.classList.contains("hidden") || !$slashPopup.classList.contains("hidden"),
 });
 
 function applyVimToggleStyle() {
@@ -613,6 +615,20 @@ function handleWsMessage(envelope) {
       renderAgentList();
       break;
 
+    case "agent_session_reset":
+      // The server discarded this agent's session and started a fresh one
+      // (in response to /new). Clear local transcript caches so the next
+      // render shows the empty-state placeholder; tool-expansion state
+      // for this agent's old keys also goes stale, so wipe it too.
+      delete transcriptByAgent[envelope.agentId];
+      delete currentActivity[envelope.agentId];
+      historyLoaded[envelope.agentId] = true; // empty server history; skip refetch
+      // expandedItems is keyed by `<agentId>:<idx>` style messageKeys, so
+      // entries from the old session can stay — they just won't match any
+      // new keys. Cheap enough to leave; no reason to scan-and-prune.
+      if (selectedAgentId === envelope.agentId) renderMessages();
+      break;
+
     case "agent_state_change": {
       const agent = agents.find((a) => a.id === envelope.agentId);
       const prevState = agent?.state;
@@ -664,6 +680,39 @@ function handleAgentEvent(agentId, event) {
     delete currentActivity[agentId];
     renderAgentList();
     if (agentId === selectedAgentId) renderAgentHeader();
+  } else if (event.type === "compaction_start") {
+    // Mirror compaction into the header's activity strip so the user sees
+    // "▶ compacting…" next to the agent name as well as the inline block.
+    const reason = typeof event.reason === "string" ? event.reason : null;
+    currentActivity[agentId] = {
+      tool: "compact",
+      subtitle: reason ? `(${reason})` : "",
+      since: Date.now(),
+    };
+    maybeStartActivityTicker();
+    renderAgentList();
+    if (agentId === selectedAgentId) {
+      renderAgentHeader();
+      renderMessages();
+    }
+  } else if (event.type === "compaction_end") {
+    // Drop the activity entry. The transcript already shows the result
+    // line via the COMPACTION_KEY block. Pi has just rewritten the
+    // session messages (replaced history with a summary) so refetch the
+    // canonical history; otherwise our local transcript stays stale
+    // until the next idle/waiting_input transition.
+    delete currentActivity[agentId];
+    renderAgentList();
+    if (agentId === selectedAgentId) {
+      renderAgentHeader();
+      renderMessages();
+      // The fetched history will arrive shortly and reconcile the
+      // messages list. We leave `historyLoaded` at true so other code
+      // paths don't double-fetch; fetchHistory itself overwrites the
+      // cached transcript.
+      void fetchHistory(agentId);
+      void fetchStats(agentId);
+    }
   }
 
   // Incremental path for text/thinking streaming: touch only the live bubble
@@ -1612,6 +1661,308 @@ function closeMentionPopup() {
   mentionIndex = 0;
 }
 
+// --- slash command autocomplete -----------------------------------------
+//
+// Two-way overlap with `@mention`:
+//   - The `^/` and `^@` regexes are disjoint, so only one popup is open
+//     at a time — the input handler dispatches to whichever matches.
+//   - The keydown handler handles popup nav (Up/Down/Enter/Tab/Esc) for
+//     whichever popup is currently visible, identical UX in both.
+//
+// Three flavours of command:
+//   - `client`  : pure UI action, no server roundtrip. Wraps an existing
+//                 button or app.js function (fork, stop, theme, copy, …).
+//   - `api`     : POSTs to a new pirouette endpoint that wraps a pi session
+//                 method (compact, new). Optional args go in the body.
+//   - `skill`   : passthrough — the literal text `/skill:<name> args` is
+//                 sent to /api/agents/:id/message; pi's session.prompt()
+//                 expands it server-side via _expandSkillCommand().
+//
+// Only `client` and `api` commands actually "dispatch" through this layer.
+// Skill commands and unknown `/foo` input fall through to sendMessage(),
+// which preserves pi's own command handling (extension commands, etc.).
+
+let skillsManifest = []; // {name, description}[] populated by /api/skills
+let skillsLoaded = false;
+
+async function loadSkillsManifest() {
+  try {
+    const res = await fetch("/api/skills");
+    if (!res.ok) throw new Error(`/api/skills: ${res.status}`);
+    const data = await res.json();
+    skillsManifest = Array.isArray(data.skills) ? data.skills : [];
+    skillsLoaded = true;
+  } catch (err) {
+    console.error("failed to load skills manifest:", err);
+    skillsManifest = [];
+  }
+}
+
+// Static command catalogue. `argLabel` shows in the popup as a hint about
+// what comes after the command name (purely cosmetic; the dispatcher just
+// passes everything after the first space through as `args`).
+const SLASH_COMMANDS = [
+  { name: "fork", description: "Fork this agent (copy session into a new agent)", kind: "client", takesArgs: false },
+  { name: "new", description: "Discard history and start a fresh session for this agent", kind: "api", endpoint: "new", takesArgs: false },
+  { name: "compact", description: "Manually compact session context", argLabel: "[instructions]", kind: "api", endpoint: "compact", takesArgs: true },
+  { name: "stop", description: "Stop the running agent", kind: "client", takesArgs: false },
+  { name: "resume", description: "Resume a stopped agent", kind: "client", takesArgs: false },
+  { name: "copy", description: "Copy last assistant message to clipboard", kind: "client", takesArgs: false },
+  { name: "raw", description: "Toggle raw markdown view", kind: "client", takesArgs: false },
+  { name: "model", description: "Open model picker", kind: "client", takesArgs: false },
+  { name: "theme", description: "Open theme picker", kind: "client", takesArgs: false },
+  { name: "notify", description: "Toggle browser notifications", kind: "client", takesArgs: false },
+];
+
+let slashIndex = 0;
+let slashMatches = [];
+
+/** Returns `{ partial }` if the input is a single token starting with `/`
+ *  (no trailing space), otherwise null. Matches the same "start-of-input,
+ *  no whitespace yet" semantics as the @mention popup, and so disjointly
+ *  with it. */
+function slashContextFromInput() {
+  const text = $input.value;
+  // `^/[^\s]*$` lets the popup track e.g. `/`, `/com`, `/skill:cach` — but
+  // closes once a space appears ("the user is now typing args, not a
+  // command name"). The same convention pi's TUI uses.
+  const m = text.match(/^\/(\S*)$/);
+  if (!m) return null;
+  return { partial: m[1] };
+}
+
+/** Build the full list of slash entries (static + skills) annotated with
+ *  which kind they are; the popup renders this list directly. */
+function allSlashEntries() {
+  const entries = SLASH_COMMANDS.map((c) => ({ ...c }));
+  for (const s of skillsManifest) {
+    entries.push({
+      name: `skill:${s.name}`,
+      description: s.description || "(skill)",
+      argLabel: "[args]",
+      kind: "skill",
+      takesArgs: true,
+    });
+  }
+  return entries;
+}
+
+function updateSlashPopup() {
+  const ctx = slashContextFromInput();
+  if (!ctx) {
+    closeSlashPopup();
+    return;
+  }
+  const partial = ctx.partial.toLowerCase();
+  // Substring match (matches @mention's policy). Surface command-name
+  // matches before skill matches; otherwise alphabetical so the order is
+  // stable across renders.
+  const all = allSlashEntries();
+  const matches = all
+    .filter((e) => e.name.toLowerCase().includes(partial))
+    .sort((a, b) => {
+      // Static commands above skills (skills can be many; static ones are
+      // the ones the user is most likely to want).
+      if (a.kind === "skill" && b.kind !== "skill") return 1;
+      if (a.kind !== "skill" && b.kind === "skill") return -1;
+      return a.name.localeCompare(b.name);
+    })
+    .slice(0, 12);
+
+  slashMatches = matches;
+  if (matches.length === 0) {
+    closeSlashPopup();
+    return;
+  }
+  if (slashIndex >= matches.length) slashIndex = 0;
+  renderSlashPopup();
+}
+
+function renderSlashPopup() {
+  if (slashMatches.length === 0) {
+    $slashPopup.classList.add("hidden");
+    return;
+  }
+  $slashPopup.classList.remove("hidden");
+  $slashPopup.innerHTML = slashMatches
+    .map((e, i) => {
+      const active = i === slashIndex ? "bg-base16-300/60" : "";
+      // Color-code the kind glyph so you can scan: skill=cyan,
+      // api=orange (server-side action), client=green (UI).
+      const glyph = e.kind === "skill" ? "◆" : e.kind === "api" ? "▸" : "•";
+      const glyphColor =
+        e.kind === "skill" ? "text-base16-cyan" : e.kind === "api" ? "text-base16-orange" : "text-base16-green";
+      const argHint = e.argLabel ? ` <span class="text-base16-500">${escHtml(e.argLabel)}</span>` : "";
+      return `<button class="w-full text-left px-3 py-2 flex items-baseline gap-2 hover:bg-base16-300/40 cursor-pointer ${active}" data-idx="${i}">
+        <span class="text-xs ${glyphColor} flex-none">${glyph}</span>
+        <span class="text-xs text-base16-700 font-mono whitespace-nowrap"><span class="text-base16-orange">/</span>${escHtml(e.name)}${argHint}</span>
+        <span class="text-[10px] text-base16-500 ml-auto truncate" title="${escHtml(e.description ?? "")}">${escHtml(e.description ?? "")}</span>
+      </button>`;
+    })
+    .join("");
+  $slashPopup.querySelectorAll("[data-idx]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      slashIndex = Number(btn.dataset.idx);
+      applySlashSelection();
+    });
+  });
+}
+
+/** Selecting from the popup either:
+ *   - executes immediately (commands with no args), or
+ *   - fills the input with `/<name> ` so the user can type args + Enter.
+ *  Mirrors pi's TUI behaviour. */
+function applySlashSelection() {
+  const pick = slashMatches[slashIndex];
+  if (!pick) return;
+  if (pick.takesArgs) {
+    $input.value = `/${pick.name} `;
+    closeSlashPopup();
+    $input.focus();
+    const len = $input.value.length;
+    $input.setSelectionRange(len, len);
+    autoResize();
+  } else {
+    closeSlashPopup();
+    $input.value = "";
+    autoResize();
+    void executeSlashCommand(pick.name, "");
+  }
+}
+
+function closeSlashPopup() {
+  $slashPopup.classList.add("hidden");
+  slashMatches = [];
+  slashIndex = 0;
+}
+
+/** Find the literal text content of the most recent finalized assistant
+ *  message in the currently-selected agent's transcript. Used by /copy. */
+function lastAssistantText() {
+  if (!selectedAgentId) return null;
+  const state = transcriptByAgent[selectedAgentId];
+  if (!state || !state.messages) return null;
+  for (let i = state.messages.length - 1; i >= 0; i--) {
+    const m = state.messages[i];
+    if (m.role === "assistant" && typeof m.content === "string" && m.content.trim()) {
+      return m.content;
+    }
+  }
+  return null;
+}
+
+async function copyLastAssistant() {
+  const text = lastAssistantText();
+  if (!text) {
+    alert("No assistant message to copy yet.");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (err) {
+    // navigator.clipboard requires a secure context (https) and a
+    // user-initiated event — both of which we have here, but fall back
+    // to a textarea + execCommand on truly hostile browsers.
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand("copy");
+    } catch {
+      alert("Copy failed: " + (err instanceof Error ? err.message : err));
+    }
+    ta.remove();
+  }
+}
+
+/** Parse `/cmd args` (with `cmd` possibly containing `:`) and dispatch.
+ *  Returns true if dispatched (and the caller should NOT fall through to
+ *  sendMessage); false if the caller should treat the input as a regular
+ *  message (skill commands, unknown commands).
+ *
+ *  The args portion is everything after the first space, with leading/
+ *  trailing whitespace trimmed. */
+async function tryDispatchSlash(text) {
+  if (!text.startsWith("/")) return false;
+  const spaceIdx = text.indexOf(" ");
+  const name = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
+  const args = spaceIdx === -1 ? "" : text.slice(spaceIdx + 1).trim();
+
+  // Skill passthrough: pi expands it server-side. Don't dispatch — let
+  // sendMessage() ship the literal text to /api/agents/:id/message.
+  if (name.startsWith("skill:")) return false;
+
+  const cmd = SLASH_COMMANDS.find((c) => c.name === name);
+  if (!cmd) return false; // unknown — let sendMessage handle it (pi may know)
+
+  return await executeSlashCommand(name, args);
+}
+
+async function executeSlashCommand(name, args) {
+  const cmd = SLASH_COMMANDS.find((c) => c.name === name);
+  if (!cmd) return false;
+
+  if (cmd.kind === "client") {
+    // Client-side commands ignore args (none of them currently take any).
+    switch (name) {
+      case "fork":
+        await forkAgent();
+        break;
+      case "stop":
+        await stopAgent();
+        break;
+      case "resume":
+        await resumeAgent();
+        break;
+      case "copy":
+        await copyLastAssistant();
+        break;
+      case "raw":
+        $rawBtn.click();
+        break;
+      case "model":
+        openModelPicker();
+        break;
+      case "theme":
+        openThemePicker();
+        break;
+      case "notify":
+        await toggleNotifications();
+        break;
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  if (cmd.kind === "api") {
+    if (!selectedAgentId) {
+      alert(`/${name} requires a selected agent.`);
+      return true;
+    }
+    const body = cmd.takesArgs && args
+      ? JSON.stringify({ instructions: args })
+      : "{}";
+    try {
+      const res = await fetch(`/api/agents/${selectedAgentId}/${cmd.endpoint}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(`/${name} failed: ${data.error || res.statusText}`);
+      }
+    } catch (err) {
+      alert(`/${name} failed: ${err}`);
+    }
+    return true;
+  }
+
+  return false;
+}
+
 // --- misc ---
 
 // --- theme picker (ported from neevparikh.github.io) ----------------------
@@ -1736,6 +2087,7 @@ function autoResize() {
 $sendBtn.addEventListener("click", sendMessage);
 $sendModeBtn.addEventListener("click", toggleSendMode);
 $input.addEventListener("keydown", (e) => {
+  // @mention popup wins if open (and disjoint from slash by construction).
   if ($mentionPopup.classList.contains("hidden") === false && mentionMatches.length > 0) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -1760,18 +2112,57 @@ $input.addEventListener("keydown", (e) => {
       return;
     }
   }
+  // Slash popup nav. Same UX as the mention popup.
+  if ($slashPopup.classList.contains("hidden") === false && slashMatches.length > 0) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      slashIndex = (slashIndex + 1) % slashMatches.length;
+      renderSlashPopup();
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      slashIndex = (slashIndex - 1 + slashMatches.length) % slashMatches.length;
+      renderSlashPopup();
+      return;
+    }
+    if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+      e.preventDefault();
+      applySlashSelection();
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeSlashPopup();
+      return;
+    }
+  }
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
-    sendMessage();
+    // Try slash dispatch first; on a hit, that's the whole user action and
+    // we suppress sendMessage. On a miss (skill command, unknown command,
+    // or non-slash input), fall through to sendMessage which handles
+    // @mention parsing and pi's own /skill: expansion server-side.
+    const text = $input.value.trim();
+    void (async () => {
+      const dispatched = await tryDispatchSlash(text);
+      if (!dispatched) sendMessage();
+    })();
   }
 });
 $input.addEventListener("input", () => {
   autoResize();
+  // Disjoint regexes: at most one of these will open. Both safely close
+  // when the input no longer matches their respective trigger.
   updateMentionPopup();
+  updateSlashPopup();
 });
 $input.addEventListener("blur", () => {
-  // Delay so a click inside the popup can fire first.
-  setTimeout(() => closeMentionPopup(), 150);
+  // Delay so a click inside either popup can fire first.
+  setTimeout(() => {
+    closeMentionPopup();
+    closeSlashPopup();
+  }, 150);
 });
 $newProjectBtn.addEventListener("click", openProjectModal);
 $projModalCancel.addEventListener("click", closeProjectModal);
@@ -1839,6 +2230,10 @@ $messages.addEventListener("click", (e) => {
 // Load the theme manifest in the background — the picker is populated
 // lazily when it opens, but we kick off the fetch now to warm the cache.
 loadThemeManifest();
+
+// Same for the skills manifest, which feeds the slash-command popup's
+// `/skill:<name>` entries. Cheap; one tiny GET on connect.
+void loadSkillsManifest();
 
 // --- init ---
 

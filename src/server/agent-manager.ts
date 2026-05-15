@@ -9,15 +9,18 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   getAgentDir,
+  loadProjectContextFiles,
   ModelRegistry,
   SessionManager,
   SettingsManager,
   type AgentSession,
   type AgentSessionEvent,
+  type ResourceLoader,
 } from "@mariozechner/pi-coding-agent";
 
 
 import { createWorktree, removeWorktree } from "./git.js";
+import { setupWorktreeDataTools } from "./worktree-setup.js";
 import { ProjectManager } from "./project-manager.js";
 import { StateManager } from "./state.js";
 import { normalizeEvent } from "./normalize.js";
@@ -118,6 +121,21 @@ export class AgentManager {
         );
         for (const err of exts.errors) {
           console.log(`[agent-manager] extension error: ${err.path}: ${err.error}`);
+        }
+
+        // Skills: same loader handles them. Log so we can debug "my skills
+        // aren't loading" without ssh-ing into the box.
+        const skillsResult = loader.getSkills();
+        console.log(
+          `[agent-manager] resource loader: ${skillsResult.skills.length} skill(s)` +
+            (skillsResult.skills.length > 0
+              ? `: ${skillsResult.skills.map((s: { name: string }) => s.name).join(", ")}`
+              : ""),
+        );
+        for (const d of skillsResult.diagnostics) {
+          console.log(
+            `[agent-manager] skill diagnostic: ${(d as { severity?: string }).severity ?? "?"} ${(d as { message?: string }).message ?? JSON.stringify(d)}`,
+          );
         }
 
         // Flush pending provider registrations into our modelRegistry so custom
@@ -243,6 +261,20 @@ export class AgentManager {
 
   isRunning(id: string): boolean {
     return this.handles.has(id);
+  }
+
+  /** Skills the shared ResourceLoader has discovered, in load order.
+   *  Returns an empty list if the loader hasn't initialised yet (callers
+   *  can still ensureResourceLoader() first if they need a synchronous
+   *  truth). The dashboard uses this to populate the slash-command
+   *  autocomplete for `/skill:<name>`. */
+  getSkills(): Array<{ name: string; description: string }> {
+    if (!this.resourceLoader) return [];
+    const { skills } = this.resourceLoader.getSkills();
+    return skills.map((s) => ({
+      name: s.name,
+      description: (s as { description?: string }).description ?? "",
+    }));
   }
 
   /** Live stats pulled from the pi session, matching the data pi's TUI
@@ -813,19 +845,84 @@ export class AgentManager {
 
   /** Stop an agent gracefully. */
   async stopAgent(id: string): Promise<void> {
+    // Critical: trigger the abort BEFORE taking the lock.
+    //
+    // sendMessage holds the agent lock across `await session.prompt()`,
+    // which doesn't resolve until the turn ends naturally. If we tried to
+    // acquire the lock first and then abort, we'd deadlock on every
+    // streaming agent — the lock waiter would never run because the
+    // holder is waiting for a turn that will never end on its own.
+    //
+    // Pi's session.abort() is explicitly designed to be called concurrently
+    // with prompt(): it fires the AbortSignal that prompt's LLM call is
+    // listening on, then awaits idle. So abort() unblocks prompt(), the
+    // sendMessage holder releases the lock, and our cleanup below can
+    // proceed.
+    const preLockHandle = this.handles.get(id);
+    if (preLockHandle) {
+      try {
+        await preLockHandle.session.abort();
+      } catch {
+        // ignore abort errors — we're tearing down anyway
+      }
+    }
     return this.withAgentLock(id, async () => {
+      // Re-fetch the handle: between abort and lock acquisition, another
+      // op (e.g. a parallel removeAgent) may have already disposed it.
       const handle = this.handles.get(id);
       if (handle) {
-        try {
-          await handle.session.abort();
-        } catch {
-          // ignore abort errors
-        }
         handle.unsubscribe();
         handle.session.dispose();
         this.handles.delete(id);
       }
       this.setAgentState(id, "stopped");
+    });
+  }
+
+  /** Manually compact the running agent's session context. Wraps pi's
+   *  `session.compact()`, which aborts the current operation first and
+   *  then runs a summarisation pass. Errors if the agent isn't running.
+   *
+   *  `instructions` (optional) gets passed through to pi as custom
+   *  guidance for the summary (e.g. "keep the architecture decisions,
+   *  drop the debugging tangents").
+   *
+   *  No agent lock: compact() internally aborts any in-flight prompt and
+   *  then runs its own LLM call. Taking pirouette's lock would deadlock
+   *  for the same reason stopAgent() can't (sendMessage holds the lock
+   *  across the streaming turn). pi's session is internally serialized,
+   *  so concurrent compact + prompt is safe. */
+  async compactAgent(id: string, instructions?: string): Promise<void> {
+    const handle = this.handles.get(id);
+    if (!handle) throw new Error(`Agent ${id} is not running`);
+    console.log(
+      `[agent-manager] compactAgent ${handle.config.name} (${id})${instructions ? ` with instructions` : ""}`,
+    );
+    // session.compact() emits compaction_start / compaction_end events
+    // that already flow to clients via the existing event subscription.
+    await handle.session.compact(instructions);
+  }
+
+  /** Discard the agent's current session and start a fresh one in the same
+   *  worktree / branch / project. Old session files stay on disk (orphaned
+   *  but available for forensic inspection); the next `SessionManager.
+   *  continueRecent` call would still pick the new file because it has the
+   *  later mtime.
+   *
+   *  Equivalent to pi's `/new` slash command. Aborts any in-flight turn,
+   *  disposes the old session, and creates a new one. Idempotent on a
+   *  stopped agent. */
+  async newSession(id: string): Promise<void> {
+    const config = this.stateManager.getAgent(id);
+    if (!config) throw new Error(`Agent ${id} not found`);
+    // Stop any running session (uses its own lock; we re-acquire below).
+    await this.stopAgent(id);
+    return this.withAgentLock(id, async () => {
+      console.log(`[agent-manager] newSession for ${config.name} (${id})`);
+      // resume:false makes startSession use SessionManager.create — a fresh
+      // JSONL file with no history. The agent lands in `idle` because the
+      // new session has zero messages.
+      await this.startSession(config, { resume: false });
     });
   }
 
@@ -900,6 +997,40 @@ export class AgentManager {
     await mkdir(config.worktreePath, { recursive: true });
     await mkdir(config.sessionDir, { recursive: true });
 
+    // Set up per-worktree data-pipeline scaffolding (pivot / DVC) if the
+    // source repo uses either. Idempotent: a no-op on every resume once
+    // the symlinks are in place. Done here so it also retroactively fixes
+    // pre-existing agents whose worktrees were created before this
+    // feature shipped — their next startSession picks it up.
+    const project = this.projectManager.getProject(config.projectName);
+    if (project) {
+      try {
+        const setup = await setupWorktreeDataTools({
+          repoPath: project.repoPath,
+          worktreePath: config.worktreePath,
+        });
+        if (setup.pivot || setup.dvc) {
+          const tools = [setup.pivot ? "pivot" : null, setup.dvc ? "dvc" : null]
+            .filter(Boolean)
+            .join(", ");
+          console.log(
+            `[agent-manager] data tools for ${config.name}: ${tools} (shared cache + config from ${project.repoPath})`,
+          );
+          if (setup.skipped.length > 0) {
+            console.log(
+              `[agent-manager] data-tools setup skipped (pre-existing non-symlink): ${setup.skipped.join(", ")}`,
+            );
+          }
+        }
+      } catch (err) {
+        // Non-fatal: pivot/dvc failure shouldn't block agent startup. The
+        // agent can still work, just without the shared-cache shortcut.
+        console.error(
+          `[agent-manager] data-tools setup failed for ${config.name}: ${err instanceof Error ? err.message : err}`,
+        );
+      }
+    }
+
     // Make sure extensions are loaded so hawk/other custom providers are
     // registered in the model registry before we resolve a model.
     const resourceLoader = await this.ensureResourceLoader();
@@ -965,13 +1096,57 @@ export class AgentManager {
 
     console.log(`[agent-manager] creating session for ${config.name}: cwd=${config.worktreePath} resume=${resume} model=${config.model ?? "default"}`);
 
+    // Per-agent ResourceLoader wrapper.
+    //
+    // Pirouette uses ONE DefaultResourceLoader, instantiated with cwd =
+    // dataDir (e.g. /data). That's fine for global things (extensions,
+    // ~/.pi/agent/skills) but breaks anything that walks up from cwd —
+    // most importantly AGENTS.md / CLAUDE.md, which pi expects to find in
+    // the project tree. Without this wrapper, an agent working in
+    // `/data/worktrees/<proj>/<agent>` would never see its project's
+    // AGENTS.md because the shared loader's `getAgentsFiles()` scanned
+    // from /data.
+    //
+    // We delegate everything to the shared loader except
+    // `getAgentsFiles()`, which we recompute on every call against the
+    // agent's actual worktreePath. `loadProjectContextFiles` is pi's own
+    // helper — same one DefaultResourceLoader uses internally, so the
+    // behaviour is identical to what pi's TUI does when launched with
+    // cwd=worktreePath.
+    //
+    // (Project-local skills / extensions / prompt-templates discovered
+    // via `.pi/skills` in the worktree are NOT included here because the
+    // user's skills currently live in ~/.pi/agent/skills/ which already
+    // works. If we ever need per-worktree skills too, switch to a fully
+    // per-agent DefaultResourceLoader — just be mindful that re-scanning
+    // extensions on every agent boot would redo provider registration.)
+    const agentDir = getAgentDir();
+    const agentResourceLoader: ResourceLoader = {
+      getExtensions: () => resourceLoader.getExtensions(),
+      getSkills: () => resourceLoader.getSkills(),
+      getPrompts: () => resourceLoader.getPrompts(),
+      getThemes: () => resourceLoader.getThemes(),
+      getAgentsFiles: () => ({
+        agentsFiles: loadProjectContextFiles({ cwd: config.worktreePath, agentDir }),
+      }),
+      getSystemPrompt: () => resourceLoader.getSystemPrompt(),
+      getAppendSystemPrompt: () => resourceLoader.getAppendSystemPrompt(),
+      extendResources: (paths) => resourceLoader.extendResources(paths),
+      reload: () => resourceLoader.reload(),
+    };
+    const ctxFiles = agentResourceLoader.getAgentsFiles().agentsFiles;
+    console.log(
+      `[agent-manager] context files for ${config.name}: ${ctxFiles.length}` +
+        (ctxFiles.length > 0 ? ` (${ctxFiles.map((f: { path: string }) => f.path).join(", ")})` : ""),
+    );
+
     const { session, modelFallbackMessage } = await createAgentSession({
       cwd: config.worktreePath,
       sessionManager,
       settingsManager,
       authStorage: this.authStorage,
       modelRegistry: this.modelRegistry,
-      resourceLoader,
+      resourceLoader: agentResourceLoader,
       model,
       thinkingLevel,
     });

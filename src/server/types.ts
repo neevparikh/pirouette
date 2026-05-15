@@ -106,6 +106,7 @@ export type WsEnvelope =
   | { kind: "agents_list"; agents: AgentConfig[] }
   | { kind: "agent_created"; agent: AgentConfig }
   | { kind: "agent_removed"; agentId: string }
+  | { kind: "agent_session_reset"; agentId: string }
   | { kind: "projects_list"; projects: ProjectConfig[] }
   | { kind: "project_created"; project: ProjectConfig }
   | { kind: "project_removed"; projectName: string }

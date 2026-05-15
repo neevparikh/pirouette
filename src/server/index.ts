@@ -282,6 +282,14 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
       return;
     }
 
+    // List skills the shared ResourceLoader has discovered. Used by the
+    // dashboard's slash-command autocomplete to surface `/skill:<name>`
+    // entries; also handy for diagnosing "my skills aren't loading".
+    if (method === "GET" && pathname === "/api/skills") {
+      json(res, 200, { skills: agentManager.getSkills() });
+      return;
+    }
+
     if (method === "GET" && pathname === "/api/agents") {
       const agents = agentManager.getAllAgents().map((a) => ({
         ...a,
@@ -564,6 +572,54 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
         try {
           await agentManager.resumeAgent(agentId);
           json(res, 200, { resumed: true });
+        } catch (err) {
+          error(res, 500, err instanceof Error ? err.message : String(err));
+        }
+        return;
+      }
+
+      // Manual context compaction. Optional `instructions` body field gets
+      // passed through to pi.session.compact() as custom summarisation
+      // guidance. The compaction itself happens asynchronously and emits
+      // compaction_start / compaction_end events; we accept-and-return.
+      if (method === "POST" && sub === "/compact") {
+        try {
+          const rawBody = await readBody(req).catch(() => "");
+          let instructions: string | undefined;
+          if (rawBody) {
+            try {
+              const parsed = JSON.parse(rawBody) as { instructions?: string };
+              if (typeof parsed.instructions === "string" && parsed.instructions.trim()) {
+                instructions = parsed.instructions.trim();
+              }
+            } catch {
+              // ignore body parse errors; treat as no instructions
+            }
+          }
+          // Fire-and-forget: compaction can take seconds (LLM call). We
+          // surface progress via compaction_start / compaction_end events.
+          agentManager.compactAgent(agentId, instructions).catch((err) => {
+            console.error(`[server] compactAgent error for ${agentId}: ${err}`);
+            broadcast({
+              kind: "error",
+              message: `Compaction failed for agent ${agentId}: ${err instanceof Error ? err.message : String(err)}`,
+            });
+          });
+          json(res, 202, { accepted: true });
+        } catch (err) {
+          error(res, 500, err instanceof Error ? err.message : String(err));
+        }
+        return;
+      }
+
+      // Discard the current session and start a fresh one. Same agent, same
+      // worktree, no conversation history. Broadcasts agent_session_reset so
+      // every connected client clears its cached transcript.
+      if (method === "POST" && sub === "/new") {
+        try {
+          await agentManager.newSession(agentId);
+          broadcast({ kind: "agent_session_reset", agentId });
+          json(res, 200, { reset: true });
         } catch (err) {
           error(res, 500, err instanceof Error ? err.message : String(err));
         }

@@ -20,6 +20,7 @@ describe("reduceEvent", () => {
       streamingText: "",
       streamingThinking: "",
       queue: { steering: [], followUp: [] },
+      compaction: { active: false, reason: null, lastResult: null },
     });
   });
 
@@ -181,6 +182,47 @@ describe("reduceEvent", () => {
     s = reduceEvent(s, { type: "message_update", updateType: "text_delta", delta: "hi" });
     s = reduceEvent(s, { type: "message_end", role: "assistant" });
     expect(s.queue.steering).toEqual(["hold on"]);
+  });
+
+  it("compaction_start flips compaction.active and carries reason", () => {
+    const s = reduceEvent(initialTranscriptState(), {
+      type: "compaction_start",
+      reason: "manual",
+    });
+    expect(s.compaction.active).toBe(true);
+    expect(s.compaction.reason).toBe("manual");
+    expect(s.compaction.lastResult).toBeNull();
+  });
+
+  it("compaction_end clears active and stores lastResult", () => {
+    let s = reduceEvent(initialTranscriptState(), {
+      type: "compaction_start",
+      reason: "auto",
+    });
+    s = reduceEvent(s, {
+      type: "compaction_end",
+      reason: "auto",
+      aborted: false,
+      willRetry: false,
+    });
+    expect(s.compaction.active).toBe(false);
+    expect(s.compaction.reason).toBeNull();
+    expect(s.compaction.lastResult).toMatchObject({
+      reason: "auto",
+      aborted: false,
+      willRetry: false,
+    });
+  });
+
+  it("compaction events do not disturb other transcript state", () => {
+    let s = reduceEvent(initialTranscriptState(), { type: "message_start", role: "assistant" });
+    s = reduceEvent(s, { type: "message_update", updateType: "text_delta", delta: "hello" });
+    s = reduceEvent(s, { type: "compaction_start", reason: "manual" });
+    expect(s.streamingText).toBe("hello");
+    expect(s.compaction.active).toBe(true);
+    s = reduceEvent(s, { type: "compaction_end", reason: "manual", aborted: false, willRetry: false });
+    expect(s.streamingText).toBe("hello");
+    expect(s.compaction.active).toBe(false);
   });
 });
 

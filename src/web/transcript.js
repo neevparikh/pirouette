@@ -39,6 +39,11 @@ export function initialTranscriptState() {
     streamingText: "",
     streamingThinking: "",
     queue: { steering: [], followUp: [] },
+    /** Compaction status. `active` toggles on compaction_start / -_end so
+     *  the UI can render a "compacting…" indicator while it runs. After
+     *  it ends, `lastResult` lingers until the next compaction so users
+     *  can see what happened (briefly mirrored as a system-style block). */
+    compaction: { active: false, reason: null, lastResult: null },
   };
 }
 
@@ -78,6 +83,37 @@ export function reduceEvent(state, event, now) {
         queue: { steering, followUp },
       };
     }
+
+    case "compaction_start":
+      // Pi fires this both for `/compact` (manual) and for auto-compaction
+      // when context fills up. Either way, surface it: hold the indicator
+      // open until compaction_end clears `active`.
+      return {
+        ...state,
+        compaction: {
+          active: true,
+          reason: typeof event.reason === "string" ? event.reason : null,
+          lastResult: state.compaction?.lastResult ?? null,
+        },
+      };
+
+    case "compaction_end":
+      // Result lingers (rendered as a small system-style line) so the user
+      // can confirm the compaction succeeded. The next compaction_start
+      // will overwrite it.
+      return {
+        ...state,
+        compaction: {
+          active: false,
+          reason: null,
+          lastResult: {
+            reason: typeof event.reason === "string" ? event.reason : null,
+            aborted: !!event.aborted,
+            willRetry: !!event.willRetry,
+            ts,
+          },
+        },
+      };
 
     case "message_start":
       if (event.role === "assistant") {
@@ -495,7 +531,61 @@ export function renderTranscriptBlocks(state, expandedItems, opts) {
       ),
     });
   }
+
+  // Compaction status row. Sits at the bottom of the transcript so it
+  // doesn't displace existing messages mid-stream. Two cases:
+  //   1. active: "compacting context…" with a pulsing dot.
+  //   2. last result: a one-liner showing what happened (briefly).
+  // We always render at least one of these when there's compaction state
+  // to surface; both share the same data-msg-key so they swap in place
+  // when the active state flips off.
+  const c = state.compaction;
+  if (c && (c.active || c.lastResult)) {
+    blocks.push({
+      key: COMPACTION_KEY,
+      html: renderCompactionRow(c),
+    });
+  }
   return blocks;
+}
+
+/** Stable key for the compaction-status block. Mirrors STREAMING_*_KEY —
+ *  the row swaps between "compacting…" and "compacted" content but keeps
+ *  the same DOM node, so reconciliation is a single innerHTML swap. */
+export const COMPACTION_KEY = "compaction";
+
+function renderCompactionRow(c) {
+  if (c.active) {
+    const reason = c.reason === "manual" ? "manual" : c.reason === "auto" ? "auto" : null;
+    const reasonLabel = reason ? ` (${reason})` : "";
+    return `
+      <div class="message-enter px-2 py-1" data-msg-key="${COMPACTION_KEY}">
+        <div class="flex items-baseline gap-2 text-xs font-mono text-base16-orange bg-base16-orange/10 border border-base16-orange/20 rounded px-2 py-1">
+          <span class="pulse-dot text-base16-orange">●</span>
+          <span>compacting context…${escHtml(reasonLabel)}</span>
+        </div>
+      </div>`;
+  }
+  const r = c.lastResult;
+  if (!r) return "";
+  const reason = r.reason === "manual" ? "manual" : r.reason === "auto" ? "auto" : null;
+  const reasonLabel = reason ? ` (${reason})` : "";
+  if (r.aborted) {
+    return `
+      <div class="message-enter px-2 py-1" data-msg-key="${COMPACTION_KEY}">
+        <div class="flex items-baseline gap-2 text-xs font-mono text-base16-red bg-base16-red/10 border border-base16-red/20 rounded px-2 py-1">
+          <span>×</span>
+          <span>compaction aborted${escHtml(reasonLabel)}${r.willRetry ? " (will retry)" : ""}</span>
+        </div>
+      </div>`;
+  }
+  return `
+    <div class="message-enter px-2 py-1" data-msg-key="${COMPACTION_KEY}">
+      <div class="flex items-baseline gap-2 text-xs font-mono text-base16-green bg-base16-green/10 border border-base16-green/20 rounded px-2 py-1">
+        <span>✓</span>
+        <span>context compacted${escHtml(reasonLabel)}</span>
+      </div>
+    </div>`;
 }
 
 // Re-export helpers app.js needs.

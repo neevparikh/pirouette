@@ -522,6 +522,16 @@
           class="hidden absolute bottom-full left-3 right-3 md:left-6 md:right-6 mb-1 bg-base16-200 border border-base16-300 rounded-lg shadow-lg max-h-56 overflow-y-auto z-10"
         ></div>
 
+        <!-- Slash-command popup. Mirrors the mention popup; shown when the
+             input starts with `/`. Lists pirouette's client/server commands
+             plus discovered `/skill:<name>` entries from /api/skills. The
+             two popups are mutually exclusive (the `^/` and `^@` regexes
+             are disjoint), so they share the same anchor without colliding. -->
+        <div
+          id="slash-popup"
+          class="hidden absolute bottom-full left-3 right-3 md:left-6 md:right-6 mb-1 bg-base16-200 border border-base16-300 rounded-lg shadow-lg max-h-72 overflow-y-auto z-10"
+        ></div>
+
         <!-- Queue chips. Populated by app.js when the agent has pending
              steering or follow-up messages (mirroring pi's TUI). Stays
              above the textarea so the user can see what they've already
