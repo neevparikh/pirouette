@@ -5,6 +5,35 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.5.1 — fix: scp $HOME expansion in byo-host dir-push
+
+### Fixed
+
+`pushDirViaPlainSsh` (used by `pru sync --secrets` on byo-host for AWS
+SSO/CLI cache pushes) constructed scp destinations as `$HOME/<rel>`.
+scp does NOT shell-expand `$HOME` on the remote — the path is passed
+literally and lands as a directory called "$HOME". First real exercise
+of the path on a live byo-host devpod surfaced this immediately:
+
+```
+scp: dest open "$HOME/.aws/sso/cache/<hash>.json": No such file or directory
+```
+
+Fix: use `~/<rel>` instead. scp DOES expand `~` (OpenSSH feature), and
+bash expands it the same way in our `ssh` commands too, so a single
+form works for both. `pushFileViaPlainSsh` already used `~/` correctly
+in its scp dest; this aligns `pushDirViaPlainSsh` with the same style.
+
+Lengthy in-file comment explaining the quoting subtlety (`~` inside
+double-quotes does NOT expand, so the path is deliberately unquoted;
+safe because `containerHomeRelative` is config-controlled and never
+contains whitespace for our standard secret specs).
+
+File pushes (hawk OAuth, hawk cache, AWS config) were unaffected and
+worked end-to-end in v0.5.0.
+
+---
+
 ## 0.5.0 — slash commands + AGENTS.md auto-injection + AWS SSO push
 
 All the agent-side QoL that piled up after v0.4.0 ships in one go. No

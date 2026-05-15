@@ -433,23 +433,27 @@ async function pushDirViaPlainSsh(
     return "skipped";
   }
 
-  const remoteDir = `$HOME/${spec.containerHomeRelative}`;
-  // Quote `~/...` so `$HOME` expands on the remote but the rest doesn't
-  // word-split. Wipe + mkdir in one round-trip when `replace !== false`.
+  // Use `~/...` (NOT `$HOME/...`). scp does NOT shell-expand `$HOME` on
+  // the remote -- the path is passed literally and lands as a directory
+  // called "$HOME". scp DOES expand `~` as an OpenSSH-specific feature.
+  // Both bash (for our `ssh` commands) and scp expand `~` consistently,
+  // so a single form works for both. (`~` inside double-quotes does NOT
+  // expand, so we deliberately leave the path unquoted -- safe because
+  // `containerHomeRelative` is config-controlled and never contains
+  // whitespace for our standard secret specs.)
+  const remoteDir = `~/${spec.containerHomeRelative}`;
   const setup =
     spec.replace === false
-      ? `mkdir -p "${remoteDir}" && chmod 700 "${remoteDir}"`
-      : `rm -rf "${remoteDir}" && mkdir -p "${remoteDir}" && chmod 700 "${remoteDir}"`;
+      ? `mkdir -p ${remoteDir} && chmod 700 ${remoteDir}`
+      : `rm -rf ${remoteDir} && mkdir -p ${remoteDir} && chmod 700 ${remoteDir}`;
   await ssh(setup, { target });
 
   for (const f of files) {
-    // scp into the dir explicitly so we don't depend on rsync semantics.
-    // Quote the destination path so $HOME expansion happens on the remote.
     await scp(path.join(local, f), `${remoteDir}/${f}`, { target });
   }
 
   // chmod 600 every pushed file (matches aws sso login's default).
-  await ssh(`find "${remoteDir}" -type f -exec chmod 600 {} \\;`, { target });
+  await ssh(`find ${remoteDir} -type f -exec chmod 600 {} \\;`, { target });
 
   log(
     `  push  ${spec.label.padEnd(28)} -> ${spec.containerHomeRelative}/ ` +

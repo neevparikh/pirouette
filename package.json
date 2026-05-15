@@ -1,6 +1,6 @@
 {
   "name": "@neevparikh/pirouette",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Long-lived pi coding agents in the cloud, with a web dashboard and a CLI.",
   "license": "MIT",
   "type": "module",
@@ -41,7 +41,7 @@
     "spike:stream:reset": "tsx src/spikes/event-streaming.ts reset"
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "^0.68.1",
+    "@earendil-works/pi-coding-agent": "^0.74.0",
     "commander": "^13.1.0",
     "smol-toml": "^1.6.1",
     "ws": "^8.18.3"
