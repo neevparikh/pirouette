@@ -16,7 +16,7 @@ import {
   type AgentSession,
   type AgentSessionEvent,
   type ResourceLoader,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 
 import { createWorktree, removeWorktree } from "./git.js";

@@ -8,7 +8,7 @@ import {
   ModelRegistry,
   SessionManager,
   SettingsManager,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 const ROOT_DIR = process.cwd();
 const SPIKE_ROOT = path.join(ROOT_DIR, ".pirouette", "spikes", "session-resume");

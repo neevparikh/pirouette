@@ -8,7 +8,7 @@
 // --- markdown ---
 //
 // Configured to match pi-coding-agent's markdown semantics (see
-// node_modules/@mariozechner/pi-tui/dist/components/markdown.js):
+// node_modules/@earendil-works/pi-tui/dist/components/markdown.js):
 //   - Default marked options (NO `breaks: true`). Single newlines are
 //     treated as whitespace within paragraphs, not hard breaks.
 //   - A strict strikethrough tokenizer so `~~foo~~` requires no spaces

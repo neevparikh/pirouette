@@ -3,7 +3,7 @@
  *  Lifted from the event-streaming spike with minor adjustments.
  */
 
-import type { AgentSessionEvent } from "@mariozechner/pi-coding-agent";
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { NormalizedEvent } from "./types.js";
 
 function normalizeMessageText(content: unknown): string | undefined {
@@ -144,5 +144,9 @@ export function normalizeEvent(event: AgentSessionEvent): NormalizedEvent {
       };
     case "auto_retry_end":
       return { type: event.type, attempt: event.attempt, success: event.success };
+    case "session_info_changed":
+      return { type: event.type, name: event.name };
+    case "thinking_level_changed":
+      return { type: event.type, level: event.level };
   }
 }

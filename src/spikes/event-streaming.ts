@@ -3,7 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
-import { getModel } from "@mariozechner/pi-ai";
+import { getModel } from "@earendil-works/pi-ai";
 import {
   AuthStorage,
   createAgentSession,
@@ -11,7 +11,7 @@ import {
   SessionManager,
   SettingsManager,
   type AgentSessionEvent,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 
 const ROOT_DIR = process.cwd();
@@ -155,6 +155,10 @@ function normalizeEvent(event: AgentSessionEvent): NormalizedEvent {
       return { type: event.type, attempt: event.attempt, maxAttempts: event.maxAttempts, delayMs: event.delayMs };
     case "auto_retry_end":
       return { type: event.type, attempt: event.attempt, success: event.success };
+    case "session_info_changed":
+      return { type: event.type, name: event.name };
+    case "thinking_level_changed":
+      return { type: event.type, level: event.level };
   }
 }
 
