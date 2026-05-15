@@ -43,6 +43,28 @@ export interface PirouetteConfig {
        *  `${persistent_root}/pirouette/data`. Server state lives here.
        *  Empty = use default. */
       data_dir: string;
+      /** Tailscale integration. When enabled, the bootstrap installs
+       *  tailscale (if missing), starts tailscaled in userspace mode,
+       *  runs `tailscale up` (interactive on first boot — prints a
+       *  login URL the user approves in a browser), and bridges the
+       *  tailnet's :443 to the pirouette server's loopback bind via
+       *  `tailscale serve`. Lets you reach the dashboard from any
+       *  device on the tailnet (phone, other laptop, ...) without an
+       *  SSH tunnel. Server binding stays 127.0.0.1; only tailscaled
+       *  (same netns) reaches it. */
+      tailscale: {
+        /** Master switch. Default false. */
+        enabled: boolean;
+        /** Tailnet hostname for this device. Empty = derived from
+         *  ssh_alias as `pirouette-${ssh_alias}`. The full FQDN you
+         *  reach from your phone is `${hostname}.<your-tailnet>.ts.net`. */
+        hostname: string;
+        /** Symlink `/var/lib/tailscale` to
+         *  `${persistent_root}/tailscale-state` so the node key + auth
+         *  state survive pod recreate. Default true. Set false if you
+         *  prefer fresh tailnet identity per pod. */
+        state_persistent: boolean;
+      };
     };
   };
   aws: {
@@ -144,6 +166,11 @@ const BUILTIN_DEFAULTS: PirouetteConfig = {
       user: "",
       home_dir: "",
       data_dir: "",
+      tailscale: {
+        enabled: false,
+        hostname: "",
+        state_persistent: true,
+      },
     },
   },
   aws: {
@@ -400,6 +427,15 @@ export interface EffectiveByoHostConfig {
   user: string;
   home_dir: string;
   data_dir: string;
+  tailscale: EffectiveByoHostTailscaleConfig;
+}
+
+export interface EffectiveByoHostTailscaleConfig {
+  enabled: boolean;
+  /** Resolved short hostname (e.g. "pirouette-gpu-devpod"). The full
+   *  FQDN is `${hostname}.<tailnet>.ts.net` once tailscale is up. */
+  hostname: string;
+  state_persistent: boolean;
 }
 
 /** Resolve byo-host config with default home_dir/data_dir computed from
@@ -413,11 +449,23 @@ export function resolveByoHostConfig(config: PirouetteConfig = getConfig()): Eff
       "byo-host provider not configured; set provider.byo-host.{ssh_alias, persistent_root, user}",
     );
   }
+  const ts = b.tailscale ?? { enabled: false, hostname: "", state_persistent: true };
   return {
     ssh_alias: b.ssh_alias,
     persistent_root: b.persistent_root,
     user: b.user,
     home_dir: b.home_dir || `${b.persistent_root}/home/${b.user}`,
     data_dir: b.data_dir || `${b.persistent_root}/pirouette/data`,
+    tailscale: {
+      enabled: ts.enabled,
+      // Default short hostname: `pirouette-<alias>` with non-alphanumerics
+      // collapsed to single hyphens (tailnet hostnames are DNS labels:
+      // letters/digits/hyphens only, <=63 chars). If the user supplied an
+      // explicit hostname, trust it.
+      hostname:
+        ts.hostname ||
+        `pirouette-${b.ssh_alias.replace(/[^a-zA-Z0-9-]+/g, "-")}`.slice(0, 63),
+      state_persistent: ts.state_persistent !== false,
+    },
   };
 }

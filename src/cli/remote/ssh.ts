@@ -112,6 +112,56 @@ export async function ssh(
   return { stdout, stderr };
 }
 
+/** Run an SSH command and stream stdout/stderr to the parent's stdio in
+ *  real time. Returns the exit code. No output is captured/returned.
+ *
+ *  Use this for long-running remote commands where the user needs to see
+ *  output as it happens — typically because the remote command is
+ *  interactive (e.g. `tailscale up` printing a login URL and blocking
+ *  until the user approves in a browser) or slow enough that buffered
+ *  output makes pirouette look hung.
+ *
+ *  Unlike `ssh()`, this does NOT capture stdout/stderr; you can't read
+ *  what was printed. If you need both, prefer two roundtrips (one
+ *  streaming, one buffered probe) over try-to-have-both. */
+export function sshStreaming(
+  command: string,
+  opts: {
+    target?: RemoteTarget;
+    forwardAgent?: boolean;
+    timeoutMs?: number;
+  } = {},
+): Promise<number> {
+  const t = opts.target ?? currentTarget();
+  const { opts: sshOpts, dest } = targetArgs(t);
+  const args = [
+    ...sshOpts,
+    ...(opts.forwardAgent ? ["-A"] : []),
+    dest,
+    command,
+  ];
+  return new Promise<number>((resolve, reject) => {
+    // Don't allocate a tty (-t) -- we want the remote stdout to be a
+    // pipe so tailscale up's login URL prints unbuffered. Streaming
+    // happens because `stdio: "inherit"` connects the child's pipes
+    // directly to the parent's terminal.
+    const child = spawn("ssh", args, { stdio: "inherit" });
+    let timer: NodeJS.Timeout | null = null;
+    if (opts.timeoutMs) {
+      timer = setTimeout(() => child.kill("SIGTERM"), opts.timeoutMs);
+    }
+    child.on("error", (err) => {
+      if (timer) clearTimeout(timer);
+      reject(err);
+    });
+    child.on("exit", (code) => {
+      if (timer) clearTimeout(timer);
+      if (code === 0) resolve(0);
+      else reject(new Error(`ssh exited with code ${code ?? "null"}`));
+    });
+  });
+}
+
 /** Run an interactive SSH session (stdio inherited, terminal passed through). */
 export function sshInteractive(
   remoteCommand: string | null = null,

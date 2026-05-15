@@ -30,7 +30,7 @@ import {
   type PirouetteConfig,
 } from "../../../config.js";
 import { checkLocalAuth, pushSecrets as pushSecretsLib } from "../secrets.js";
-import { scp as runScp, ssh as runSsh } from "../ssh.js";
+import { scp as runScp, ssh as runSsh, sshStreaming } from "../ssh.js";
 import {
   clearRemoteState,
   loadRemoteState,
@@ -74,6 +74,10 @@ interface BootstrapEnv {
   PIROUETTE_PORT: string;
   PIROUETTE_DOTFILES_URL?: string;
   PIROUETTE_AUTHORIZED_KEYS_URL?: string;
+  // Tailscale (only set when tailscale.enabled).
+  PIROUETTE_TS_ENABLED?: string;
+  PIROUETTE_TS_HOSTNAME?: string;
+  PIROUETTE_TS_STATE_PERSISTENT?: string;
 }
 
 export class ByoHostProvider implements HostProvider {
@@ -148,21 +152,36 @@ export class ByoHostProvider implements HostProvider {
     if (cfg.dotfiles.authorized_keys_url) {
       env.PIROUETTE_AUTHORIZED_KEYS_URL = cfg.dotfiles.authorized_keys_url;
     }
+    if (b.tailscale.enabled) {
+      env.PIROUETTE_TS_ENABLED = "1";
+      env.PIROUETTE_TS_HOSTNAME = b.tailscale.hostname;
+      env.PIROUETTE_TS_STATE_PERSISTENT = b.tailscale.state_persistent ? "1" : "0";
+    }
 
     const envPrefix = Object.entries(env)
       .map(([k, v]) => `${k}=${shellQuote(v)}`)
       .join(" ");
 
-    console.log(`running bootstrap (this may take a minute on first run)...`);
-    // `bash -lc` so the script inherits login-shell PATH (npm prefix,
-    // node, yadm location). Output streams back to the laptop via the
-    // ssh() helper.
-    const { stdout, stderr } = await runSsh(
+    if (b.tailscale.enabled) {
+      console.log(
+        `running bootstrap (this may take a few minutes on first run;` +
+          ` tailscale auth is interactive — watch for a login URL below)...`,
+      );
+    } else {
+      console.log(`running bootstrap (this may take a minute on first run)...`);
+    }
+
+    // Stream the bootstrap output live (not buffered). Critical for
+    // tailscale.enabled because `tailscale up` prints a login URL the
+    // user must approve in a browser — buffering would hide the URL
+    // until ssh times out. Also a UX win for the slow bootstrap steps
+    // (npm install, yadm clone) which feel hung when buffered.
+    // `bash -l` so the script inherits login-shell PATH (npm prefix,
+    // node, yadm location).
+    await sshStreaming(
       `chmod +x ${REMOTE_BOOTSTRAP_PATH} && ${envPrefix} bash -l ${REMOTE_BOOTSTRAP_PATH}`,
-      { target: this.target(), timeoutMs: 10 * 60 * 1000 },
+      { target: this.target(), timeoutMs: 15 * 60 * 1000 },
     );
-    if (stdout.trim()) console.log(stdout.trimEnd());
-    if (stderr.trim()) console.error(stderr.trimEnd());
 
     // ---- push secrets (idempotent overwrite) ---------------------------
     console.log("pushing local auth secrets...");
@@ -188,13 +207,41 @@ export class ByoHostProvider implements HostProvider {
     console.log("waiting for pirouette server to be healthy...");
     await this.waitForServerHealthy({ timeoutMs: 3 * 60 * 1000 });
 
+    // ---- read tailscale FQDN if the bootstrap wrote one ----------------
+    let tsFqdn: string | null = null;
+    if (b.tailscale.enabled) {
+      try {
+        const { stdout } = await runSsh(
+          `cat ${shellQuote(b.data_dir + "/tailscale-fqdn")} 2>/dev/null || true`,
+          { target: this.target(), timeoutMs: 10_000 },
+        );
+        tsFqdn = stdout.trim() || null;
+      } catch {
+        /* best effort */
+      }
+    }
+
     console.log("");
     console.log("  setup complete.");
-    console.log(`  Open an SSH tunnel from your laptop:`);
-    console.log(`    ssh -fN -L ${cfg.container.pirouette_port}:localhost:${cfg.container.pirouette_port} ${b.ssh_alias}`);
-    console.log(`  Then:`);
-    console.log(`    export PIROUETTE_URL=http://localhost:${cfg.container.pirouette_port}`);
-    console.log(`    pru open`);
+    if (tsFqdn) {
+      console.log(`  Tailscale: https://${tsFqdn} (reachable from any tailnet device)`);
+      console.log(`    set on your laptop:`);
+      console.log(`      export PIROUETTE_URL=https://${tsFqdn}`);
+      console.log(`    or add to ~/.pirouette/config.toml:`);
+      console.log(`      [server]`);
+      console.log(`      public_url    = "https://${tsFqdn}"`);
+      console.log(`      allowed_hosts = ["${tsFqdn}"]`);
+      console.log("");
+      console.log(`  Or fall back to SSH tunnel (always works):`);
+      console.log(`    ssh -fN -L ${cfg.container.pirouette_port}:localhost:${cfg.container.pirouette_port} ${b.ssh_alias}`);
+      console.log(`    export PIROUETTE_URL=http://localhost:${cfg.container.pirouette_port}`);
+    } else {
+      console.log(`  Open an SSH tunnel from your laptop:`);
+      console.log(`    ssh -fN -L ${cfg.container.pirouette_port}:localhost:${cfg.container.pirouette_port} ${b.ssh_alias}`);
+      console.log(`  Then:`);
+      console.log(`    export PIROUETTE_URL=http://localhost:${cfg.container.pirouette_port}`);
+      console.log(`    pru open`);
+    }
     console.log("");
     console.log(`  pru ssh          # shell into ${b.ssh_alias}`);
     console.log(`  pru logs         # tail server logs`);
@@ -295,6 +342,7 @@ export class ByoHostProvider implements HostProvider {
     //   1. is the home symlink intact and pointing at the persistent target?
     //   2. is the pirouette tmux session running?
     //   3. does the data dir exist and is the log file written?
+    //   4. tailscale FQDN (if tailscale was set up during bootstrap)
     // Output is line-by-line; we parse and emit health icons. Best-effort:
     // don't fail status() on transient SSH errors.
     let coarse: ProviderStatus["state"] = "unknown";
@@ -303,7 +351,8 @@ export class ByoHostProvider implements HostProvider {
       const probe =
         `if [ -L ${shellQuote(home)} ] && [ "$(readlink ${shellQuote(home)})" = ${shellQuote(state.homeDir)} ]; then echo SYMLINK_OK; else echo SYMLINK_BAD; fi; ` +
         `tmux has-session -t pirouette 2>/dev/null && echo TMUX_RUNNING || echo TMUX_STOPPED; ` +
-        `if [ -d ${shellQuote(state.dataDir)} ]; then echo DATA_DIR_OK; else echo DATA_DIR_MISSING; fi`;
+        `if [ -d ${shellQuote(state.dataDir)} ]; then echo DATA_DIR_OK; else echo DATA_DIR_MISSING; fi; ` +
+        `echo TS_FQDN="$(cat ${shellQuote(state.dataDir + "/tailscale-fqdn")} 2>/dev/null || echo none)"`;
       try {
         const { stdout } = await runSsh(probe, {
           target: this.target(),
@@ -313,12 +362,17 @@ export class ByoHostProvider implements HostProvider {
         const symlinkOk = lines.includes("SYMLINK_OK");
         const tmuxRunning = lines.includes("TMUX_RUNNING");
         const dataDirOk = lines.includes("DATA_DIR_OK");
+        const tsLine = lines.find((l) => l.startsWith("TS_FQDN="));
+        const tsFqdn = tsLine ? tsLine.slice("TS_FQDN=".length) : "none";
         coarse = tmuxRunning ? "running" : "stopped";
         extra.push(
           `  home swap  ${symlinkOk ? "\u2705 ok" : "\u26a0 not symlinked to home_dir (run \`pru setup\`?)"}`,
         );
         extra.push(`  data dir   ${dataDirOk ? "\u2705 present" : "\u26a0 missing"} (${state.dataDir})`);
         extra.push(`  tmux       ${tmuxRunning ? "\u2705 running" : "\u26a0 stopped"}`);
+        if (tsFqdn !== "none" && tsFqdn !== "") {
+          extra.push(`  tailscale  \u2705 https://${tsFqdn}`);
+        }
       } catch (err) {
         extra.push(`  health     unreachable (${err instanceof Error ? err.message : err})`);
       }

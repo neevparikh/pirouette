@@ -5,6 +5,83 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.6.0 — tailscale-on-byo-host (reach the dashboard from your phone)
+
+### Added
+
+Optional Tailscale integration for the byo-host provider. Enable it,
+run `pru setup`, approve once in a browser, then reach the dashboard
+at `https://<hostname>.<your-tailnet>.ts.net` from any device on your
+tailnet — phone, secondary laptop, anywhere. The trust boundary stays
+the tailnet ACL; pirouette server stays bound to `127.0.0.1` on the
+pod and only tailscaled (same netns) bridges traffic in.
+
+Config:
+
+```toml
+[provider.byo-host.tailscale]
+enabled         = true
+hostname        = "pirouette-gpu-devpod"   # optional; default: pirouette-${ssh_alias}
+state_persistent = true                     # symlink /var/lib/tailscale -> ${persistent_root}/tailscale-state
+```
+
+Mechanics added by the bootstrap script:
+
+1. Symlinks `/var/lib/tailscale` to the persistent volume on first run
+   (when `state_persistent`), so the node key + auth state survive
+   pod recreate. Migrates any pre-existing dir contents into the
+   symlink target before swapping, so an image-baked node key isn't
+   lost.
+2. Installs tailscale if not already on the image
+   (`curl -fsSL https://tailscale.com/install.sh | sudo sh`).
+3. Starts `tailscaled --tun=userspace-networking` in the background.
+   Userspace mode means no `CAP_NET_ADMIN` needed — works inside
+   stock k8s pods without privileged or special securityContext.
+4. Runs `tailscale up --hostname=...` on first boot. Without an
+   `--auth-key`, this prints a login URL and blocks until you approve
+   in a browser. `pru setup` streams the URL to your terminal so you
+   can click. Subsequent boots read the cached node key from the
+   persistent volume and skip auth.
+5. `tailscale serve --bg --https=443 http://localhost:$PORT` bridges
+   the loopback bind onto the tailnet IP on :443 with a tailscale-
+   provisioned TLS cert (LetsEncrypt via tailnet).
+6. After all of the above succeeds, the pirouette server is restarted
+   with `PIROUETTE_ALLOWED_HOSTS=<tailnet-fqdn>` so its Host-header
+   allowlist accepts requests from the new hostname. Restart is
+   sentinel-gated (`$DATA_DIR/tailscale-fqdn-active`) so it only runs
+   when the FQDN changes — idempotent on re-runs.
+
+`pru status` on byo-host gains a `tailscale  ✅ https://<fqdn>` line
+when tailscale is up, sourced from the bootstrap-written sentinel
+file (one ssh round-trip; same probe as the other health checks).
+
+New SSH helper `sshStreaming()` in `src/cli/remote/ssh.ts`. Buffered
+`ssh()` couldn't surface `tailscale up`'s login URL in time (output
+buffered until ssh returns; ssh wouldn't return until tailscale up
+returned; tailscale up wouldn't return until the user approved —
+deadlock from a UX perspective). The streaming variant inherits the
+parent's stdio so output is real-time. `provision()` switched to use
+it for the bootstrap step regardless of tailscale state, which is
+also a UX win for the slow npm install / yadm clone steps.
+
+### Notes
+
+- Tailscale is opt-in. Existing byo-host setups without
+  `[provider.byo-host.tailscale]` configured behave identically to
+  v0.5.2.
+- `state_persistent = false` gives you a fresh tailnet identity per
+  pod recreate (you'd re-auth in a browser each time). Useful if you
+  want disposable nodes; default is on for stable hostnames.
+- The EC2 provider is unaffected. Its existing
+  `tailscale serve --bg --https=443 http://localhost:7777` recipe
+  documented in the README continues to be a one-time manual step
+  per the README's "Quick start (cloud)" section.
+- If `tailscale up` fails for any reason, the server still works via
+  the SSH-tunnel fallback path — `pirouette server` stays bound to
+  127.0.0.1 regardless, so the tunnel route is always available.
+
+---
+
 ## 0.5.2 — fix: yadm clone over SSH in byo-host bootstrap
 
 ### Fixed

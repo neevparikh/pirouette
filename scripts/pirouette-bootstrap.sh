@@ -33,6 +33,20 @@
 #                                   copying the image's pre-swap ~/.ssh/.
 #   PIROUETTE_FORCE_REINSTALL=1     force `npm install -g` even if pirouette
 #                                   appears to already be installed.
+#   PIROUETTE_TS_ENABLED=1          enable tailscale-on-pod: install (if
+#                                   missing), start tailscaled in userspace
+#                                   mode, `tailscale up` interactively on
+#                                   first run, `tailscale serve --https=443
+#                                   -> http://localhost:$PIROUETTE_PORT`.
+#                                   Subsequent runs are idempotent.
+#   PIROUETTE_TS_HOSTNAME           short hostname for this node on the
+#                                   tailnet (e.g. "pirouette-gpu-devpod").
+#                                   The phone-reachable FQDN is
+#                                   ${HOSTNAME}.<tailnet>.ts.net.
+#   PIROUETTE_TS_STATE_PERSISTENT=1 symlink /var/lib/tailscale ->
+#                                   ${PIROUETTE_PERSISTENT_ROOT}/tailscale-
+#                                   state so the node key survives pod
+#                                   recreate. Default on when TS_ENABLED.
 #
 # Output goes to $HOME/logs/bootstrap.log via `tee` after we set up $HOME.
 
@@ -243,6 +257,115 @@ else
     log "starting tmux session '$SESSION_NAME' (binding 127.0.0.1:$PIROUETTE_PORT)"
     tmux new-session -d -s "$SESSION_NAME" \
         "PIROUETTE_DATA_DIR='$PIROUETTE_DATA_DIR' PIROUETTE_PORT='$PIROUETTE_PORT' PIROUETTE_HOST='127.0.0.1' pirouette server 2>&1 | tee -a '$PIROUETTE_DATA_DIR/logs/pirouette.log'"
+fi
+
+# ---- 8. Tailscale (optional) ----------------------------------------------
+# Bridges the loopback-bound pirouette server onto the tailnet so any
+# device on the tailnet (phone, other laptop) can reach the dashboard
+# without an SSH tunnel. Trust boundary stays the tailnet ACL --
+# pirouette server is still bound 127.0.0.1; only tailscaled (same
+# pod, same netns) reaches it.
+#
+# k8s pods typically lack CAP_NET_ADMIN, so we run tailscaled in
+# userspace mode (no TUN device, virtual netstack inside tailscaled).
+# `tailscale serve` works fine in userspace mode — listener is a
+# socket inside tailscaled, externally identical to kernel-mode.
+#
+# First-boot is interactive: `tailscale up` (without --auth-key)
+# prints a login URL and blocks until the user approves in a browser.
+# `pru setup` streams that URL back to the laptop terminal. Subsequent
+# boots reuse the cached node key from /var/lib/tailscale (symlinked
+# to the persistent volume by default) and skip the auth step.
+if [ "${PIROUETTE_TS_ENABLED:-0}" = "1" ]; then
+    : "${PIROUETTE_TS_HOSTNAME:?PIROUETTE_TS_HOSTNAME not set; required when TS_ENABLED=1}"
+
+    # State persistence: symlink /var/lib/tailscale -> persistent.
+    # Idempotent: skip when already a symlink to the right target.
+    if [ "${PIROUETTE_TS_STATE_PERSISTENT:-1}" = "1" ]; then
+        ts_state="$PIROUETTE_PERSISTENT_ROOT/tailscale-state"
+        sudo install -d -o root -g root -m 700 "$ts_state"
+        if [ ! -L /var/lib/tailscale ] \
+           || [ "$(sudo readlink /var/lib/tailscale 2>/dev/null)" != "$ts_state" ]; then
+            # If /var/lib/tailscale exists as a regular dir (image-baked or
+            # left over from a non-persistent run), move its contents into
+            # the persistent target FIRST so the cached node key survives.
+            if [ -d /var/lib/tailscale ] && [ ! -L /var/lib/tailscale ]; then
+                sudo cp -an /var/lib/tailscale/. "$ts_state"/ 2>/dev/null || true
+                sudo rm -rf /var/lib/tailscale
+            fi
+            sudo ln -sfn "$ts_state" /var/lib/tailscale
+            log "tailscale state persisted at $ts_state"
+        fi
+    fi
+
+    # Install if missing. The official install script auto-detects distro.
+    if ! command -v tailscale >/dev/null 2>&1; then
+        log "installing tailscale"
+        curl -fsSL https://tailscale.com/install.sh | sudo sh
+    fi
+
+    # Start tailscaled in userspace mode if not already running.
+    # `nohup` + `&` so it survives the bootstrap ssh session ending.
+    # Idempotent: skip when pgrep finds an existing tailscaled.
+    if ! pgrep -x tailscaled >/dev/null 2>&1; then
+        log "starting tailscaled (userspace networking)"
+        sudo nohup tailscaled \
+            --tun=userspace-networking \
+            --state=/var/lib/tailscale/tailscaled.state \
+            --socket=/var/run/tailscale/tailscaled.sock \
+            > /tmp/tailscaled.log 2>&1 &
+        # Give tailscaled a moment to bind its control socket.
+        for _ in 1 2 3 4 5; do
+            sudo tailscale status --json >/dev/null 2>&1 && break
+            sleep 1
+        done
+    fi
+
+    # `tailscale up` if not authed yet. Streams the login URL to the
+    # laptop's terminal (pru setup uses sshStreaming for this step).
+    # `--ssh=false` because devpod already has its own sshd on :22 and
+    # we don't want tailscale-ssh shadowing it.
+    if ! sudo tailscale status >/dev/null 2>&1; then
+        log "authenticating to tailnet as $PIROUETTE_TS_HOSTNAME (approve in browser)"
+        sudo tailscale up \
+            --hostname="$PIROUETTE_TS_HOSTNAME" \
+            --ssh=false
+    else
+        log "tailscale already authed as $(sudo tailscale status --json | grep -oE '"DNSName":"[^"]+"' | head -1 | cut -d'"' -f4 || echo unknown)"
+    fi
+
+    # `tailscale serve --bg --https=443 http://localhost:$PORT`
+    # idempotent: re-running the same mapping is a no-op. Setting the
+    # mapping survives tailscaled restarts (stored in serve config).
+    log "bridging tailnet :443 -> http://localhost:$PIROUETTE_PORT"
+    sudo tailscale serve --bg --https=443 "http://localhost:$PIROUETTE_PORT" || true
+
+    # Surface the dashboard URL so the user knows what to open from their
+    # phone (or set as PIROUETTE_URL on the laptop).
+    ts_fqdn="$(sudo tailscale status --json 2>/dev/null \
+        | grep -oE '"DNSName":"[^"]+"' | head -1 \
+        | cut -d'"' -f4 | sed 's/\.$//')"
+    if [ -n "$ts_fqdn" ]; then
+        log "dashboard URL: https://$ts_fqdn"
+        echo "$ts_fqdn" > "$PIROUETTE_DATA_DIR/tailscale-fqdn"
+
+        # Restart the pirouette tmux session with the tailscale FQDN in
+        # PIROUETTE_ALLOWED_HOSTS so the server's Host-header allowlist
+        # accepts requests addressed to that hostname. (Loopback addresses
+        # are always allowed automatically; only the new non-loopback FQDN
+        # needs to be allow-listed.) Idempotent via a sentinel file: only
+        # restart when the running session's FQDN differs from the
+        # tailscale-current one.
+        sentinel="$PIROUETTE_DATA_DIR/tailscale-fqdn-active"
+        prev_fqdn="$(cat "$sentinel" 2>/dev/null || true)"
+        if [ "$prev_fqdn" != "$ts_fqdn" ]; then
+            log "restarting pirouette server with allowed_hosts=$ts_fqdn"
+            tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
+            tmux new-session -d -s "$SESSION_NAME" \
+                "PIROUETTE_DATA_DIR='$PIROUETTE_DATA_DIR' PIROUETTE_PORT='$PIROUETTE_PORT' PIROUETTE_HOST='127.0.0.1' PIROUETTE_ALLOWED_HOSTS='$ts_fqdn' pirouette server 2>&1 | tee -a '$PIROUETTE_DATA_DIR/logs/pirouette.log'"
+            echo "$ts_fqdn" > "$sentinel"
+        fi
+    fi
 fi
 
 log "bootstrap complete."
