@@ -5,6 +5,45 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.6.1 — fix: tailscale FQDN extraction in byo-host bootstrap
+
+### Fixed
+
+v0.6.0's tailscale block scraped the device FQDN out of
+`tailscale status --json` with a regex (`"DNSName":"[^"]+"`) that
+required no whitespace between `:` and `"`. Newer tailscale versions
+pretty-print the JSON, putting a space there—so the regex matched
+nothing, `grep -oE` returned exit 1, and `set -euo pipefail` killed
+the bootstrap after the rest of the tailscale setup had already
+succeeded. The dashboard ended up reachable over the tailnet but
+the pirouette server didn't get restarted with
+`PIROUETTE_ALLOWED_HOSTS=<fqdn>`, so requests from the tailscale URL
+failed the server's Host-header allowlist.
+
+Fix: parse the FQDN from `tailscale serve status`'s plain-text
+output instead. The serve-status output prints `https://<fqdn>/` on
+its own line and is stable across tailscale versions. Also added
+`|| true` defensively so future parse failures here don't kill the
+bootstrap — the useful work (tailscaled up, serve configured) has
+already happened by the time we get here.
+
+### Manual recovery for v0.6.0 users
+
+If you already ran `pru setup` on v0.6.0 and the tailscale block
+crashed, your tailnet is configured correctly but the pirouette
+server is missing the allowed-hosts plumbing. Either:
+
+  1. Upgrade to v0.6.1 and `pru setup` again (idempotent re-run
+     adds the allowlist + restarts the tmux session).
+  2. Or manually restart the tmux session with the env var:
+     ```
+     ssh <alias> 'tmux kill-session -t pirouette; tmux new-session -d -s pirouette \
+       "PIROUETTE_DATA_DIR=<data_dir> PIROUETTE_PORT=7777 PIROUETTE_HOST=127.0.0.1 \
+        PIROUETTE_ALLOWED_HOSTS=<fqdn>.<tailnet>.ts.net pirouette server"'
+     ```
+
+---
+
 ## 0.6.0 — tailscale-on-byo-host (reach the dashboard from your phone)
 
 ### Added

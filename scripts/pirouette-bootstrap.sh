@@ -340,11 +340,27 @@ if [ "${PIROUETTE_TS_ENABLED:-0}" = "1" ]; then
     log "bridging tailnet :443 -> http://localhost:$PIROUETTE_PORT"
     sudo tailscale serve --bg --https=443 "http://localhost:$PIROUETTE_PORT" || true
 
-    # Surface the dashboard URL so the user knows what to open from their
-    # phone (or set as PIROUETTE_URL on the laptop).
-    ts_fqdn="$(sudo tailscale status --json 2>/dev/null \
-        | grep -oE '"DNSName":"[^"]+"' | head -1 \
-        | cut -d'"' -f4 | sed 's/\.$//')"
+    # Extract the FQDN to plumb into PIROUETTE_ALLOWED_HOSTS so the
+    # server's Host-header allowlist accepts the tailscale URL.
+    #
+    # We parse `tailscale serve status`'s plain-text output (which prints
+    # the URL deterministically across versions) rather than
+    # `tailscale status --json`. The JSON path is fragile: newer tailscale
+    # versions pretty-print the JSON with whitespace between key and
+    # value (`"DNSName": "..."`), which breaks naive regex extraction
+    # and — with set -euo pipefail — kills the bootstrap. The plain-text
+    # serve-status output is `https://<fqdn>/` on its own line; trivial
+    # to extract and stable.
+    #
+    # `|| true` at the end so even if parsing fails the script doesn't
+    # exit — the useful work (tailscaled up, serve configured) has
+    # already happened, and an empty ts_fqdn just skips the optional
+    # restart-with-allowlist below.
+    ts_fqdn="$(sudo tailscale serve status 2>/dev/null \
+        | grep -oE 'https://[^/[:space:]]+\.ts\.net' \
+        | head -1 \
+        | sed 's|^https://||' \
+        || true)"
     if [ -n "$ts_fqdn" ]; then
         log "dashboard URL: https://$ts_fqdn"
         echo "$ts_fqdn" > "$PIROUETTE_DATA_DIR/tailscale-fqdn"
