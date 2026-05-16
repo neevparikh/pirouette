@@ -5,6 +5,33 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.6.5 — fix: missing xhigh thinking level; dashboard cache-control
+
+### Added
+
+`xhigh` joins the thinking-level picker. Pi's `ThinkingLevel` is
+`"off" | "minimal" | "low" | "medium" | "high" | "xhigh"` per
+`@earendil-works/pi-agent-core`, but v0.6.3's picker hard-coded the
+first five and rejected `xhigh` from the API as invalid. Now both UI
+(picker shows all six) and server endpoint accept it.
+
+### Fixed
+
+The dashboard's static-asset responses now set `Cache-Control:
+no-cache` so the browser revalidates on each load. Without this, an
+aggressive cache (especially Safari on the laptop) could leave you
+with a freshly-synced `index.html` but a stale `app.js` -- the new
+UI elements would render but their event handlers wouldn't be wired
+(no JS bindings for the new DOM ids). The user-visible symptom was
+"button is there but clicking it does nothing." The new header makes
+the browser send `If-Modified-Since` on every request; the server
+still 304s when nothing has changed, so the cost is minimal.
+
+If you hit this on v0.6.3/0.6.4, a one-time hard refresh
+(`Cmd+Shift+R`) is the fix.
+
+---
+
 ## 0.6.4 — fix: byo-host restartServer drops env vars; project-creation UX
 
 ### Fixed (the urgent one)

@@ -189,7 +189,20 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
     try {
       const content = await readFile(resolved);
       const ext = path.extname(resolved);
-      res.writeHead(200, { "content-type": MIME_TYPES[ext] ?? "application/octet-stream" });
+      // Cache policy for the dashboard. Pirouette is updated frequently
+      // via `pru sync` and `pru sync --npm`, and aggressive browser
+      // caching on app.js / transcript.js etc. has bitten users -- they
+      // get the new index.html but the old JS, and event listeners for
+      // newly-added UI elements never get attached. Send `no-cache` on
+      // every response: forces a revalidating request on each load, but
+      // 304s when nothing changed (cheap). Vendored libraries under
+      // /vendor/ are content-hashed and effectively immutable, so we
+      // could be more aggressive there, but the simplicity of one rule
+      // beats the marginal byte savings.
+      res.writeHead(200, {
+        "content-type": MIME_TYPES[ext] ?? "application/octet-stream",
+        "cache-control": "no-cache",
+      });
       res.end(content);
       return true;
     } catch {
@@ -501,7 +514,7 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
       if (method === "POST" && sub === "/thinking-level") {
         try {
           const body = JSON.parse(await readBody(req)) as { level?: string };
-          const allowed = ["off", "minimal", "low", "medium", "high"] as const;
+          const allowed = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
           type ThinkingLevel = (typeof allowed)[number];
           if (
             !body.level ||

@@ -498,7 +498,7 @@ document.addEventListener("click", (e) => {
 // persists on agent config + reconfigures live session via pi's
 // `setThinkingLevel()`. UI re-renders via the broadcast state-change.
 
-const THINKING_LEVELS = /** @type {const} */ (["off", "minimal", "low", "medium", "high"]);
+const THINKING_LEVELS = /** @type {const} */ (["off", "minimal", "low", "medium", "high", "xhigh"]);
 
 function renderThinkingList() {
   const agent = selectedAgentId ? agentsById[selectedAgentId] : null;

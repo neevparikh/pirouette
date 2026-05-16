@@ -426,11 +426,12 @@ export class AgentManager {
    *  session is live, updates pi's reasoning settings via
    *  `session.setThinkingLevel()` so the next turn uses the new level
    *  immediately. Allowed values: "off" | "minimal" | "low" | "medium" |
-   *  "high". Levels above "off" only have effect on models with
-   *  reasoning support; pi silently ignores them on non-reasoning models. */
+   *  "high" | "xhigh". Levels above "off" only have effect on models
+   *  with reasoning support; pi silently ignores them on non-reasoning
+   *  models. */
   async setAgentThinkingLevel(
     id: string,
-    level: "off" | "minimal" | "low" | "medium" | "high",
+    level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh",
   ): Promise<void> {
     return this.withAgentLock(id, async () => {
       const config = this.getAgent(id);
