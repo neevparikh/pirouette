@@ -5,6 +5,29 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.6.6 — fix: thinking-picker referenced non-existent agentsById
+
+### Fixed
+
+The v0.6.3 thinking-picker code looked up the current agent via
+`agentsById[selectedAgentId]`, but the dashboard uses a flat `agents`
+array (not a map keyed by id). On click, `renderThinkingList()` threw
+`ReferenceError: agentsById is not defined`, which crashed before the
+popup was shown -- the dropdown silently failed to open with no
+visible feedback.
+
+Fix: use `agents.find((a) => a.id === selectedAgentId)`, mirroring
+the pattern used everywhere else in the dashboard for the same
+lookup.
+
+Didn't catch this earlier because v0.6.3 / 0.6.5 typechecks pass
+(app.js isn't covered by tsc; it's plain JS) and the existing test
+suite doesn't exercise the picker. Going forward, the smoke-test of
+any new dashboard UI should include actually clicking the new
+elements and watching DevTools console.
+
+---
+
 ## 0.6.5 — fix: missing xhigh thinking level; dashboard cache-control
 
 ### Added

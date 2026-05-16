@@ -501,7 +501,10 @@ document.addEventListener("click", (e) => {
 const THINKING_LEVELS = /** @type {const} */ (["off", "minimal", "low", "medium", "high", "xhigh"]);
 
 function renderThinkingList() {
-  const agent = selectedAgentId ? agentsById[selectedAgentId] : null;
+  // `agents` is a flat array (not a map) -- mirroring how every other
+  // dashboard handler looks up the current agent. Earlier draft mistakenly
+  // referenced `agentsById`, which doesn't exist.
+  const agent = selectedAgentId ? agents.find((a) => a.id === selectedAgentId) : null;
   const current = (agent && agent.thinkingLevel) || "off";
   let html = "";
   for (const level of THINKING_LEVELS) {
@@ -555,8 +558,9 @@ $thinkingList.addEventListener("click", async (e) => {
     // Optimistically reflect the change in our cached agent state so the
     // header label updates immediately. The server's state_change broadcast
     // also triggers a re-render shortly after.
-    if (agentsById[selectedAgentId]) {
-      agentsById[selectedAgentId].thinkingLevel = level;
+    const cached = agents.find((a) => a.id === selectedAgentId);
+    if (cached) {
+      cached.thinkingLevel = level;
       renderAgentHeader();
     }
   } catch (err) {
