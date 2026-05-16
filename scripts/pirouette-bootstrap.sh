@@ -250,13 +250,46 @@ fi
 # ---- 7. Start the server in tmux ------------------------------------------
 # Idempotent: only spawn if not already running. Bind 127.0.0.1 (loopback
 # only) -- access from laptop is via SSH tunnel. Decision 6 in the plan.
+#
+# The tmux command forwards a curated set of env vars that the laptop's
+# byo-host provider plumbs through (default model / thinking level,
+# config-level allowed_hosts). Empty / unset vars are omitted rather
+# than passed as empty strings because the server falls back to
+# config.toml / defaults via nullish-coalesce -- an explicit empty
+# string would override the fallback to literal "".
+#
+# Kept as a function so the tailscale block (which restarts the session
+# with an additional allowed-hosts entry for the tailnet FQDN) can
+# reuse the exact same env-construction logic.
+build_server_env() {
+    local extra_allowed_hosts="${1:-}"
+    local env_str=""
+    [ -n "${PIROUETTE_DEFAULT_MODEL:-}" ] && \
+        env_str="$env_str PIROUETTE_DEFAULT_MODEL='$PIROUETTE_DEFAULT_MODEL'"
+    [ -n "${PIROUETTE_DEFAULT_THINKING_LEVEL:-}" ] && \
+        env_str="$env_str PIROUETTE_DEFAULT_THINKING_LEVEL='$PIROUETTE_DEFAULT_THINKING_LEVEL'"
+    # Merge config-level allowed_hosts with any extra entries the caller
+    # supplies (e.g. the tailscale FQDN). Server parses this comma-separated.
+    local hosts="${PIROUETTE_ALLOWED_HOSTS:-}"
+    if [ -n "$extra_allowed_hosts" ]; then
+        if [ -n "$hosts" ]; then
+            hosts="$hosts,$extra_allowed_hosts"
+        else
+            hosts="$extra_allowed_hosts"
+        fi
+    fi
+    [ -n "$hosts" ] && env_str="$env_str PIROUETTE_ALLOWED_HOSTS='$hosts'"
+    echo "$env_str"
+}
+
 SESSION_NAME="pirouette"
 if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
     log "tmux session '$SESSION_NAME' already running; not restarting"
 else
     log "starting tmux session '$SESSION_NAME' (binding 127.0.0.1:$PIROUETTE_PORT)"
+    server_env="$(build_server_env)"
     tmux new-session -d -s "$SESSION_NAME" \
-        "PIROUETTE_DATA_DIR='$PIROUETTE_DATA_DIR' PIROUETTE_PORT='$PIROUETTE_PORT' PIROUETTE_HOST='127.0.0.1' pirouette server 2>&1 | tee -a '$PIROUETTE_DATA_DIR/logs/pirouette.log'"
+        "PIROUETTE_DATA_DIR='$PIROUETTE_DATA_DIR' PIROUETTE_PORT='$PIROUETTE_PORT' PIROUETTE_HOST='127.0.0.1' $server_env pirouette server 2>&1 | tee -a '$PIROUETTE_DATA_DIR/logs/pirouette.log'"
 fi
 
 # ---- 8. Tailscale (optional) ----------------------------------------------
@@ -375,10 +408,13 @@ if [ "${PIROUETTE_TS_ENABLED:-0}" = "1" ]; then
         sentinel="$PIROUETTE_DATA_DIR/tailscale-fqdn-active"
         prev_fqdn="$(cat "$sentinel" 2>/dev/null || true)"
         if [ "$prev_fqdn" != "$ts_fqdn" ]; then
-            log "restarting pirouette server with allowed_hosts=$ts_fqdn"
+            log "restarting pirouette server (adding $ts_fqdn to allowed_hosts)"
             tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
+            # build_server_env merges PIROUETTE_ALLOWED_HOSTS from config
+            # with the tailscale FQDN so we don't drop existing entries.
+            server_env="$(build_server_env "$ts_fqdn")"
             tmux new-session -d -s "$SESSION_NAME" \
-                "PIROUETTE_DATA_DIR='$PIROUETTE_DATA_DIR' PIROUETTE_PORT='$PIROUETTE_PORT' PIROUETTE_HOST='127.0.0.1' PIROUETTE_ALLOWED_HOSTS='$ts_fqdn' pirouette server 2>&1 | tee -a '$PIROUETTE_DATA_DIR/logs/pirouette.log'"
+                "PIROUETTE_DATA_DIR='$PIROUETTE_DATA_DIR' PIROUETTE_PORT='$PIROUETTE_PORT' PIROUETTE_HOST='127.0.0.1' $server_env pirouette server 2>&1 | tee -a '$PIROUETTE_DATA_DIR/logs/pirouette.log'"
             echo "$ts_fqdn" > "$sentinel"
         fi
     fi

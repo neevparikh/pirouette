@@ -74,6 +74,12 @@ interface BootstrapEnv {
   PIROUETTE_PORT: string;
   PIROUETTE_DOTFILES_URL?: string;
   PIROUETTE_AUTHORIZED_KEYS_URL?: string;
+  // Server-runtime config the bootstrap forwards into the pirouette
+  // tmux session's env (so `pirouette server` on the remote knows the
+  // laptop's config defaults without needing a config.toml of its own).
+  PIROUETTE_DEFAULT_MODEL?: string;
+  PIROUETTE_DEFAULT_THINKING_LEVEL?: string;
+  PIROUETTE_ALLOWED_HOSTS?: string;
   // Tailscale (only set when tailscale.enabled).
   PIROUETTE_TS_ENABLED?: string;
   PIROUETTE_TS_HOSTNAME?: string;
@@ -151,6 +157,25 @@ export class ByoHostProvider implements HostProvider {
     if (cfg.dotfiles.clone_url) env.PIROUETTE_DOTFILES_URL = cfg.dotfiles.clone_url;
     if (cfg.dotfiles.authorized_keys_url) {
       env.PIROUETTE_AUTHORIZED_KEYS_URL = cfg.dotfiles.authorized_keys_url;
+    }
+    // Forward server-runtime config to the bootstrap so it can plumb
+    // these into the pirouette server's tmux env. Without these, the
+    // remote server falls back to its (typically empty) config.toml
+    // and ends up with no default model -- `@<newname> ...` flows
+    // through the UI fail with "No model specified". The EC2 path
+    // passes these via `docker run -e`; byo-host has no docker layer
+    // so they go through the bootstrap.
+    if (cfg.container.default_model) {
+      env.PIROUETTE_DEFAULT_MODEL = cfg.container.default_model;
+    }
+    if (cfg.container.default_thinking_level) {
+      env.PIROUETTE_DEFAULT_THINKING_LEVEL = cfg.container.default_thinking_level;
+    }
+    if (cfg.server?.allowed_hosts && cfg.server.allowed_hosts.length > 0) {
+      // Server parses this comma-separated. The bootstrap merges the
+      // tailscale FQDN onto this list (rather than replacing) when
+      // tailscale is enabled.
+      env.PIROUETTE_ALLOWED_HOSTS = cfg.server.allowed_hosts.join(",");
     }
     if (b.tailscale.enabled) {
       env.PIROUETTE_TS_ENABLED = "1";

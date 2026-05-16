@@ -5,6 +5,56 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.6.2 — fix: forward server-runtime env vars on byo-host
+
+### Fixed
+
+The byo-host bootstrap script started the pirouette server tmux
+session with only `PIROUETTE_DATA_DIR / PIROUETTE_PORT /
+PIROUETTE_HOST` set in its env. Critically missing:
+`PIROUETTE_DEFAULT_MODEL`, `PIROUETTE_DEFAULT_THINKING_LEVEL`, and
+`PIROUETTE_ALLOWED_HOSTS`. The EC2 path passes these via
+`docker run -e`; byo-host has no docker layer so they have to thread
+through the bootstrap.
+
+User-visible symptom: launching an agent via `@<name>` in the UI
+failed with `Could not create @default: No model specified` even
+when `container.default_model` was set in `~/.pirouette/config.toml`
+on the laptop. The remote server had no `config.toml` of its own
+and no env-var override, so it ended up with no default.
+
+Fix:
+  - byo-host's `provision()` now copies `container.default_model`,
+    `container.default_thinking_level`, and (comma-joined)
+    `server.allowed_hosts` into the bootstrap env.
+  - The bootstrap script wraps tmux launch in a `build_server_env`
+    helper that emits each var only when non-empty (avoids
+    explicit-empty-string-overrides-fallback foot-gun), used by
+    both the initial start and the tailscale-block restart.
+  - The tailscale restart now MERGES the new FQDN onto the existing
+    `allowed_hosts` list rather than replacing it (so config-level
+    hostnames like `pirouette-neev.koi-moth.ts.net` survive).
+
+### Manual recovery for v0.6.0 / v0.6.1 users
+
+For a running byo-host server that's missing the env vars, the
+fastest fix is to restart the tmux session by hand (idempotent):
+
+```
+ssh <alias> 'tmux kill-session -t pirouette; tmux new-session -d -s pirouette \
+  "PIROUETTE_DATA_DIR=/data/pirouette/data \
+   PIROUETTE_PORT=7777 \
+   PIROUETTE_HOST=127.0.0.1 \
+   PIROUETTE_DEFAULT_MODEL=<your-model> \
+   PIROUETTE_ALLOWED_HOSTS=<tailscale-fqdn> \
+   pirouette server"'
+```
+
+Or upgrade to 0.6.2 and re-run `pru setup` (the idempotent fast
+path will hit the new build_server_env code).
+
+---
+
 ## 0.6.1 — fix: tailscale FQDN extraction in byo-host bootstrap
 
 ### Fixed
