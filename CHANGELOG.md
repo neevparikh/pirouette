@@ -5,6 +5,85 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.6.4 — fix: byo-host restartServer drops env vars; project-creation UX
+
+### Fixed (the urgent one)
+
+Byo-host's `restartServer()` (called by `pru sync` / `pru sync --npm`)
+spawned the new tmux session with only `PIROUETTE_DATA_DIR / PORT /
+HOST` set. Missing: `PIROUETTE_DEFAULT_MODEL`,
+`PIROUETTE_DEFAULT_THINKING_LEVEL`, and `PIROUETTE_ALLOWED_HOSTS`.
+The bootstrap script DOES pass all of these on initial start (v0.6.2),
+but byo-host's restartServer maintained its own duplicated tmux
+command line that didn't.
+
+Result: any `pru sync` (or any other path through restartServer)
+resurrected the server with empty allowlist + no default model:
+
+  - Tailscale URL (`pirouette-<host>.<tailnet>.ts.net`) -> 421
+    "misdirected request" from the Host-header check
+  - SSH tunnel (`http://localhost:7777`) -> still worked
+    (loopback is always allowed)
+  - `@default` agent launches in the UI -> "No model specified"
+
+The EC2 provider doesn't have this bug because docker passes env at
+container-start via `-e`, and tmux inherits the container env.
+Byo-host has no docker layer, so the env vars have to be re-passed at
+every tmux start.
+
+Fix: `restartServer()` now builds the same env prefix the bootstrap
+script does, including reading the tailscale FQDN sentinel
+(`<data_dir>/tailscale-fqdn`, written by the tailscale block) and
+merging it with `server.allowed_hosts` from config. Field names +
+formatting kept in lock-step with `build_server_env()` in
+`scripts/pirouette-bootstrap.sh`; if one changes, the other has to.
+
+Manual recovery for an existing v0.6.3-or-earlier deployment that
+lost its env via a recent `pru sync`: either re-run `pru setup`
+(bootstrap fast-paths and restarts tmux with full env), or restart
+tmux by hand with the env vars set (recipe in the v0.6.2 entry).
+
+### Fixed: project-creation feedback + concurrent-clone race
+
+### Fixed
+
+Clicking "create" in the new-project modal fired off a POST and waited
+for the response with zero visual feedback while the clone ran (1–30s
+for a typical repo). Easy to assume nothing happened and double-click,
+which raced two concurrent POSTs for the same name; whichever lost the
+race tripped the empty-dir check on the half-cloned target and
+surfaced as `repo path /…/repos/<name> is not empty; refusing to
+clone/init into it`.
+
+**UI side**: the create button now flips to `creating…` (or
+`cloning…` when a repo URL was provided), goes disabled, and the name
+/ repo inputs go disabled too. Re-enabled on success or failure. An
+in-flight flag also short-circuits Enter-key submits + re-click
+attempts, so the user can't queue a second request even if they try.
+
+**Server side**: `ProjectManager.createProject` now tracks names
+currently being created in a small in-memory set; a concurrent POST
+for the same name (e.g. from curl or two browser tabs) gets a
+`PROJECT_IN_FLIGHT`-tagged error which the API maps to a `409
+Conflict` with a clear "already in progress" message, rather than
+racing into the empty-dir failure.
+
+The empty-dir error message itself also got slightly more helpful —
+includes the exact `rm -rf <path>` command to clear leftover state.
+
+### Added
+
+On server boot, the project manager scans `<dataDir>/repos/` for
+subdirectories without a matching project entry in state and logs a
+warning if it finds any. Most likely cause: a previous
+`createProject` that errored after the clone but before
+`putProject` ran (e.g. server crashed mid-clone). Non-fatal — we
+don't auto-clean because the user might want to inspect / recover
+the contents — just surfaces the situation in `pru logs` so future
+"name is not empty" errors are easier to diagnose.
+
+---
+
 ## 0.6.3 — thinking-level picker in the dashboard
 
 ### Added

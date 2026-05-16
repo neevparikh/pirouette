@@ -336,7 +336,17 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
         broadcast({ kind: "project_created", project });
         json(res, 201, project);
       } catch (err) {
-        error(res, 400, err instanceof Error ? err.message : String(err));
+        // Distinguish "this name is already mid-creation" (transient,
+        // 409) from generic creation failures (400). The UI's disable-on-
+        // click guard should prevent users from hitting this, but curl
+        // and concurrent-tabs scenarios still benefit.
+        const code = (err as { code?: string }).code;
+        const msg = err instanceof Error ? err.message : String(err);
+        if (code === "PROJECT_IN_FLIGHT") {
+          error(res, 409, msg);
+        } else {
+          error(res, 400, msg);
+        }
       }
       return;
     }
@@ -772,6 +782,9 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
   // Ensure the default `scratchpad` project exists so `pru launch` with no
   // --project flag always has a target. Idempotent on subsequent boots.
   await projectManager.ensureDefaultProject();
+  // Surface any orphaned repo dirs (state-less leftovers from previous
+  // crashed creates). Non-fatal; user can rm or rename to recover.
+  await projectManager.warnAboutOrphanedRepos();
 
   await agentManager.resumeAll();
 

@@ -512,15 +512,63 @@ export class ByoHostProvider implements HostProvider {
   // ---- helpers ----------------------------------------------------------
 
   /** Tear down + relaunch the pirouette tmux session so the new pirouette
-   *  binary takes effect. Matches `scripts/pirouette-bootstrap.sh`'s tmux
-   *  launch line, including the 127.0.0.1 bind (Decision 6). */
+   *  binary takes effect.
+   *
+   *  Mirrors `scripts/pirouette-bootstrap.sh`'s `build_server_env` +
+   *  `start_server_tmux` logic: forwards default_model, default_thinking_
+   *  level, and the merged allowed_hosts (config + tailscale FQDN if
+   *  known) so the server's Host-header allowlist actually accepts the
+   *  tailscale URL and so unspecified-model agent launches use the
+   *  configured default. The bootstrap script itself passes these env
+   *  vars on initial start; without this method also passing them, a
+   *  later `pru sync` / `pru sync --npm` would drop them on the floor
+   *  and the dashboard would 421 / @default would fail with "no model". */
   private async restartServer(): Promise<void> {
     const b = resolveByoHostConfig(this.cfg);
+    const cfg = this.cfg;
+
+    // Build the env prefix. Keep field names + value formatting in sync
+    // with build_server_env() in scripts/pirouette-bootstrap.sh.
+    const envPairs: string[] = [
+      `PIROUETTE_DATA_DIR=${shellQuote(b.data_dir)}`,
+      `PIROUETTE_PORT=${cfg.container.pirouette_port}`,
+      `PIROUETTE_HOST=127.0.0.1`,
+    ];
+    if (cfg.container.default_model) {
+      envPairs.push(`PIROUETTE_DEFAULT_MODEL=${shellQuote(cfg.container.default_model)}`);
+    }
+    if (cfg.container.default_thinking_level) {
+      envPairs.push(
+        `PIROUETTE_DEFAULT_THINKING_LEVEL=${shellQuote(cfg.container.default_thinking_level)}`,
+      );
+    }
+
+    // Allowed hosts: config + tailscale FQDN if set (the bootstrap writes
+    // it to a sentinel file after `tailscale serve` succeeds). Dedupe.
+    const allowedHosts = new Set<string>(cfg.server?.allowed_hosts ?? []);
+    try {
+      const r = await runSsh(
+        `cat ${shellQuote(b.data_dir + "/tailscale-fqdn")} 2>/dev/null || true`,
+        { target: this.target(), timeoutMs: 10_000 },
+      );
+      const fqdn = r.stdout.trim();
+      if (fqdn) allowedHosts.add(fqdn);
+    } catch {
+      /* best effort; sentinel may not exist on a non-tailscale setup */
+    }
+    if (allowedHosts.size > 0) {
+      envPairs.push(
+        `PIROUETTE_ALLOWED_HOSTS=${shellQuote([...allowedHosts].join(","))}`,
+      );
+    }
+
+    const envPrefix = envPairs.join(" ");
+
     await runSsh(`tmux kill-session -t pirouette 2>/dev/null || true`, {
       target: this.target(),
     });
     await runSsh(
-      `bash -lc "tmux new-session -d -s pirouette 'PIROUETTE_DATA_DIR=${shellQuote(b.data_dir)} PIROUETTE_PORT=${this.cfg.container.pirouette_port} PIROUETTE_HOST=127.0.0.1 pirouette server 2>&1 | tee -a ${shellQuote(b.data_dir + "/logs/pirouette.log")}'"`,
+      `bash -lc "tmux new-session -d -s pirouette '${envPrefix} pirouette server 2>&1 | tee -a ${shellQuote(b.data_dir + "/logs/pirouette.log")}'"`,
       { target: this.target() },
     );
   }

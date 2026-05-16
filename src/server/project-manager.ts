@@ -6,7 +6,7 @@
  *  can spin up agents without setting up a repo first.
  */
 
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 
 import type { StateManager } from "./state.js";
@@ -61,6 +61,13 @@ export class ProjectManager {
     return this.stateManager.getProjects();
   }
 
+  /** Names currently being created. Prevents two concurrent POSTs for the
+   *  same project name from racing each other into the clone step —
+   *  whichever loses the race trips the "not empty" check and leaves the
+   *  user staring at a cryptic error. With this set, the second caller
+   *  gets a clean 409 right away. */
+  private creatingNames = new Set<string>();
+
   /** Create the default scratchpad project if it doesn't exist. Idempotent.
    *  Called once at server startup so that bare agent creation always has a
    *  target project. */
@@ -70,11 +77,39 @@ export class ProjectManager {
     return this.createProject({ name: DEFAULT_PROJECT_NAME });
   }
 
+  /** Log a warning for any subdirectory under `repos/` that doesn't have a
+   *  matching project entry in state. Most likely cause: a failed
+   *  `createProject` that errored AFTER the on-disk clone started but
+   *  BEFORE `putProject` ran (e.g. server crash). Doesn't auto-clean —
+   *  the user might want to inspect / recover the contents. Called once
+   *  at server boot from runServer(). */
+  async warnAboutOrphanedRepos(): Promise<void> {
+    let entries: string[];
+    try {
+      entries = await readdir(this.reposDir());
+    } catch {
+      return; // repos/ doesn't exist yet, fine.
+    }
+    const knownNames = new Set(this.getAllProjects().map((p) => p.name));
+    const orphans = entries.filter((e) => !knownNames.has(e));
+    if (orphans.length === 0) return;
+    console.warn(
+      `[project-manager] orphaned repo dir(s) detected (no matching project in state): ` +
+        orphans.map((o) => `${this.reposDir()}/${o}`).join(", "),
+    );
+    console.warn(
+      `  Likely from a failed createProject that didn't roll back cleanly.` +
+        ` Either rm -rf to free the name, or move aside if you want to recover the contents.`,
+    );
+  }
+
   /** Create a new project.
    *  - If `repoUrl` is provided: clone it into `<dataDir>/repos/<name>/`
    *  - Otherwise: `git init` an empty repo so worktrees still work
    *
-   *  Throws on name collision, validation error, or clone failure. */
+   *  Throws on name collision, validation error, or clone failure.
+   *  Throws `PROJECT_IN_FLIGHT` (a tagged Error) if a concurrent POST is
+   *  already creating the same name — callers should map that to 409. */
   async createProject(opts: {
     name: string;
     repoUrl?: string;
@@ -85,51 +120,71 @@ export class ProjectManager {
       throw new Error(`project "${name}" already exists`);
     }
 
-    const repoPath = this.projectRepoPath(name);
-    const worktreesDir = this.projectWorktreesDir(name);
-
-    await mkdir(this.reposDir(), { recursive: true });
-    await mkdir(worktreesDir, { recursive: true });
-
-    // Ensure the target path is empty so clone/init doesn't trip over stale files.
-    if (!(await isEmptyOrMissing(repoPath))) {
-      throw new Error(
-        `repo path ${repoPath} is not empty; refusing to clone/init into it`,
-      );
-    }
-
-    let defaultBranch: string | null = null;
-    try {
-      if (opts.repoUrl) {
-        console.log(`[project-manager] cloning ${opts.repoUrl} \u2192 ${repoPath}`);
-        await cloneRepo({ url: opts.repoUrl, dest: repoPath });
-        defaultBranch = await getDefaultBranch(repoPath);
-      } else {
-        // Always init a repo so worktrees work. Scratchpad falls into this
-        // branch: bare directory + empty initial commit.
-        console.log(`[project-manager] init new repo at ${repoPath}`);
-        defaultBranch = await initRepo(repoPath);
-      }
-    } catch (err) {
-      // Clean up partial state on failure.
-      try {
-        await rm(repoPath, { recursive: true, force: true });
-      } catch {
-        /* ignore */
-      }
+    // Race guard. A clone takes 1-30s; the UI used to allow a second
+    // click during that window, which raced into the empty-dir check on
+    // the half-cloned target dir and produced a cryptic error. With this
+    // set, the second concurrent call returns immediately with a clean
+    // signal that the request is already in flight.
+    if (this.creatingNames.has(name)) {
+      const err = new Error(
+        `project "${name}" creation is already in progress — wait for it to finish (or fail)`,
+      ) as Error & { code?: string };
+      err.code = "PROJECT_IN_FLIGHT";
       throw err;
     }
+    this.creatingNames.add(name);
 
-    const config: ProjectConfig = {
-      name,
-      repoUrl: opts.repoUrl ?? null,
-      repoPath,
-      worktreesDir,
-      defaultBranch,
-      createdAt: new Date().toISOString(),
-    };
-    this.stateManager.putProject(config);
-    return config;
+    try {
+      const repoPath = this.projectRepoPath(name);
+      const worktreesDir = this.projectWorktreesDir(name);
+
+      await mkdir(this.reposDir(), { recursive: true });
+      await mkdir(worktreesDir, { recursive: true });
+
+      // Ensure the target path is empty so clone/init doesn't trip over stale files.
+      if (!(await isEmptyOrMissing(repoPath))) {
+        throw new Error(
+          `repo path ${repoPath} is not empty; refusing to clone/init into it. ` +
+            `If this is leftover from a failed previous attempt, remove it first: ` +
+            `\`rm -rf ${repoPath}\` (or pick a different project name).`,
+        );
+      }
+
+      let defaultBranch: string | null = null;
+      try {
+        if (opts.repoUrl) {
+          console.log(`[project-manager] cloning ${opts.repoUrl} \u2192 ${repoPath}`);
+          await cloneRepo({ url: opts.repoUrl, dest: repoPath });
+          defaultBranch = await getDefaultBranch(repoPath);
+        } else {
+          // Always init a repo so worktrees work. Scratchpad falls into this
+          // branch: bare directory + empty initial commit.
+          console.log(`[project-manager] init new repo at ${repoPath}`);
+          defaultBranch = await initRepo(repoPath);
+        }
+      } catch (err) {
+        // Clean up partial state on failure.
+        try {
+          await rm(repoPath, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+        throw err;
+      }
+
+      const config: ProjectConfig = {
+        name,
+        repoUrl: opts.repoUrl ?? null,
+        repoPath,
+        worktreesDir,
+        defaultBranch,
+        createdAt: new Date().toISOString(),
+      };
+      this.stateManager.putProject(config);
+      return config;
+    } finally {
+      this.creatingNames.delete(name);
+    }
   }
 
   /** Remove a project. Optionally delete its repo + worktrees on disk.

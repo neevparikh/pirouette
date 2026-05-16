@@ -1624,12 +1624,32 @@ function openProjectModal() {
 function closeProjectModal() {
   $projModal.classList.add("hidden");
 }
+// Re-entrancy guard: the modal's create button used to fire a fresh
+// POST on every click, and a clone takes 1-30s with no visual feedback.
+// Double-clicking would race two concurrent POSTs for the same name --
+// whichever lost the race tripped the empty-dir check on a half-cloned
+// target and surfaced as a cryptic error. We now disable the button +
+// flip its label while a request is in flight; the server also rejects
+// concurrent requests for the same name with a 409, but the UI side is
+// what users notice.
+let projectCreateInFlight = false;
+
 async function createProject() {
+  if (projectCreateInFlight) return;
   const name = $projModalName.value.trim();
   if (!name) return;
   const body = { name };
   const repo = $projModalRepo.value.trim();
   if (repo) body.repoUrl = repo;
+
+  projectCreateInFlight = true;
+  const originalLabel = $projModalCreate.textContent;
+  $projModalCreate.textContent = repo ? "cloning\u2026" : "creating\u2026";
+  $projModalCreate.disabled = true;
+  $projModalCreate.classList.add("opacity-60", "cursor-not-allowed");
+  $projModalName.disabled = true;
+  $projModalRepo.disabled = true;
+
   try {
     const res = await fetch("/api/projects", {
       method: "POST",
@@ -1641,11 +1661,17 @@ async function createProject() {
       alert(data.error || "Failed to create project");
       return;
     }
+    closeProjectModal();
   } catch (err) {
     alert("Failed to create project: " + err.message);
-    return;
+  } finally {
+    projectCreateInFlight = false;
+    $projModalCreate.textContent = originalLabel;
+    $projModalCreate.disabled = false;
+    $projModalCreate.classList.remove("opacity-60", "cursor-not-allowed");
+    $projModalName.disabled = false;
+    $projModalRepo.disabled = false;
   }
-  closeProjectModal();
 }
 
 // --- @mention autocomplete ---
