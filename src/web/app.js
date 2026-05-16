@@ -99,6 +99,9 @@ const $modelBtn = document.getElementById("agent-model-btn");
 const $modelPicker = document.getElementById("model-picker");
 const $modelSearch = document.getElementById("model-search");
 const $modelList = document.getElementById("model-list");
+const $thinkingBtn = document.getElementById("agent-thinking-btn");
+const $thinkingPicker = document.getElementById("thinking-picker");
+const $thinkingList = document.getElementById("thinking-list");
 
 // --- vim mode ---
 //
@@ -478,6 +481,86 @@ document.addEventListener("click", (e) => {
     e.target !== $modelBtn
   ) {
     closeModelPicker();
+  }
+  if (
+    !$thinkingPicker.classList.contains("hidden") &&
+    !$thinkingPicker.contains(e.target) &&
+    e.target !== $thinkingBtn
+  ) {
+    closeThinkingPicker();
+  }
+});
+
+// --- thinking-level picker ---
+//
+// Mirror of the model picker but for reasoning effort. Five fixed
+// options. Click `thinking ▾` -> popup -> click a level. Server
+// persists on agent config + reconfigures live session via pi's
+// `setThinkingLevel()`. UI re-renders via the broadcast state-change.
+
+const THINKING_LEVELS = /** @type {const} */ (["off", "minimal", "low", "medium", "high"]);
+
+function renderThinkingList() {
+  const agent = selectedAgentId ? agentsById[selectedAgentId] : null;
+  const current = (agent && agent.thinkingLevel) || "off";
+  let html = "";
+  for (const level of THINKING_LEVELS) {
+    const isCurrent = level === current;
+    const checkmark = isCurrent
+      ? '<span class="text-base16-green mr-1">✓</span>'
+      : '<span class="mr-1"> </span>';
+    const activeClass = isCurrent
+      ? "bg-base16-green/10 text-base16-700"
+      : "hover:bg-base16-200 text-base16-600";
+    html += `
+      <button
+        class="w-full text-left px-3 py-1.5 text-sm font-mono cursor-pointer ${activeClass}"
+        data-thinking-level="${level}"
+      >${checkmark}${level}</button>`;
+  }
+  $thinkingList.innerHTML = html;
+}
+
+function openThinkingPicker() {
+  if (!selectedAgentId) return;
+  $thinkingPicker.classList.remove("hidden");
+  renderThinkingList();
+}
+function closeThinkingPicker() {
+  $thinkingPicker.classList.add("hidden");
+}
+
+$thinkingBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if ($thinkingPicker.classList.contains("hidden")) openThinkingPicker();
+  else closeThinkingPicker();
+});
+$thinkingList.addEventListener("click", async (e) => {
+  const target = e.target.closest("[data-thinking-level]");
+  if (!target) return;
+  const level = target.getAttribute("data-thinking-level");
+  if (!level || !selectedAgentId) return;
+  closeThinkingPicker();
+  try {
+    const res = await fetch(`/api/agents/${selectedAgentId}/thinking-level`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ level }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(`Failed to set thinking level: ${data.error || res.statusText}`);
+      return;
+    }
+    // Optimistically reflect the change in our cached agent state so the
+    // header label updates immediately. The server's state_change broadcast
+    // also triggers a re-render shortly after.
+    if (agentsById[selectedAgentId]) {
+      agentsById[selectedAgentId].thinkingLevel = level;
+      renderAgentHeader();
+    }
+  } catch (err) {
+    alert(`Failed to set thinking level: ${err}`);
   }
 });
 
@@ -1068,6 +1151,7 @@ function renderAgentHeader() {
     $rawBtn.classList.add("hidden");
     $forkBtn.classList.add("hidden");
     $modelBtn.classList.add("hidden");
+    $thinkingBtn.classList.add("hidden");
     return;
   }
 
@@ -1076,6 +1160,7 @@ function renderAgentHeader() {
   $rawBtn.classList.remove("hidden");
   $forkBtn.classList.remove("hidden");
   $modelBtn.classList.remove("hidden");
+  $thinkingBtn.classList.remove("hidden");
 
   $agentName.textContent = agent.name;
 

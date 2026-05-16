@@ -494,6 +494,22 @@
             </div>
           </div>
 
+          <!-- Thinking-level picker. Mirror of the model picker but with a
+               fixed five-option list (off / minimal / low / medium / high).
+               Only meaningful on reasoning-capable models; pi silently
+               ignores the setting on non-reasoning models. Persists on the
+               agent config and reconfigures the live session via pi's
+               `setThinkingLevel()`. -->
+          <div class="relative">
+            <button id="agent-thinking-btn" class="text-xs px-2 py-1 rounded bg-base16-300/40 text-base16-500 hover:bg-base16-300/70 cursor-pointer font-mono whitespace-nowrap" title="Set reasoning effort for this agent">thinking ▾</button>
+            <div
+              id="thinking-picker"
+              class="hidden absolute right-0 top-full mt-2 w-44 bg-base16-100 border border-base16-300 rounded-lg shadow-lg z-50 overflow-hidden flex flex-col"
+            >
+              <div id="thinking-list" class="overflow-y-auto"></div>
+            </div>
+          </div>
+
           <!-- Fork: spawn a new agent with a copy of this one's session.
                Click to fork at HEAD. To fork from a specific message, hover
                a user message in the transcript and click its ⋉ button. -->

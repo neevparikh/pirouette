@@ -421,6 +421,43 @@ export class AgentManager {
     });
   }
 
+  /** Change the thinking level for an agent. Mirrors setAgentModel:
+   *  persists on the agent config (so resumes pick it up) and, if the
+   *  session is live, updates pi's reasoning settings via
+   *  `session.setThinkingLevel()` so the next turn uses the new level
+   *  immediately. Allowed values: "off" | "minimal" | "low" | "medium" |
+   *  "high". Levels above "off" only have effect on models with
+   *  reasoning support; pi silently ignores them on non-reasoning models. */
+  async setAgentThinkingLevel(
+    id: string,
+    level: "off" | "minimal" | "low" | "medium" | "high",
+  ): Promise<void> {
+    return this.withAgentLock(id, async () => {
+      const config = this.getAgent(id);
+      if (!config) throw new Error(`Agent ${id} not found`);
+
+      // Update persisted state first so resumes use the new level. Then
+      // mutate the live session if any -- pi's setThinkingLevel is
+      // synchronous and doesn't validate against the model (high-level
+      // semantics live in the provider; an unsupported level is a
+      // no-op there).
+      this.stateManager.updateAgentState(id, { thinkingLevel: level });
+      config.thinkingLevel = level;
+
+      const handle = this.handles.get(id);
+      if (handle) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (handle.session as any).setThinkingLevel(level);
+        console.log(`[agent-manager] live setThinkingLevel ${id} -> ${level}`);
+      } else {
+        console.log(`[agent-manager] config-only setThinkingLevel ${id} -> ${level} (no live session)`);
+      }
+
+      // Same lightweight rerender broadcast as setAgentModel.
+      this.emitStateChange(id, config.state);
+    });
+  }
+
   getMessages(id: string): ChatMessage[] {
     const handle = this.handles.get(id);
     if (!handle) return [];

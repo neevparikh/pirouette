@@ -5,6 +5,39 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.6.3 — thinking-level picker in the dashboard
+
+### Added
+
+A `thinking ▾` button in the agent header, next to the existing
+`model ▾` picker. Opens a five-option popup
+(`off / minimal / low / medium / high`); clicking a level persists it
+on the agent config and — if the session is live — reconfigures pi's
+reasoning settings via `AgentSession.setThinkingLevel()` so the next
+turn uses the new level.
+
+New server endpoint:
+
+  POST /api/agents/:id/thinking-level
+  body: { "level": "off" | "minimal" | "low" | "medium" | "high" }
+
+New AgentManager method `setAgentThinkingLevel(id, level)` mirrors
+`setAgentModel`'s shape: takes the agent lock, updates persisted
+state first (so resumes pick the new level up), then mutates the
+live session if one exists, then emits a state-change broadcast so
+the UI re-renders.
+
+Levels above `off` only have effect on models with reasoning support;
+pi silently ignores them on non-reasoning models, so the picker is
+shown for every agent regardless of model.
+
+Before this, thinking level was settable only at agent creation
+(`pru launch --thinking <level>` or `container.default_thinking_level`
+in config) and read-only after that. Now it's editable mid-conversation,
+including mid-streaming-turn.
+
+---
+
 ## 0.6.2 — fix: forward server-runtime env vars on byo-host
 
 ### Fixed

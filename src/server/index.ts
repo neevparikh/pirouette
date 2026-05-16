@@ -485,6 +485,34 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
         return;
       }
 
+      // Switch this agent's reasoning effort level. Mirror of /model:
+      // persists on the config + reconfigures the live session via pi's
+      // `setThinkingLevel()`. No-op on non-reasoning models.
+      if (method === "POST" && sub === "/thinking-level") {
+        try {
+          const body = JSON.parse(await readBody(req)) as { level?: string };
+          const allowed = ["off", "minimal", "low", "medium", "high"] as const;
+          type ThinkingLevel = (typeof allowed)[number];
+          if (
+            !body.level ||
+            typeof body.level !== "string" ||
+            !(allowed as readonly string[]).includes(body.level)
+          ) {
+            error(
+              res,
+              400,
+              `level must be one of: ${allowed.join(", ")} (got ${JSON.stringify(body.level)})`,
+            );
+            return;
+          }
+          await agentManager.setAgentThinkingLevel(agentId, body.level as ThinkingLevel);
+          json(res, 200, { ok: true, level: body.level });
+        } catch (err) {
+          error(res, 400, err instanceof Error ? err.message : String(err));
+        }
+        return;
+      }
+
       // List of user messages in this agent's session that can serve as
       // fork points. UI uses this to render "fork from here" buttons.
       if (method === "GET" && sub === "/fork-points") {
