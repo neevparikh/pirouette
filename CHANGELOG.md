@@ -5,6 +5,23 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.6.7 — fix: agent-header button row overflows on mobile
+
+### Fixed
+
+Adding the `thinking ▾` picker in v0.6.3 brought the visible-button
+count up to six (raw / model / thinking / fork / stop / delete). With
+the hamburger + agent name on the same flex row, the total width
+exceeds a 375px-wide phone viewport, so `delete` (rightmost) clips
+off the edge.
+
+Fix: add `flex-wrap md:flex-nowrap` to the `<header id="agent-header">`.
+On mobile the buttons drop to a second row below the name. On desktop
+(md+) the single-row layout is preserved -- plenty of horizontal
+space there, no wrap needed.
+
+---
+
 ## 0.6.6 — fix: thinking-picker referenced non-existent agentsById
 
 ### Fixed

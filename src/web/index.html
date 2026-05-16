@@ -447,7 +447,15 @@
            `items-center`. Top-align there would leave the agent-name's
            Zilla Slab text at one Y and the pill-text baselines at
            another, which reads as misalignment. -->
-      <header id="agent-header" class="flex-none md:h-[88px] px-3 md:px-6 py-2 md:py-3 border-b border-base16-300 bg-base16-200/50 flex items-center md:items-start justify-between gap-2 md:gap-4">
+      <!-- On mobile (<md), allow the action-button cluster to wrap to a
+           second row. With six visible pills (raw/model/thinking/fork/
+           stop/delete) plus the agent name and hamburger, the row
+           overflows the viewport on a 375px-wide phone -- 'delete'
+           visibly clips on the right edge. `flex-wrap` lets the
+           buttons drop below the name when they can't fit, with
+           `md:flex-nowrap` restoring the single-row desktop layout
+           (which has plenty of horizontal real estate). -->
+      <header id="agent-header" class="flex-none md:h-[88px] px-3 md:px-6 py-2 md:py-3 border-b border-base16-300 bg-base16-200/50 flex flex-wrap md:flex-nowrap items-center md:items-start justify-between gap-2 md:gap-4">
         <button
           id="sidebar-toggle"
           class="md:hidden flex-none px-2 py-1 rounded text-base16-500 hover:text-base16-700 hover:bg-base16-300/40 cursor-pointer text-base"
