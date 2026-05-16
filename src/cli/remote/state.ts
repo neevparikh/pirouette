@@ -19,6 +19,8 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { homedir } from "node:os";
 import path from "node:path";
 
+import { defaultUserConfigPath, userConfigPath } from "../../config.js";
+
 /** Provider kinds that can stamp a record. Kept as a string union so the
  *  migration shim can read forward-compatible state files without choking. */
 export type ProviderKind = "ec2" | "byo-host";
@@ -62,19 +64,56 @@ export interface RemoteState {
   updatedAt?: string;
 }
 
-function stateDir(): string {
-  return path.join(homedir(), ".pirouette");
-}
-
-/** Canonical state-file path. */
+/** Canonical state-file path. Derived from the active config path so a
+ *  multi-deployment setup (one TOML + one host.json per deployment) Just
+ *  Works:
+ *
+ *    - Default config `~/.pirouette/config.toml`
+ *        -> state at `~/.pirouette/host.json`  (historical default; kept
+ *           verbatim so existing single-deployment setups don't move
+ *           their state file when this code lands)
+ *    - Custom config `~/cfgs/ec2.toml`
+ *        -> state at `~/cfgs/ec2.host.json`  (stem of config + .host.json,
+ *           same directory)
+ *    - Explicit `$PIROUETTE_STATE` env var
+ *        -> wins outright. Useful when you want a custom state location
+ *           independent of the config dir (e.g. ephemeral state on /tmp
+ *           for testing).
+ */
 export function stateFilePath(): string {
-  return path.join(stateDir(), "host.json");
+  const fromEnv = process.env.PIROUETTE_STATE;
+  if (fromEnv && fromEnv.trim().length > 0) {
+    return fromEnv.startsWith("~/")
+      ? path.join(homedir(), fromEnv.slice(2))
+      : fromEnv;
+  }
+  const cfg = userConfigPath();
+  // Historical default: ~/.pirouette/host.json. Preserved when the active
+  // config is the default location so users upgrading from <0.7.0 don't
+  // have to migrate their state file.
+  if (cfg === defaultUserConfigPath()) {
+    return path.join(homedir(), ".pirouette", "host.json");
+  }
+  // Custom config -> sibling host.json. Replaces the config's extension
+  // with `.host.json` so two configs in the same dir don't collide:
+  //   ec2.toml      -> ec2.host.json
+  //   byo-host.toml -> byo-host.host.json
+  const parsed = path.parse(cfg);
+  return path.join(parsed.dir, `${parsed.name}.host.json`);
 }
 
-/** Legacy state-file path. Read forward-compatibly; never written. Will be
- *  removed in a future release once the migration window closes. */
+/** Directory containing the state file. Created on demand. */
+function stateDir(): string {
+  return path.dirname(stateFilePath());
+}
+
+/** Legacy state-file path: `<state-dir>/ec2.json`. Read forward-compatibly
+ *  on first read into the modern `host.json` location; never written.
+ *  Only meaningful for the default config (~/.pirouette/) -- custom-config
+ *  setups didn't exist before host.json was introduced, so the legacy file
+ *  can only be in the default location. */
 function legacyStateFilePath(): string {
-  return path.join(stateDir(), "ec2.json");
+  return path.join(homedir(), ".pirouette", "ec2.json");
 }
 
 /** Read the state file. Migrates `~/.pirouette/ec2.json` → `host.json` on

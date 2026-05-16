@@ -47,7 +47,30 @@ const program = new Command();
 program
   .name("pru")
   .description("Pirouette — manage cloud pi agents")
-  .version(readVersion());
+  .version(readVersion())
+  // Global --config option. Lets users keep one TOML per deployment
+  // (e.g. ~/.pirouette/ec2.toml + ~/.pirouette/gpu.toml) and switch
+  // between them per-invocation. State file is automatically derived
+  // to sit alongside the config: ec2.toml -> ec2.host.json, etc., so
+  // each deployment's state stays separate.
+  //
+  // Resolution precedence:
+  //   --config <path>           (this flag)
+  //   $PIROUETTE_CONFIG         (env var)
+  //   ~/.pirouette/config.toml  (historical default)
+  //
+  // Set as a preAction hook -- runs before any subcommand handler reads
+  // getConfig(). Hoisted into the env var (rather than threaded through
+  // every code path) because config-loading is module-singleton and
+  // re-plumbing the cache for an injected path would be invasive.
+  .option(
+    "-c, --config <path>",
+    "Path to pirouette config TOML (default: $PIROUETTE_CONFIG or ~/.pirouette/config.toml)",
+  )
+  .hook("preAction", (thisCommand) => {
+    const cfg = thisCommand.opts().config as string | undefined;
+    if (cfg) process.env.PIROUETTE_CONFIG = cfg;
+  });
 
 program
   .command("server")

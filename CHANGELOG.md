@@ -5,6 +5,69 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.7.0 — multi-config support (`--config <path>` / `$PIROUETTE_CONFIG`)
+
+### Added
+
+The CLI now accepts a global `--config <path>` flag (or
+`$PIROUETTE_CONFIG` env var) so users with multiple deployments can
+keep one TOML per host and switch between them per-invocation:
+
+```
+pru --config ~/.pirouette/ec2.toml status
+pru --config ~/.pirouette/gpu.toml sync
+
+# or via env var:
+export PIROUETTE_CONFIG=~/.pirouette/ec2.toml
+pru sync --npm
+```
+
+State files automatically derive from the config path, so each
+deployment's `host.json` stays separate:
+
+  - Default `~/.pirouette/config.toml`  -> `~/.pirouette/host.json` (unchanged)
+  - Custom `~/.pirouette/ec2.toml`      -> `~/.pirouette/ec2.host.json`
+  - Custom `~/cfgs/gpu.toml`            -> `~/cfgs/gpu.host.json`
+
+`pru config edit` now opens whichever path is active. If the path
+doesn't exist yet, it's seeded as an empty file so the editor has
+something to open.
+
+`$PIROUETTE_STATE` is also honoured for cases where you want the
+state file somewhere completely independent of the config dir
+(e.g. ephemeral state in `/tmp` for tests).
+
+Resolution precedence:
+
+  config: --config flag > $PIROUETTE_CONFIG > ~/.pirouette/config.toml
+  state:  $PIROUETTE_STATE > <stem-of-config>.host.json > legacy ~/.pirouette/host.json
+
+### Compatibility
+
+Fully backward-compatible. With no `--config` and no `$PIROUETTE_*`
+set, behaviour is byte-identical to v0.6.x: same config path, same
+state path, same legacy `ec2.json` migration on first read.
+
+### Use case
+
+The immediate motivation was "I have a long-running EC2 deployment
+*and* a byo-host devpod and want to push releases to either without
+fiddling with `provider.kind`." With separate configs, you alias:
+
+```
+alias pru-ec2='pru --config ~/.pirouette/ec2.toml'
+alias pru-gpu='pru --config ~/.pirouette/gpu.toml'
+
+pru-ec2 sync --npm     # upgrade the EC2 deployment
+pru-gpu sync           # push local build to the gpu devpod
+pru-gpu open           # dashboard for the gpu devpod
+```
+
+State stays cleanly partitioned (each TOML's `.host.json` lives next
+to it).
+
+---
+
 ## 0.6.7 — fix: agent-header button row overflows on mobile
 
 ### Fixed

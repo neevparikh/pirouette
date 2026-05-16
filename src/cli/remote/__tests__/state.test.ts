@@ -167,3 +167,50 @@ describe("remote state — file paths", () => {
     expect(stateFilePath()).toBe(path.join(sandbox, ".pirouette", "host.json"));
   });
 });
+
+describe("remote state — multi-config (--config / $PIROUETTE_CONFIG)", () => {
+  let prevConfig: string | undefined;
+  let prevState: string | undefined;
+  beforeEach(() => {
+    prevConfig = process.env.PIROUETTE_CONFIG;
+    prevState = process.env.PIROUETTE_STATE;
+  });
+  afterEach(() => {
+    if (prevConfig !== undefined) process.env.PIROUETTE_CONFIG = prevConfig;
+    else delete process.env.PIROUETTE_CONFIG;
+    if (prevState !== undefined) process.env.PIROUETTE_STATE = prevState;
+    else delete process.env.PIROUETTE_STATE;
+  });
+
+  it("default config keeps historical state path ~/.pirouette/host.json", () => {
+    delete process.env.PIROUETTE_CONFIG;
+    delete process.env.PIROUETTE_STATE;
+    expect(stateFilePath()).toBe(path.join(sandbox, ".pirouette", "host.json"));
+  });
+
+  it("custom config -> sibling host.json with stem-matching name", () => {
+    process.env.PIROUETTE_CONFIG = "/tmp/cfgs/ec2.toml";
+    delete process.env.PIROUETTE_STATE;
+    expect(stateFilePath()).toBe("/tmp/cfgs/ec2.host.json");
+  });
+
+  it("different custom configs in same dir get separate state files", () => {
+    process.env.PIROUETTE_CONFIG = "/tmp/cfgs/byo-host.toml";
+    delete process.env.PIROUETTE_STATE;
+    expect(stateFilePath()).toBe("/tmp/cfgs/byo-host.host.json");
+    process.env.PIROUETTE_CONFIG = "/tmp/cfgs/ec2.toml";
+    expect(stateFilePath()).toBe("/tmp/cfgs/ec2.host.json");
+  });
+
+  it("PIROUETTE_STATE env var wins outright", () => {
+    process.env.PIROUETTE_CONFIG = "/tmp/cfgs/ec2.toml";
+    process.env.PIROUETTE_STATE = "/tmp/explicit/state.json";
+    expect(stateFilePath()).toBe("/tmp/explicit/state.json");
+  });
+
+  it("PIROUETTE_CONFIG with ~/ expands", () => {
+    process.env.PIROUETTE_CONFIG = "~/my-cfgs/ec2.toml";
+    delete process.env.PIROUETTE_STATE;
+    expect(stateFilePath()).toBe(path.join(sandbox, "my-cfgs", "ec2.host.json"));
+  });
+});

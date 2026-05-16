@@ -230,8 +230,31 @@ function repoConfigPath(): string {
   return path.resolve(path.dirname(here), "..", "pirouette.toml");
 }
 
-function userConfigPath(): string {
+/** Default location for the user override config when no explicit path is
+ *  supplied. Kept as a separate constant so callers (state.ts in particular)
+ *  can detect whether they're operating against the historical default
+ *  layout vs a custom path. */
+export function defaultUserConfigPath(): string {
   return path.join(homedir(), ".pirouette", "config.toml");
+}
+
+/** Resolve the active user-override config path. Resolution order:
+ *    1. `$PIROUETTE_CONFIG` env var (set by the CLI's `--config` flag or
+ *       by the caller directly).
+ *    2. `~/.pirouette/config.toml` (the historical default).
+ *
+ *  The CLI's top-level `--config <path>` option sets the env var in a
+ *  pre-action hook so subcommand handlers see the override through this
+ *  function transparently. Same path resolution is used by the state-
+ *  file location logic so multi-deployment setups stay self-contained
+ *  (one TOML + one host.json per deployment, both in the same dir by
+ *  default). */
+export function userConfigPath(): string {
+  const fromEnv = process.env.PIROUETTE_CONFIG;
+  if (fromEnv && fromEnv.trim().length > 0) {
+    return expandHome(fromEnv);
+  }
+  return defaultUserConfigPath();
 }
 
 function loadTomlIfExists(p: string): ConfigSource {

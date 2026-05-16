@@ -1,7 +1,9 @@
 /** `pru config show|path` — inspect effective merged configuration. */
 
 import { spawnSync } from "node:child_process";
-import { loadConfig } from "../../config.js";
+import { mkdirSync, writeFileSync, existsSync } from "node:fs";
+import path from "node:path";
+import { loadConfig, userConfigPath } from "../../config.js";
 
 export function configShow(): void {
   const { config, sources } = loadConfig();
@@ -25,9 +27,18 @@ export function configPath(): void {
 }
 
 export function configEdit(): void {
-  const { sources } = loadConfig();
-  // Prefer editing the user-level override, not the repo default.
-  const target = sources.find((s) => s.path.includes(".pirouette")) ?? sources[0];
+  // Edit the active user-override path (respects --config / $PIROUETTE_CONFIG).
+  // We deliberately don't fall back to the repo's pirouette.toml -- editing
+  // that would leak personal values into the published package.
+  const targetPath = userConfigPath();
+  // If the active path doesn't exist yet (e.g. user did `pru --config ec2.toml
+  // config edit` to create a fresh one), seed an empty file so the editor
+  // has something to open.
+  if (!existsSync(targetPath)) {
+    mkdirSync(path.dirname(targetPath), { recursive: true });
+    writeFileSync(targetPath, "", { mode: 0o600 });
+  }
+  const target = { path: targetPath };
   const editorRaw = process.env.VISUAL ?? process.env.EDITOR ?? "vi";
 
   // Run via spawnSync with an explicit arg array (shell: false) so that
