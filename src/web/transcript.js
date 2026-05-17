@@ -387,25 +387,31 @@ export function renderMessage(msg, idx, expandedItems, opts) {
       ? `${icon} ${msg.toolName || "done"} — ${summary}`
       : `${icon} ${msg.toolName || "done"}`;
     const chevron = hasBody ? `<span class="text-[9px] text-base16-500 ml-auto">${isExpanded ? "▼" : "▶"}</span>` : "";
-    // Tool results can also include image content blocks (e.g. a
-    // screenshot tool returning a PNG). Render them inline, below the
-    // tool-result one-liner, gated by the same expand chevron as the
-    // text body. If there are images but no text, the chevron is still
-    // useful so we treat hasImages the same as hasBody for click-to-expand.
+    // Tool results can also include image content blocks (e.g. the
+    // `read` tool reading a PNG, or a screenshot tool). Images render
+    // ALWAYS-VISIBLE (no chevron gating) -- because the chevron's job
+    // is hiding bulky text bodies, and an image is both more useful
+    // and more bounded (max-h-48). For `read` on an image file, the
+    // text body is literally just "Read image file [image/png]", so
+    // hiding it by default and showing the image makes the row
+    // self-explanatory.
+    //
+    // The chevron continues to gate the text body only, when one exists.
     const imagesHtml = renderInlineImages(msg.images);
     const hasImages = imagesHtml.length > 0;
-    const expandable = hasBody || hasImages;
+    const expandable = hasBody;
     const bodyHtml = hasBody
       ? `<pre class="mt-1 text-[11px] text-base16-500 bg-base16-100 rounded p-2 overflow-x-auto whitespace-pre-wrap max-h-64 ${isExpanded ? "" : "hidden"}" data-expand="${key}">${escHtml(contentStr)}</pre>`
       : "";
-    const imagesWrap = hasImages
-      ? `<div class="mt-1 ${isExpanded ? "" : "hidden"}" data-expand="${key}">${imagesHtml}</div>`
+    const imagesWrap = hasImages ? `<div class="mt-1">${imagesHtml}</div>` : "";
+    const imageLabelSuffix = hasImages
+      ? ` <span class="text-base16-500">· ${msg.images.length} image${msg.images.length === 1 ? "" : "s"}</span>`
       : "";
     const clickable = expandable ? "cursor-pointer hover:bg-base16-200/50" : "";
     return `
       <div class="message-enter px-2 py-0.5" data-msg-key="${key}">
         <div class="flex items-baseline gap-2 text-xs font-mono ${clickable} rounded px-1 py-0.5" data-toggle="${expandable ? key : ""}">
-          <span class="${color} font-semibold">${escHtml(label)}</span>
+          <span class="${color} font-semibold">${escHtml(label)}</span>${imageLabelSuffix}
           ${expandable ? `<span class="text-[9px] text-base16-500 ml-auto">${isExpanded ? "\u25bc" : "\u25b6"}</span>` : ""}
         </div>
         ${bodyHtml}

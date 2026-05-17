@@ -5,6 +5,26 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.8.1 — fix: tool-result images shouldn't be hidden behind the chevron
+
+### Fixed
+
+v0.8.0 rendered tool-result images inside the same expand wrapper as
+the text body (hidden until the user clicked the chevron). For
+`read` on an image file, the text body is just the placeholder
+`"Read image file [image/png]"` -- so the chevron was hiding the
+only content that mattered (the image), and the user had to drill
+two levels of expand (run → tool_result chevron) to see anything.
+
+Fix: render images ALWAYS-VISIBLE on tool_result rows; the chevron
+gates the text body only. Images are bounded (`max-h-48`) so they
+won't blow up the timeline.
+
+Also added a `· N image(s)` suffix to the tool_result label so the
+row is self-describing without having to look at the body.
+
+---
+
 ## 0.8.0 — image attachments (paste + view) in the dashboard
 
 ### Added
