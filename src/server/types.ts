@@ -158,6 +158,9 @@ export interface SendMessageRequest {
    *    - `"followUp"` — queue, deliver after the current turn ends.
    *  Both produce `queue_update` events while the queue is non-empty. */
   mode?: "steer" | "followUp";
+  /** Image attachments. Forwarded into pi's `session.prompt({images})`
+ *  so the model sees them as part of this user message. */
+  images?: InboundImage[];
 }
 
 /** A chat message formatted for the frontend. */
@@ -169,4 +172,28 @@ export interface ChatMessage {
   toolCallId?: string;
   args?: Record<string, unknown>;
   isError?: boolean;
+  /** Inline image attachments. Currently populated for user messages
+   *  (pasted/dropped into the dashboard input) and tool_result messages
+   *  whose pi content blocks include images. We send them inline as
+   *  data URIs so the dashboard can render them with no extra fetches
+   *  -- same way pi's JSONL session file stores them. Cap at
+   *  MAX_IMAGES_PER_MESSAGE * MAX_IMAGE_BYTES on the inbound side. */
+  images?: ChatImage[];
+}
+
+/** A single image attachment formatted for the frontend. */
+export interface ChatImage {
+  /** `data:<mime>;base64,<bytes>` ready to drop into an <img src=...>. */
+  dataUrl: string;
+  /** Same as the mime portion of dataUrl, broken out for the renderer
+   *  (which uses it to label tool-result images and pick a placeholder
+   *  icon for unsupported types). */
+  mimeType: string;
+}
+
+/** Inbound image attachment on POST /api/agents/:id/message. The data
+ *  field is a base64-encoded image; mimeType is the source mime type. */
+export interface InboundImage {
+  data: string;
+  mimeType: string;
 }

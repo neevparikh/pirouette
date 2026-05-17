@@ -75,6 +75,7 @@ const $input = document.getElementById("message-input");
 const $sendBtn = document.getElementById("send-btn");
 const $sendModeBtn = document.getElementById("send-mode-btn");
 const $queueStrip = document.getElementById("queue-strip");
+const $attachmentStrip = document.getElementById("attachment-strip");
 const $newProjectBtn = document.getElementById("new-project-btn");
 const $projModal = document.getElementById("new-project-modal");
 const $projModalName = document.getElementById("proj-modal-name");
@@ -1474,7 +1475,9 @@ async function createAgentQuick(name, projectName) {
 
 async function sendMessage() {
   const text = $input.value.trim();
-  if (!text) return;
+  // Empty text is OK if we have images attached -- mirroring pi's TUI,
+  // which lets you send an image-only message.
+  if (!text && pendingImages.length === 0) return;
 
   // Resolve target: explicit @name overrides sidebar selection.
   const mention = parseAtMention(text);
@@ -1501,11 +1504,30 @@ async function sendMessage() {
     return;
   }
 
+  // Snapshot the attached images for this send. We clear pendingImages
+  // before the await so a fast follow-up paste doesn't accidentally
+  // double-attach (or get clobbered by the next render). The send
+  // request still has the snapshot in flight; if it fails, the user
+  // would need to re-paste.
+  const imagesForThisSend = pendingImages.slice();
+  pendingImages = [];
+  renderAttachmentStrip();
+
   // Optimistic local append so the user sees their message immediately.
   const prev = stateFor(targetId);
   transcriptByAgent[targetId] = {
     ...prev,
-    messages: [...prev.messages, { role: "user", content: body, ts: Date.now() }],
+    messages: [
+      ...prev.messages,
+      {
+        role: "user",
+        content: body,
+        ts: Date.now(),
+        ...(imagesForThisSend.length > 0
+          ? { images: imagesForThisSend.map((i) => ({ dataUrl: i.dataUrl, mimeType: i.mimeType })) }
+          : {}),
+      },
+    ],
   };
   // IMPORTANT: mark history as "loaded" so the upcoming selectAgent doesn't
   // call fetchHistory before the server has processed our POST. Otherwise
@@ -1534,7 +1556,18 @@ async function sendMessage() {
     const res = await fetch(`/api/agents/${targetId}/message`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ message: body, mode: modeForThisSend }),
+      body: JSON.stringify({
+        message: body,
+        mode: modeForThisSend,
+        ...(imagesForThisSend.length > 0
+          ? {
+              images: imagesForThisSend.map((i) => ({
+                data: i.data,
+                mimeType: i.mimeType,
+              })),
+            }
+          : {}),
+      }),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
@@ -2271,6 +2304,89 @@ $input.addEventListener("input", () => {
   // when the input no longer matches their respective trigger.
   updateMentionPopup();
   updateSlashPopup();
+});
+
+// --- image attachments via paste ---
+//
+// Same UX as pi's TUI (Ctrl+V on a clipboard image): the bytes get pulled
+// out of the paste event, base64-encoded, and shown as a preview pill
+// under the input. On send, the images travel with the message body to
+// POST /api/agents/:id/message and the server forwards them into pi's
+// session.prompt({images}) so the model sees them as part of the user
+// message.
+//
+// State is a plain array of {dataUrl, mimeType, data}. dataUrl is for
+// the preview <img>; mimeType + data go on the wire. Cleared after
+// successful send (in sendMessage()), but NOT on paste-failure so the
+// user can retry.
+const PASTE_ALLOWED_MIME = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+/** @type {{ dataUrl: string, mimeType: string, data: string }[]} */
+let pendingImages = [];
+
+function renderAttachmentStrip() {
+  if (pendingImages.length === 0) {
+    $attachmentStrip.classList.add("hidden");
+    $attachmentStrip.innerHTML = "";
+    return;
+  }
+  $attachmentStrip.classList.remove("hidden");
+  let html = "";
+  for (let i = 0; i < pendingImages.length; i++) {
+    const img = pendingImages[i];
+    html += `
+      <div class="relative inline-flex items-center bg-base16-200 border border-base16-300 rounded-lg p-1 pr-2 gap-2">
+        <img src="${img.dataUrl}" class="h-12 w-12 object-cover rounded" alt="attached ${img.mimeType}" />
+        <span class="text-[10px] text-base16-500 font-mono">${escHtml(img.mimeType.replace("image/", ""))}</span>
+        <button class="text-base16-500 hover:text-base16-red text-xs cursor-pointer px-1" data-remove-image="${i}" aria-label="remove attachment">×</button>
+      </div>`;
+  }
+  $attachmentStrip.innerHTML = html;
+}
+
+$attachmentStrip.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-remove-image]");
+  if (!btn) return;
+  const idx = Number(btn.getAttribute("data-remove-image"));
+  if (Number.isInteger(idx) && idx >= 0 && idx < pendingImages.length) {
+    pendingImages.splice(idx, 1);
+    renderAttachmentStrip();
+  }
+});
+
+$input.addEventListener("paste", (e) => {
+  // Pull image items out of the clipboard payload. Browsers expose them
+  // as DataTransferItems with kind="file" + image/* type. Text paste is
+  // handled by the default behavior; we only intercept when image data
+  // is present.
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  const imageItems = [];
+  for (const item of items) {
+    if (item.kind === "file" && PASTE_ALLOWED_MIME.has(item.type)) {
+      imageItems.push(item);
+    }
+  }
+  if (imageItems.length === 0) return;
+  // Block default paste so the image's filename/junk text doesn't end up
+  // in the textarea alongside the attachment pill.
+  e.preventDefault();
+  for (const item of imageItems) {
+    const blob = item.getAsFile();
+    if (!blob) continue;
+    // Read as base64. FileReader is async; we update the strip when each
+    // load resolves so the user sees the previews appear in paste order.
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result;
+      if (typeof dataUrl !== "string") return;
+      // Strip the `data:<mime>;base64,` prefix; pi's ImageContent wants raw base64.
+      const commaIdx = dataUrl.indexOf(",");
+      const data = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl;
+      pendingImages.push({ dataUrl, mimeType: blob.type, data });
+      renderAttachmentStrip();
+    };
+    reader.readAsDataURL(blob);
+  }
 });
 $input.addEventListener("blur", () => {
   // Delay so a click inside either popup can fire first.

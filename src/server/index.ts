@@ -595,7 +595,53 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
           // streaming turn (matches pi's TUI). UI can pass "followUp" to
           // queue without interrupting.
           const mode = body.mode === "followUp" ? "followUp" : "steer";
-          agentManager.sendMessage(agentId, body.message, { mode }).catch((err) => {
+          // Validate + cap image attachments. Server-side enforcement so a
+          // misbehaving / malicious client can't dump 100MB into the
+          // session and bypass pi's own size handling. Cap mirrors typical
+          // model-provider limits (Anthropic image attachments: 5MB per
+          // image; we're generous here).
+          let images: Array<{ data: string; mimeType: string }> | undefined;
+          if (body.images !== undefined) {
+            if (!Array.isArray(body.images)) {
+              error(res, 400, "images must be an array");
+              return;
+            }
+            const MAX_IMAGES = 8;
+            const MAX_BASE64_LEN = 16 * 1024 * 1024; // ~12MB binary
+            const ALLOWED_MIME = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+            if (body.images.length > MAX_IMAGES) {
+              error(res, 400, `too many images (max ${MAX_IMAGES})`);
+              return;
+            }
+            for (const [i, img] of body.images.entries()) {
+              if (
+                !img ||
+                typeof img.data !== "string" ||
+                typeof img.mimeType !== "string"
+              ) {
+                error(res, 400, `images[${i}]: must be {data: string, mimeType: string}`);
+                return;
+              }
+              if (!ALLOWED_MIME.has(img.mimeType)) {
+                error(
+                  res,
+                  400,
+                  `images[${i}]: mimeType ${JSON.stringify(img.mimeType)} not in {png, jpeg, webp, gif}`,
+                );
+                return;
+              }
+              if (img.data.length > MAX_BASE64_LEN) {
+                error(
+                  res,
+                  400,
+                  `images[${i}]: data too large (max ${MAX_BASE64_LEN} base64 chars, ~12MB binary)`,
+                );
+                return;
+              }
+            }
+            images = body.images;
+          }
+          agentManager.sendMessage(agentId, body.message, { mode, images }).catch((err) => {
             console.error(`[server] sendMessage error for ${agentId}: ${err}`);
             broadcast({
               kind: "error",

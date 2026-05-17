@@ -5,6 +5,72 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.8.0 — image attachments (paste + view) in the dashboard
+
+### Added
+
+The dashboard now supports image attachments end-to-end, mirroring pi's
+TUI Ctrl+V flow:
+
+  - **Send images**: paste an image (png/jpeg/webp/gif) into the message
+    input. A preview pill with thumbnail + mime label + remove (×)
+    button appears above the input. On send, the bytes are forwarded
+    as part of the user message and the agent's model sees them in
+    the same turn.
+  - **View images**: inline `<img>` rendering in the transcript for
+    user messages with attachments. Click to open the full-size image
+    in a new tab.
+  - **Tool-result images**: tool results that include image content
+    blocks (e.g. a screenshot tool) render the images alongside the
+    tool's text output, gated by the existing expand chevron so they
+    don't blow up the timeline.
+
+Wire flow:
+
+  - `POST /api/agents/:id/message` body extends with `images: [{ data:
+    <base64>, mimeType }]`. Server validates: max 8 images per message,
+    max ~12MB binary per image, mime allowlist (png/jpeg/webp/gif).
+  - `AgentManager.sendMessage(id, message, { images })` forwards to
+    pi's `session.prompt({images})` / `session.steer(message, images)`
+    / `session.followUp(message, images)`. (Pi's API quirk: prompt
+    takes an options object, but steer/followUp take a positional
+    images arg -- both forms handled.)
+  - `ChatMessage` shape extends with optional `images?: { dataUrl,
+    mimeType }[]`. `getMessages` extracts pi's image content blocks
+    into ready-to-use `data:<mime>;base64,...` URIs so the dashboard
+    has no extra fetches.
+  - `transcript.js` renderMessage gains a `renderInlineImages` helper
+    used by both user and tool_result branches.
+
+### Limits
+
+Server-side caps:
+  - 8 images max per message
+  - ~12MB binary max per image (16MB base64-encoded chars)
+  - Allowed mime: image/png, image/jpeg, image/webp, image/gif
+
+These mirror typical model-provider limits (Anthropic: 5MB/image; we
+are generous) and exist so a misbehaving client can't dump 100MB into
+a session.
+
+### Tests
+
++3 renderMessage tests for: user-with-image, user-image-only-no-text,
+tool_result-with-images. +1 update to the existing user-message test
+for the new flex layout (`items-end` instead of `justify-end`, since
+images stack above the text bubble now).
+
+Total: 178/178 passing.
+
+### Verified end-to-end via playwright
+
+Using the new `scripts/check-dashboard.mjs` harness: loaded the live
+deployment, dispatched a synthetic paste event with a 1x1 PNG, asserted
+the preview pill rendered, asserted no JS errors on the page. The
+smoke check sequence has been added to the dev loop.
+
+---
+
 ## 0.7.0 — multi-config support (`--config <path>` / `$PIROUETTE_CONFIG`)
 
 ### Added

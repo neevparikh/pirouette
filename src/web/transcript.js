@@ -234,6 +234,23 @@ export const STREAMING_THINKING_KEY = "streaming-thinking";
  * @param {Set<string>} [expandedItems]
  * @param {{ rawAssistant?: boolean }} [opts]
  */
+/** Render an array of {dataUrl, mimeType} as a wrapping flex row of small
+ *  thumbnails. Click expands the full image in a new tab (data: URL).
+ *  Returns "" for an empty / missing array so callers can interpolate
+ *  unconditionally. Used by both user and tool-result message renderers. */
+function renderInlineImages(images) {
+  if (!Array.isArray(images) || images.length === 0) return "";
+  let html = `<div class="flex flex-wrap gap-1 justify-end max-w-[80%]">`;
+  for (const img of images) {
+    if (!img || typeof img.dataUrl !== "string") continue;
+    html += `<a href="${img.dataUrl}" target="_blank" rel="noopener" class="block">
+      <img src="${img.dataUrl}" alt="attached ${escHtml(img.mimeType || "image")}" class="max-h-48 max-w-full rounded-lg border border-base16-300 object-contain bg-base16-100" />
+    </a>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
 export function renderMessage(msg, idx, expandedItems, opts) {
   const expanded = expandedItems ?? new Set();
   const rawAssistant = !!(opts && opts.rawAssistant);
@@ -249,11 +266,21 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     : messageKey(msg, idx);
 
   if (msg.role === "user") {
+    // Image attachments (pasted into the input on the way out, or stored
+    // on the message after a roundtrip via getMessages). Inlined as data
+    // URIs from the server -- no extra fetches. Multiple images stack as
+    // a wrapping flex row above the text bubble.
+    const imagesHtml = renderInlineImages(msg.images);
     return `
-      <div class="message-enter flex justify-end" data-msg-key="${wrapKey}">
-        <div class="max-w-[80%] bg-base16-blue/15 border border-base16-blue/20 rounded-xl px-4 py-2">
+      <div class="message-enter flex flex-col items-end gap-1" data-msg-key="${wrapKey}">
+        ${imagesHtml}
+        ${
+          msg.content
+            ? `<div class="max-w-[80%] bg-base16-blue/15 border border-base16-blue/20 rounded-xl px-4 py-2">
           <pre class="whitespace-pre-wrap text-base16-700 text-base font-sans">${escHtml(msg.content)}</pre>
-        </div>
+        </div>`
+            : ""
+        }
       </div>`;
   }
 
@@ -360,17 +387,29 @@ export function renderMessage(msg, idx, expandedItems, opts) {
       ? `${icon} ${msg.toolName || "done"} — ${summary}`
       : `${icon} ${msg.toolName || "done"}`;
     const chevron = hasBody ? `<span class="text-[9px] text-base16-500 ml-auto">${isExpanded ? "▼" : "▶"}</span>` : "";
+    // Tool results can also include image content blocks (e.g. a
+    // screenshot tool returning a PNG). Render them inline, below the
+    // tool-result one-liner, gated by the same expand chevron as the
+    // text body. If there are images but no text, the chevron is still
+    // useful so we treat hasImages the same as hasBody for click-to-expand.
+    const imagesHtml = renderInlineImages(msg.images);
+    const hasImages = imagesHtml.length > 0;
+    const expandable = hasBody || hasImages;
     const bodyHtml = hasBody
       ? `<pre class="mt-1 text-[11px] text-base16-500 bg-base16-100 rounded p-2 overflow-x-auto whitespace-pre-wrap max-h-64 ${isExpanded ? "" : "hidden"}" data-expand="${key}">${escHtml(contentStr)}</pre>`
       : "";
-    const clickable = hasBody ? "cursor-pointer hover:bg-base16-200/50" : "";
+    const imagesWrap = hasImages
+      ? `<div class="mt-1 ${isExpanded ? "" : "hidden"}" data-expand="${key}">${imagesHtml}</div>`
+      : "";
+    const clickable = expandable ? "cursor-pointer hover:bg-base16-200/50" : "";
     return `
       <div class="message-enter px-2 py-0.5" data-msg-key="${key}">
-        <div class="flex items-baseline gap-2 text-xs font-mono ${clickable} rounded px-1 py-0.5" data-toggle="${hasBody ? key : ""}">
+        <div class="flex items-baseline gap-2 text-xs font-mono ${clickable} rounded px-1 py-0.5" data-toggle="${expandable ? key : ""}">
           <span class="${color} font-semibold">${escHtml(label)}</span>
-          ${chevron}
+          ${expandable ? `<span class="text-[9px] text-base16-500 ml-auto">${isExpanded ? "\u25bc" : "\u25b6"}</span>` : ""}
         </div>
         ${bodyHtml}
+        ${imagesWrap}
       </div>`;
   }
 

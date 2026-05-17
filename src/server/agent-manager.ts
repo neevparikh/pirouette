@@ -29,10 +29,36 @@ import {
   emptyUsage,
   type AgentConfig,
   type AgentState,
+  type ChatImage,
   type ChatMessage,
   type DeleteAgentOptions,
   type NormalizedEvent,
 } from "./types.js";
+
+/** Pull image content blocks out of a pi message's content array, formatted
+ *  for the dashboard. Pi stores images as `{ type: "image", data, mimeType }`
+ *  (base64 data); the dashboard wants a ready-to-use `data:<mime>;base64,...`
+ *  data URI it can put straight into <img src=...>. */
+function pickImageContent(
+  content: unknown,
+): ChatImage[] {
+  if (!Array.isArray(content)) return [];
+  const out: ChatImage[] = [];
+  for (const block of content) {
+    if (
+      block &&
+      typeof block === "object" &&
+      "type" in block &&
+      (block as { type: string }).type === "image" &&
+      "data" in block &&
+      "mimeType" in block
+    ) {
+      const b = block as { data: string; mimeType: string };
+      out.push({ dataUrl: `data:${b.mimeType};base64,${b.data}`, mimeType: b.mimeType });
+    }
+  }
+  return out;
+}
 
 export interface AgentHandle {
   config: AgentConfig;
@@ -469,14 +495,25 @@ export class AgentManager {
 
     for (const msg of messages) {
       if (msg.role === "user") {
-        const content =
-          typeof msg.content === "string"
-            ? msg.content
-            : (msg.content as Array<{ type: string; text?: string }>)
-                .filter((p) => p.type === "text")
-                .map((p) => p.text ?? "")
-                .join("");
-        result.push({ role: "user", content, ts: msg.timestamp });
+        // User messages can have a string or an array of content blocks.
+        // Array form is what pi uses when there are images attached.
+        // Extract text + images independently so the UI can render both.
+        let content = "";
+        const images = pickImageContent(msg.content);
+        if (typeof msg.content === "string") {
+          content = msg.content;
+        } else {
+          content = (msg.content as Array<{ type: string; text?: string }>)
+            .filter((p) => p.type === "text")
+            .map((p) => p.text ?? "")
+            .join("");
+        }
+        result.push({
+          role: "user",
+          content,
+          ts: msg.timestamp,
+          ...(images.length > 0 ? { images } : {}),
+        });
       } else if (msg.role === "assistant") {
         // Extract thinking, text, and tool-calls separately so the UI can
         // render them as their own timeline entries.
@@ -531,6 +568,8 @@ export class AgentManager {
           textContent.length > 2000
             ? textContent.slice(0, 2000) + "\n…(truncated)"
             : textContent;
+        // Tool results can also include images (e.g. a screenshot tool).
+        const images = pickImageContent(msg.content);
         result.push({
           role: "tool_result",
           content: truncated || (msg.isError ? "✗ error" : "✓ done"),
@@ -538,6 +577,7 @@ export class AgentManager {
           toolCallId: msg.toolCallId,
           isError: msg.isError,
           ts: msg.timestamp,
+          ...(images.length > 0 ? { images } : {}),
         });
       } else if (msg.role === "compactionSummary") {
         result.push({
@@ -848,15 +888,22 @@ export class AgentManager {
   async sendMessage(
     id: string,
     message: string,
-    opts: { mode?: "steer" | "followUp" } = {},
+    opts: {
+      mode?: "steer" | "followUp";
+      /** Image attachments forwarded to pi's prompt/steer/followUp.
+       *  Pi's `ImageContent` shape is `{ type: "image", data, mimeType }`;
+       *  callers pass us the raw `{ data, mimeType }` and we wrap. */
+      images?: Array<{ data: string; mimeType: string }>;
+    } = {},
   ): Promise<void> {
     return this.withAgentLock(id, async () => {
       const handle = this.handles.get(id);
       if (!handle) throw new Error(`Agent ${id} is not running`);
 
       const mode = opts.mode ?? "steer";
+      const imageCount = opts.images?.length ?? 0;
       console.log(
-        `[agent-manager] sendMessage to ${handle.config.name} (${id}): streaming=${handle.session.isStreaming} mode=${mode}`,
+        `[agent-manager] sendMessage to ${handle.config.name} (${id}): streaming=${handle.session.isStreaming} mode=${mode}${imageCount > 0 ? ` images=${imageCount}` : ""}`,
       );
       // Clear any prior error when the user sends a new message.
       if (handle.config.errorMessage) {
@@ -865,17 +912,32 @@ export class AgentManager {
       }
       this.setAgentState(id, "running");
 
+      // Wrap raw image data into pi's ImageContent shape. We don't import
+      // the type here to avoid pulling in pi-ai for a one-field struct;
+      // pi accepts any object with type="image"+data+mimeType.
+      const images =
+        imageCount > 0
+          ? opts.images!.map((i) => ({
+              type: "image" as const,
+              data: i.data,
+              mimeType: i.mimeType,
+            }))
+          : undefined;
+
+      // Pi's API quirk: prompt() takes options object `{images}`, but
+      // steer/followUp take a plain `images` arg as the 2nd parameter.
+      // Hidden in agent-session.d.ts -- see steer(text, images?) etc.
       if (handle.session.isStreaming) {
         if (mode === "followUp") {
           console.log(`[agent-manager] using followUp (agent is streaming)`);
-          await handle.session.followUp(message);
+          await handle.session.followUp(message, images);
         } else {
           console.log(`[agent-manager] using steer (agent is streaming)`);
-          await handle.session.steer(message);
+          await handle.session.steer(message, images);
         }
       } else {
         console.log(`[agent-manager] using prompt (agent is idle)`);
-        await handle.session.prompt(message);
+        await handle.session.prompt(message, images ? { images } : undefined);
       }
       console.log(`[agent-manager] prompt/${mode} resolved for ${id}`);
     });

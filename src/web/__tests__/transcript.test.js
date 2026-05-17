@@ -293,12 +293,64 @@ describe("mock transcript", () => {
 // --- renderMessage HTML snapshots (shape-only) ---
 
 describe("renderMessage", () => {
+  it("user message with image attachments renders an inline <img>", () => {
+    const html = renderMessage(
+      {
+        role: "user",
+        content: "look",
+        ts: 0,
+        images: [{ dataUrl: "data:image/png;base64,iVBOR", mimeType: "image/png" }],
+      },
+      0,
+    );
+    expect(html).toContain("<img");
+    expect(html).toContain('src="data:image/png;base64,iVBOR"');
+    // Text bubble still renders alongside.
+    expect(html).toContain("look");
+  });
+
+  it("user message with image but no text renders only the image", () => {
+    const html = renderMessage(
+      {
+        role: "user",
+        content: "",
+        ts: 0,
+        images: [{ dataUrl: "data:image/png;base64,iVBOR", mimeType: "image/png" }],
+      },
+      0,
+    );
+    expect(html).toContain("<img");
+    // No text bubble div.
+    expect(html).not.toContain("bg-base16-blue/15");
+  });
+
+  it("tool_result with images renders them under the expand chevron", () => {
+    const html = renderMessage(
+      {
+        role: "tool_result",
+        toolName: "screenshot",
+        content: "",
+        ts: 0,
+        images: [{ dataUrl: "data:image/png;base64,XYZ", mimeType: "image/png" }],
+      },
+      0,
+      new Set(["tool_result-0"]),
+    );
+    expect(html).toContain("<img");
+    expect(html).toContain('src="data:image/png;base64,XYZ"');
+  });
+
   it("user message renders in a right-aligned bubble with escaped content", () => {
     const html = renderMessage(
       { role: "user", content: "<script>x</script>", ts: 0 },
       0,
     );
-    expect(html).toContain("justify-end");
+    // v0.8.0: user messages can have image attachments above the text,
+    // so the outer wrapper is `flex flex-col items-end` (was `flex
+    // justify-end` when text-only was the only shape). Both end up
+    // right-aligned; the test just needs to verify alignment, not the
+    // specific flex incantation.
+    expect(html).toContain("items-end");
     expect(html).toContain("&lt;script&gt;");
   });
 
