@@ -1956,26 +1956,62 @@ function renderSlashPopup() {
   });
 }
 
-/** Selecting from the popup either:
- *   - executes immediately (commands with no args), or
- *   - fills the input with `/<name> ` so the user can type args + Enter.
- *  Mirrors pi's TUI behaviour. */
-function applySlashSelection() {
+/** Apply the popup-highlighted slash entry.
+ *
+ *  `mode` controls what happens:
+ *    - "dispatch" (Enter): immediately fire the command. Args come from the
+ *      current input, after the command name. If the user just typed the
+ *      command name (no args), we dispatch with empty args -- which is the
+ *      right behaviour for /compact, /new, /skill:foo (skills happily run
+ *      with no extra text). This matches "Enter = do the thing" intuition.
+ *    - "complete" (Tab): fill the input with `/<name> ` (trailing space)
+ *      and leave the popup closed, so the user can type args before hitting
+ *      Enter. Bare-name commands (`takesArgs: false`) dispatch immediately
+ *      under Tab too -- there's nothing to type. */
+function applySlashSelection(mode = "dispatch") {
   const pick = slashMatches[slashIndex];
   if (!pick) return;
-  if (pick.takesArgs) {
+  // For Tab on a takesArgs command, fill name + space and leave popup
+  // closed. No dispatch -- user wants to type args next.
+  if (mode === "complete" && pick.takesArgs) {
     $input.value = `/${pick.name} `;
     closeSlashPopup();
     $input.focus();
     const len = $input.value.length;
     $input.setSelectionRange(len, len);
     autoResize();
-  } else {
-    closeSlashPopup();
-    $input.value = "";
-    autoResize();
-    void executeSlashCommand(pick.name, "");
+    return;
   }
+  // Otherwise dispatch. For skills, route through sendMessage so pi's
+  // server-side expansion handles them. For api/client commands, route
+  // through executeSlashCommand.
+  //
+  // Args = whatever's after the first space in the current input value,
+  // OR empty if the user only typed the command name.
+  const text = $input.value;
+  const spaceIdx = text.indexOf(" ");
+  const args = spaceIdx === -1 ? "" : text.slice(spaceIdx + 1).trim();
+  closeSlashPopup();
+  $input.value = "";
+  autoResize();
+  if (pick.kind === "skill") {
+    // Re-serialise as `/skill:<name> <args>` and send through the normal
+    // message path; pi's _expandSkillCommand will resolve it server-side.
+    const body = args ? `/${pick.name} ${args}` : `/${pick.name}`;
+    void (async () => {
+      try {
+        await fetch(`/api/agents/${selectedAgentId}/message`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ message: body, mode: sendMode }),
+        });
+      } catch (err) {
+        console.error("skill dispatch failed:", err);
+      }
+    })();
+    return;
+  }
+  void executeSlashCommand(pick.name, args);
 }
 
 function closeSlashPopup() {
@@ -2274,9 +2310,14 @@ $input.addEventListener("keydown", (e) => {
       renderSlashPopup();
       return;
     }
-    if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+    if (e.key === "Tab") {
       e.preventDefault();
-      applySlashSelection();
+      applySlashSelection("complete");
+      return;
+    }
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      applySlashSelection("dispatch");
       return;
     }
     if (e.key === "Escape") {

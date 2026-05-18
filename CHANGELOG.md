@@ -5,6 +5,39 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.8.3 — fix: Enter on `/compact` (and other args-taking slash commands) now dispatches
+
+### Fixed
+
+`applySlashSelection` had a hidden trap: for commands declared with
+`takesArgs: true` (`/compact`, `/skill:foo`), pressing Enter while the
+slash-popup was open just filled the input with `/compact ` (with a
+trailing space) and closed the popup. It did **not** POST to the
+`/compact` endpoint. The user saw the popup vanish and a stale
+`/compact ` sitting in the input, gave up, and assumed the command was
+broken. Real-world consequence: a stuck agent that needed compaction
+couldn't be compacted via the UI at all.
+
+Fix: split Tab and Enter on the popup.
+
+  - **Tab**: fill `/<name> ` so the user can type args before sending.
+    Same as before.
+  - **Enter**: dispatch the command immediately. Args come from whatever
+    is currently in the input after the command name (empty is fine
+    -- `/compact` works without instructions).
+  - Skills (`/skill:foo`) now route through `sendMessage` so pi's
+    server-side `_expandSkillCommand` resolves them, instead of falling
+    through the old client-side branch.
+  - Click on a popup item still dispatches immediately (intuitive --
+    you clicked it, so do it).
+
+Verified end-to-end with the playwright harness against the live
+gpu-devpod dashboard: Enter on `/compact` POSTs `/api/agents/:id/
+compact`; Tab on `/comp` fills the input without firing; Enter on
+`/compact keep arch decisions` POSTs with the instructions in the body.
+
+---
+
 ## 0.8.2 — fix: steering during a turn no longer behaves like follow-up
 
 ### Fixed
