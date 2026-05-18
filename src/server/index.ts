@@ -10,7 +10,7 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -459,6 +459,98 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
         }
         const messages = agentManager.getMessages(agentId);
         json(res, 200, { messages });
+        return;
+      }
+
+      // Serve a file from inside the agent's worktree, by relative path.
+      //
+      // Used by the dashboard to render images that the agent references
+      // inline (markdown `![](plots/foo.png)`, `<img src="plots/foo.png">`,
+      // or just a `<code>plots/foo.png</code>` mention) without making the
+      // user open a tool result + click through. "Best-effort" -- only
+      // serves whitelisted image MIME types, capped at 25 MB, with strict
+      // path-traversal protection.
+      //
+      // Safety:
+      //   - `path` is resolved against the agent's `worktreePath`.
+      //   - resolved real path must stay inside worktreePath (symlinks
+      //     pointing out of the worktree are rejected).
+      //   - only image extensions are served; everything else 415s.
+      //   - 25 MB cap (well above what any chart we generate looks like).
+      //   - same-origin only; no CORS headers.
+      if (method === "GET" && sub === "/file") {
+        const agent = agentManager.getAgent(agentId);
+        if (!agent) {
+          error(res, 404, "Agent not found");
+          return;
+        }
+        const u = new URL(req.url ?? "/", "http://localhost");
+        const relRaw = u.searchParams.get("path");
+        if (!relRaw) {
+          error(res, 400, "missing path");
+          return;
+        }
+        // Reject absolute paths up front -- callers always pass relative.
+        // path.resolve would otherwise happily escape worktreePath.
+        if (path.isAbsolute(relRaw) || relRaw.includes("\u0000")) {
+          error(res, 400, "path must be relative");
+          return;
+        }
+        const root = path.resolve(agent.worktreePath);
+        // path.resolve normalizes `..` segments. We then verify the
+        // result still starts with root + sep (or equals root). This is
+        // the standard traversal-prevention idiom.
+        const resolved = path.resolve(root, relRaw);
+        if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+          error(res, 403, "path escapes worktree");
+          return;
+        }
+        const ext = path.extname(resolved).toLowerCase();
+        const IMAGE_MIMES: Record<string, string> = {
+          ".png": "image/png",
+          ".jpg": "image/jpeg",
+          ".jpeg": "image/jpeg",
+          ".gif": "image/gif",
+          ".webp": "image/webp",
+          ".svg": "image/svg+xml",
+          ".bmp": "image/bmp",
+          ".ico": "image/x-icon",
+        };
+        const mime = IMAGE_MIMES[ext];
+        if (!mime) {
+          error(res, 415, `unsupported file type ${ext || "(none)"}`);
+          return;
+        }
+        const MAX_BYTES = 25 * 1024 * 1024;
+        try {
+          const st = await stat(resolved);
+          if (!st.isFile()) {
+            error(res, 404, "not a regular file");
+            return;
+          }
+          if (st.size > MAX_BYTES) {
+            error(res, 413, `file too large (${st.size} > ${MAX_BYTES})`);
+            return;
+          }
+          const buf = await readFile(resolved);
+          res.writeHead(200, {
+            "content-type": mime,
+            "content-length": String(buf.length),
+            // Short cache: assistant-referenced files can be regenerated
+            // mid-conversation (e.g. an updated plot). 30s lets a single
+            // page-load avoid double-fetching the same image without
+            // pinning a stale version for long.
+            "cache-control": "private, max-age=30",
+          });
+          res.end(buf);
+        } catch (err) {
+          const code = (err as { code?: string })?.code;
+          if (code === "ENOENT") {
+            error(res, 404, "file not found");
+          } else {
+            error(res, 500, err instanceof Error ? err.message : String(err));
+          }
+        }
         return;
       }
 

@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   describeToolCall,
   describeToolResult,
+  enhanceImagePaths,
   escHtml,
+  looksLikeImagePathRef,
   parseToolArgs,
   relTime,
   renderDiff,
@@ -216,5 +218,96 @@ describe("relTime", () => {
   });
   it("returns days for >=1d", () => {
     expect(relTime(now - 2 * 86_400_000, now)).toBe("2d ago");
+  });
+});
+
+describe("looksLikeImagePathRef", () => {
+  it("accepts simple relative image paths", () => {
+    expect(looksLikeImagePathRef("plots/foo.png")).toBe(true);
+    expect(looksLikeImagePathRef("foo.png")).toBe(true);
+    expect(looksLikeImagePathRef("./foo.jpg")).toBe(true);
+    expect(looksLikeImagePathRef("a/b/c.webp")).toBe(true);
+    expect(looksLikeImagePathRef("SVG_Logo.svg")).toBe(true);
+  });
+  it("rejects URLs and absolute paths", () => {
+    expect(looksLikeImagePathRef("https://example.com/x.png")).toBe(false);
+    expect(looksLikeImagePathRef("http://x.png")).toBe(false);
+    expect(looksLikeImagePathRef("data:image/png;base64,xxx")).toBe(false);
+    expect(looksLikeImagePathRef("file:///etc/x.png")).toBe(false);
+    expect(looksLikeImagePathRef("/etc/passwd.png")).toBe(false);
+    expect(looksLikeImagePathRef("/abs.png")).toBe(false);
+  });
+  it("rejects non-image extensions", () => {
+    expect(looksLikeImagePathRef("foo.txt")).toBe(false);
+    expect(looksLikeImagePathRef("foo.md")).toBe(false);
+    expect(looksLikeImagePathRef("script.js")).toBe(false);
+    expect(looksLikeImagePathRef("plot")).toBe(false); // no ext
+  });
+  it("rejects prose-like strings even with image-ext suffix", () => {
+    expect(looksLikeImagePathRef("a sentence with foo.png inside")).toBe(false);
+    expect(looksLikeImagePathRef('quoted"foo.png')).toBe(false);
+    expect(looksLikeImagePathRef("trailing\nfoo.png")).toBe(false);
+    expect(looksLikeImagePathRef("<tagged>foo.png")).toBe(false);
+  });
+  it("rejects empty or oversized inputs", () => {
+    expect(looksLikeImagePathRef("")).toBe(false);
+    expect(looksLikeImagePathRef("a".repeat(600))).toBe(false);
+    expect(looksLikeImagePathRef(null)).toBe(false);
+    expect(looksLikeImagePathRef(undefined)).toBe(false);
+    expect(looksLikeImagePathRef(123)).toBe(false);
+  });
+});
+
+describe("enhanceImagePaths", () => {
+  it("rewrites <img src> with relative path to /file endpoint", () => {
+    const html = '<img src="plots/foo.png" alt="foo">';
+    const out = enhanceImagePaths(html, "agent-1");
+    expect(out).toContain('src="/api/agents/agent-1/file?path=plots%2Ffoo.png"');
+    expect(out).toContain('alt="foo"');
+    // default presentational attrs added
+    expect(out).toContain("max-h-64");
+    expect(out).toContain('loading="lazy"');
+  });
+  it("does not rewrite absolute or remote img srcs", () => {
+    const html =
+      '<img src="https://cdn.example/x.png"><img src="/abs/y.png">';
+    const out = enhanceImagePaths(html, "agent-1");
+    expect(out).toContain('src="https://cdn.example/x.png"');
+    expect(out).toContain('src="/abs/y.png"');
+    expect(out).not.toContain("/api/agents/agent-1/file");
+  });
+  it("appends a thumbnail after <code>image-path</code> inline-code spans", () => {
+    const html = "see <code>plots/foo.png</code> for the result";
+    const out = enhanceImagePaths(html, "agent-1");
+    // original <code> still present
+    expect(out).toContain("<code>plots/foo.png</code>");
+    // and a thumbnail link after it
+    expect(out).toContain('href="/api/agents/agent-1/file?path=plots%2Ffoo.png"');
+    expect(out).toContain('alt="plots/foo.png"');
+  });
+  it("ignores hljs-marked code blocks (don't flood code listings)", () => {
+    const html =
+      '<pre><code class="hljs language-bash">plots/foo.png\nplots/bar.png</code></pre>';
+    const out = enhanceImagePaths(html, "agent-1");
+    expect(out).not.toContain("/api/agents/agent-1/file");
+  });
+  it("ignores <code> with non-path content", () => {
+    const html = "use <code>npm install foo</code> first";
+    const out = enhanceImagePaths(html, "agent-1");
+    expect(out).toBe(html);
+  });
+  it("no-ops without agentId (preserves input)", () => {
+    const html = '<img src="plots/foo.png">';
+    expect(enhanceImagePaths(html, "")).toBe(html);
+    expect(enhanceImagePaths(html, null)).toBe(html);
+    expect(enhanceImagePaths(html, undefined)).toBe(html);
+  });
+  it("decodes HTML entities inside <code> before path detection", () => {
+    // marked HTML-escapes ampersands but image paths don't usually have
+    // those; still, make sure decoding is at least a no-op for plain
+    // ASCII paths.
+    const html = "<code>my-file.png</code>";
+    const out = enhanceImagePaths(html, "agent-1");
+    expect(out).toContain('href="/api/agents/agent-1/file?path=my-file.png"');
   });
 });

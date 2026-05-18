@@ -1278,7 +1278,13 @@ function renderMessages() {
         }];
       }
     } else {
-      blocks = renderTranscriptBlocks(state, expandedItems, { rawAssistant: rawView });
+      // `agentId` enables `enhanceImagePaths` in transcript.js to
+      // rewrite relative image refs in assistant markdown to
+      // /api/agents/<id>/file?path=...
+      blocks = renderTranscriptBlocks(state, expandedItems, {
+        rawAssistant: rawView,
+        agentId: selectedAgentId,
+      });
     }
   }
 

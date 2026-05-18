@@ -5,6 +5,74 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.9.0 — inline images for path-referenced files in assistant output
+
+### Added
+
+**Best-effort inline rendering of agent-referenced images.** When an
+assistant message mentions a file by relative path — either via a
+markdown image `![alt](plots/foo.png)`, a raw `<img src="plots/foo.png">`,
+or just an inline-code reference like ``the chart is in `plots/foo.png` `` —
+the dashboard now renders the actual image inline so you don't have
+to open a tool result and click through.
+
+New server endpoint: **`GET /api/agents/:id/file?path=<rel>`**.
+
+  - Resolves `path` against the agent's `worktreePath` and refuses to
+    serve anything outside it (path-traversal protection with the
+    standard resolve + prefix check).
+  - Whitelists image MIME types only (`png`, `jpg`, `jpeg`, `gif`,
+    `webp`, `svg`, `bmp`, `ico`); everything else returns 415.
+  - 25 MB size cap; oversize files return 413.
+  - 400 for absolute paths or null bytes; 404 for missing files or
+    unknown agents; 403 for `../`-style escapes.
+  - `cache-control: private, max-age=30` so a single page-load doesn't
+    refetch the same image but a regenerated plot picks up within 30s.
+
+New client helpers in `src/web/render.js`:
+
+  - `looksLikeImagePathRef(s)` — conservative path-shape check (relative,
+    image extension, no quotes/spaces/URLs).
+  - `enhanceImagePaths(html, agentId)` — takes sanitized markdown HTML
+    and (1) rewrites `<img src>` for relative image paths to the
+    `/file` endpoint, (2) appends a small clickable thumbnail after
+    any `<code>plots/foo.png</code>` inline-code span whose text
+    matches the image-path shape. Skips `<pre><code class="hljs">`
+    code blocks so listings of many filenames don't flood the view.
+    Each generated `<img>` has `onerror="this.parentNode.style.display='none'"`
+    so paths the assistant proposed but didn't actually create just
+    disappear instead of leaving broken-image icons.
+
+`renderTranscriptBlocks` now accepts `opts.agentId`, plumbed through
+from `app.js`'s `renderMessages`. Without it, the markdown render is
+unmodified (safe fallback for tests / preview).
+
+### Tests
+
+  - 7 unit tests for `looksLikeImagePathRef` + `enhanceImagePaths`
+    covering positive cases, URL rejection, prose rejection, and the
+    no-`agentId` fallback.
+  - 9 server integration tests in `file-endpoint.test.ts` that boot a
+    real `runServer` against a tmp dataDir, seed a fake agent +
+    worktree, and exercise: happy path PNG / SVG, missing file (404),
+    non-image ext (415), `../` traversal (403), absolute path (400),
+    missing `path` query (400), unknown agent (404), and a documented
+    behaviour-test for symlinks (currently followed; flagged as a
+    known limitation since pirouette controls the worktree).
+
+  202 total tests pass.
+
+### Verified end-to-end
+
+On the live gpu-devpod dashboard, an old transcript that mentioned
+``the chart is in `specaugment_demo.png` `` rendered 3 inline
+thumbnail links + the browser fired 3 actual `/file` fetches. The
+training-curves PNG served by the endpoint round-trips at
+`Content-Type: image/png`, `Cache-Control: private, max-age=30`,
+416 KB body.
+
+---
+
 ## 0.8.4 — fix: stopped agents keep their transcript; mobile selection is instant
 
 ### Fixed

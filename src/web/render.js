@@ -71,6 +71,107 @@ function configureMarked() {
   markedConfigured = true;
 }
 
+// File extensions we'll render inline as thumbnails when referenced
+// (either via markdown `<img>` or a bare `<code>foo.png</code>`).
+const INLINE_IMAGE_EXTS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".svg",
+  ".bmp",
+]);
+
+/** Decide whether a string looks like an in-tree file reference to an
+ *  image we can serve. Used by both the `<img>` src rewriter and the
+ *  `<code>` thumbnail-injector.
+ *
+ *  Conservative on purpose -- false positives turn unrelated text into
+ *  broken `<img>` 404s on the page.
+ *
+ *  Accepts: relative paths like `plots/foo.png`, `./foo.png`, or just
+ *  `foo.png`. Rejects: absolute paths, URLs (anything with `://`),
+ *  data: URIs, paths with spaces or quotes (caller hasn't HTML-encoded
+ *  them, so almost certainly not a real path), and anything not ending
+ *  in a whitelisted image extension.
+ */
+export function looksLikeImagePathRef(s) {
+  if (typeof s !== "string") return false;
+  if (s.length === 0 || s.length > 512) return false;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(s)) return false; // URLs / data: / file:
+  if (s.startsWith("/")) return false; // absolute -- not our worktree
+  if (s.startsWith("#")) return false; // anchor
+  if (/[\s"'<>`]/.test(s)) return false; // quotes/whitespace = prose, not a path
+  // Must look like path/segment(s)/name.ext with a known image ext.
+  const m = s.match(/(\.[a-zA-Z0-9]+)$/);
+  if (!m) return false;
+  return INLINE_IMAGE_EXTS.has(m[1].toLowerCase());
+}
+
+/** Best-effort: enhance a chunk of sanitized HTML so that image paths
+ *  the agent referenced inline actually render as thumbnails in the
+ *  dashboard.
+ *
+ *  Two passes:
+ *    1. Rewrite `<img src="plots/foo.png">` (or any `looksLikeImagePathRef`
+ *       src) to point at `/api/agents/<agentId>/file?path=...`. That
+ *       turns markdown `![alt](plots/foo.png)` into a working image
+ *       without changing the renderMarkdown pipeline.
+ *    2. Append a small thumbnail after any `<code>plots/foo.png</code>`
+ *       inline-code span whose text content looks like an image path.
+ *       Common in assistant output ("saved to `plots/foo.png`"); the
+ *       user shouldn't have to click anywhere to see it.
+ *
+ *  `agentId` is required; if missing, we return the input unchanged.
+ *  This function operates on a string -- no DOMParser dependency --
+ *  using narrow regexes; the input has already been DOMPurified so the
+ *  attribute syntax is predictable. We only ever ADD elements or rewrite
+ *  attribute values; never strip user content.
+ */
+export function enhanceImagePaths(html, agentId) {
+  if (!html || !agentId) return html;
+
+  // 1. Rewrite <img src="..."> for relative paths. DOMPurify normalises
+  //    to double-quoted attributes, so we only need to handle that form.
+  let out = html.replace(/<img\s+([^>]*?)src="([^"]*)"([^>]*?)>/gi, (match, before, src, after) => {
+    if (!looksLikeImagePathRef(src)) return match;
+    const newSrc = `/api/agents/${encodeURIComponent(agentId)}/file?path=${encodeURIComponent(src)}`;
+    // Add a few presentational defaults if the markdown didn't.
+    const hasClass = /\sclass="/i.test(before) || /\sclass="/i.test(after);
+    const classAttr = hasClass
+      ? ""
+      : ' class="max-h-64 rounded border border-base16-300 my-2"';
+    const hasLoading = /\sloading="/i.test(before) || /\sloading="/i.test(after);
+    const loadingAttr = hasLoading ? "" : ' loading="lazy"';
+    return `<img ${before}src="${newSrc}"${after}${classAttr}${loadingAttr}>`;
+  });
+
+  // 2. After each <code>image-path</code> inline span, append a
+  //    thumbnail. We deliberately limit this to <code> (inline code) --
+  //    NOT <pre><code> (code blocks), where the agent often lists many
+  //    paths in a snippet and we'd flood the view with thumbnails.
+  //    Matching anchors at "<code>" without a preceding "<pre>" by
+  //    requiring no `class="hljs ..."` attribute (hljs only applies to
+  //    code blocks, never inline).
+  out = out.replace(/<code(?![^>]*\bclass="hljs)>([^<]+)<\/code>/gi, (match, inner) => {
+    // `inner` is HTML-escaped by marked. Decode the entities we care
+    // about so the path-shape check sees the literal string.
+    const decoded = inner
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
+    if (!looksLikeImagePathRef(decoded)) return match;
+    const src = `/api/agents/${encodeURIComponent(agentId)}/file?path=${encodeURIComponent(decoded)}`;
+    // Render as a link-wrapped thumbnail so click opens full-size.
+    return `${match}<a href="${src}" target="_blank" rel="noopener" class="block my-1"><img src="${src}" alt="${decoded}" loading="lazy" class="max-h-48 rounded border border-base16-300" onerror="this.parentNode.style.display='none'" /></a>`;
+  });
+
+  return out;
+}
+
 /**
  * Render markdown to sanitized HTML.
  * Falls back to plain escaped text if marked/DOMPurify aren't available.

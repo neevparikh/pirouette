@@ -4,6 +4,7 @@
 import {
   describeToolCall,
   describeToolResult,
+  enhanceImagePaths,
   escHtml,
   relTime,
   renderMarkdown,
@@ -232,7 +233,7 @@ export const STREAMING_THINKING_KEY = "streaming-thinking";
  * @param {ChatMessage} msg
  * @param {number} idx
  * @param {Set<string>} [expandedItems]
- * @param {{ rawAssistant?: boolean }} [opts]
+ * @param {{ rawAssistant?: boolean, agentId?: string }} [opts]
  */
 /** Render an array of {dataUrl, mimeType} as a wrapping flex row of small
  *  thumbnails. Click expands the full image in a new tab (data: URL).
@@ -309,9 +310,15 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     // `rawAssistant` is a global toggle owned by app.js (localStorage-backed)
     // — flipped via the `raw` button in the agent header. When on, every
     // assistant message renders as plain escaped markdown source.
+    // After markdown rendering, do a best-effort pass to inline images
+    // the assistant referenced by relative path. `agentId` is supplied
+    // by app.js via renderOpts; without it we render the markdown
+    // unmodified (safe fallback for tests / preview).
+    const md = renderMarkdown(msg.content);
+    const enhanced = opts && opts.agentId ? enhanceImagePaths(md, opts.agentId) : md;
     const body = rawAssistant
       ? `<pre class="whitespace-pre-wrap text-base16-600 text-base font-mono">${escHtml(msg.content)}</pre>`
-      : `<div class="md text-base16-600 text-base">${renderMarkdown(msg.content)}</div>`;
+      : `<div class="md text-base16-600 text-base">${enhanced}</div>`;
     return `
       <div class="message-enter flex justify-start" data-msg-key="${wrapKey}">
         <div class="max-w-[90%] bg-base16-200 border border-base16-300 rounded-xl px-4 py-2">
@@ -490,7 +497,7 @@ function renderToolRun(run, firstIdx, expanded, renderOpts) {
  *
  *  @param {TranscriptState} state
  *  @param {Set<string>} [expandedItems]
- *  @param {{ rawAssistant?: boolean }} [opts]
+ *  @param {{ rawAssistant?: boolean, agentId?: string }} [opts]
  */
 export function renderTranscript(state, expandedItems, opts) {
   return renderTranscriptBlocks(state, expandedItems, opts)
@@ -512,7 +519,7 @@ export function renderTranscript(state, expandedItems, opts) {
  *
  *  @param {TranscriptState} state
  *  @param {Set<string>} [expandedItems]
- *  @param {{ rawAssistant?: boolean }} [opts]
+ *  @param {{ rawAssistant?: boolean, agentId?: string }} [opts]
  *  @returns {{ key: string, html: string }[]}
  */
 export function renderTranscriptBlocks(state, expandedItems, opts) {
