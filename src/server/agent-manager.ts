@@ -487,13 +487,54 @@ export class AgentManager {
 
   getMessages(id: string): ChatMessage[] {
     const handle = this.handles.get(id);
-    if (!handle) return [];
-
-    const messages = handle.session.messages;
-    console.log(`[agent-manager] getMessages for ${id}: ${messages.length} raw messages`);
+    let messages: ReadonlyArray<unknown>;
+    let source: string;
+    if (handle) {
+      messages = handle.session.messages;
+      source = "live";
+    } else {
+      // Agent isn't running (stopped, errored, or never started). Pi's
+      // CLI behaves the same as us when the agent IS running -- but
+      // unlike pi, our "stop" doesn't keep the session alive in memory.
+      // We tear it down so a stopped agent costs nothing.
+      //
+      // To preserve the conversation across a stop (matches pi-CLI's
+      // Ctrl+C-interrupt semantics: the transcript stays put), load the
+      // most-recent session from disk via SessionManager.continueRecent.
+      // We DON'T mutate any state -- just walk the entries to extract
+      // messages for the UI.
+      const config = this.stateManager.getAgent(id);
+      if (!config || !config.sessionDir) {
+        return [];
+      }
+      try {
+        const sm = SessionManager.continueRecent(config.worktreePath, config.sessionDir);
+        // buildSessionContext() resolves compaction summaries into the
+        // canonical message list, same as what an active session would
+        // hand the LLM. That's exactly what we want to render.
+        messages = sm.buildSessionContext().messages;
+        source = "disk";
+      } catch (err) {
+        console.log(`[agent-manager] getMessages: no on-disk session for ${id}: ${err instanceof Error ? err.message : err}`);
+        return [];
+      }
+    }
+    console.log(
+      `[agent-manager] getMessages for ${id}: ${messages.length} raw messages (source=${source})`,
+    );
     const result: ChatMessage[] = [];
 
-    for (const msg of messages) {
+    for (const rawMsg of messages) {
+      const msg = rawMsg as {
+        role: string;
+        content: unknown;
+        timestamp: number;
+        stopReason?: string;
+        errorMessage?: string;
+        toolName?: string;
+        toolCallId?: string;
+        isError?: boolean;
+      };
       if (msg.role === "user") {
         // User messages can have a string or an array of content blocks.
         // Array form is what pi uses when there are images attached.
@@ -519,7 +560,8 @@ export class AgentManager {
         // render them as their own timeline entries.
         const thinkingParts: string[] = [];
         const textParts: string[] = [];
-        for (const block of msg.content) {
+        const blocks = msg.content as Array<Record<string, unknown>>;
+        for (const block of blocks) {
           if ("type" in block && block.type === "thinking" && "thinking" in block) {
             thinkingParts.push(block.thinking as string);
           } else if ("type" in block && block.type === "text" && "text" in block) {
@@ -583,7 +625,7 @@ export class AgentManager {
         result.push({
           role: "system",
           content: "[context compacted]",
-          ts: (msg as { timestamp: number }).timestamp,
+          ts: msg.timestamp,
         });
       }
       // Skip bashExecution, branchSummary, custom, thinking — not needed in chat

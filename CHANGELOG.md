@@ -5,6 +5,51 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.8.4 — fix: stopped agents keep their transcript; mobile selection is instant
+
+### Fixed
+
+**Stopped agents now show their conversation history.**
+
+Previously, when an agent transitioned to `stopped` (via the Stop button
+or `/stop`), `AgentManager.getMessages` returned `[]` because
+`handles.get(id)` was `undefined` (we tear the live `AgentSession` down
+on stop to free memory). The UI then showed the empty-state
+placeholder, making it look like the conversation had been deleted.
+This differs from the pi CLI, where Ctrl+C-interrupting an agent
+leaves the transcript intact.
+
+Fix: when no live handle exists, `getMessages` falls back to loading
+the most-recent session JSONL from disk via
+`SessionManager.continueRecent(worktreePath, sessionDir)` and runs the
+same transcript-extraction pipeline. The on-disk session is the source
+of truth anyway, so this is a pure read with no state-mutation risk.
+Verified end-to-end with `curl /api/agents/<stopped-id>/messages`:
+0 messages → 1039 messages after the fix.
+
+**Mobile: tapping an agent now feels instant.**
+
+`selectAgent(id)` used to `await fetchHistory(id)` before closing the
+sidebar drawer and rendering messages. On a slow mobile connection,
+that meant the drawer stayed open for several seconds after the tap,
+covering the chat view -- so the user saw their tap highlight the
+agent in the sidebar but no actual chat content for the whole fetch
+duration. Felt like a freeze or a missed tap.
+
+Fix: close the sidebar and call `renderMessages()` BEFORE awaiting
+`fetchHistory`. The cached transcript (or a new "loading…" placeholder
+for agents whose history hasn't been fetched yet) renders immediately;
+the fetch updates the view when it lands.
+
+Verified on a throttled 1.5 Mbps / 200 ms-latency emulated iPhone:
+129 ms after tap, drawer is closed and "loading…" placeholder is
+visible, vs. previously waiting for the full multi-second fetch.
+
+**New `placeholder:loading` block** in the transcript pane,
+distinguishing "history fetch in flight" from "actually-empty agent".
+
+---
+
 ## 0.8.3 — fix: Enter on `/compact` (and other args-taking slash commands) now dispatches
 
 ### Fixed

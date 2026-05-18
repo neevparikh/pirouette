@@ -1239,6 +1239,7 @@ function renderAgentHeader() {
 // without rebuilding the container.
 const PLACEHOLDER_SELECT_KEY = "placeholder:select";
 const PLACEHOLDER_EMPTY_KEY = "placeholder:empty";
+const PLACEHOLDER_LOADING_KEY = "placeholder:loading";
 const _tmpl = document.createElement("template");
 
 function renderMessages() {
@@ -1256,10 +1257,26 @@ function renderMessages() {
     const isEmpty =
       state.messages.length === 0 && !state.streamingText && !state.streamingThinking;
     if (isEmpty) {
-      blocks = [{
-        key: PLACEHOLDER_EMPTY_KEY,
-        html: '<div data-msg-key="placeholder:empty" class="text-base16-500 text-xs italic text-center mt-8">no messages yet — send one below</div>',
-      }];
+      // Distinguish two empty cases:
+      //   - history is still being fetched -> "loading..." so the user
+      //     gets immediate feedback that their tap landed (matters on
+      //     mobile where REST roundtrips can be a few seconds);
+      //   - history is loaded and genuinely empty -> the original
+      //     "send one below" prompt.
+      // historyLoaded[id] is set to true by fetchHistory on success and
+      // by agent_session_reset for a freshly-emptied session.
+      const loaded = !!historyLoaded[selectedAgentId];
+      if (!loaded) {
+        blocks = [{
+          key: PLACEHOLDER_LOADING_KEY,
+          html: '<div data-msg-key="placeholder:loading" class="text-base16-500 text-xs italic text-center mt-8">loading conversation…</div>',
+        }];
+      } else {
+        blocks = [{
+          key: PLACEHOLDER_EMPTY_KEY,
+          html: '<div data-msg-key="placeholder:empty" class="text-base16-500 text-xs italic text-center mt-8">no messages yet — send one below</div>',
+        }];
+      }
     } else {
       blocks = renderTranscriptBlocks(state, expandedItems, { rawAssistant: rawView });
     }
@@ -1434,19 +1451,32 @@ async function selectAgent(id) {
   renderAgentHeader();
   updateInputPlaceholder();
   stateFor(id);
-  if (id && !historyLoaded[id]) {
-    await fetchHistory(id);
-  } else {
-    renderMessages();
-  }
-  // Kick off the live footer stats fetch; renderAgentHeader will re-run
-  // when the response lands.
-  if (id) fetchStats(id);
-  // On mobile, the sidebar drawer covers the agent view. Picking an
-  // agent should immediately reveal the conversation, not leave the
-  // drawer on top of it.
+
+  // Render whatever's in the local transcript cache RIGHT NOW (could be
+  // empty placeholder, could be cached messages from a prior selection).
+  // We do this before the await on fetchHistory below so the user gets
+  // an instant visual response -- critical on mobile where the network
+  // roundtrip can take a few seconds.
+  renderMessages();
+
+  // Same reasoning for the sidebar drawer on mobile: close it now so the
+  // chat view is visible while we're still waiting on the history fetch.
+  // Previously this happened AFTER `await fetchHistory(id)`, which meant
+  // a slow connection left the drawer covering the view -- the user saw
+  // their tap highlight an agent in the sidebar but no chat content,
+  // then everything would jump several seconds later. Closing eagerly
+  // makes the selection feel instantaneous.
   if (id && isMobileViewport()) closeSidebar();
-  // Don't auto-focus the input on mobile — it would summon the on-screen
+
+  // Now kick off the async work. fetchHistory updates the cache and
+  // re-renders if we're still on the same agent when it returns. Not
+  // awaited at the top level so a slow fetch doesn't block the function.
+  if (id && !historyLoaded[id]) {
+    void fetchHistory(id);
+  }
+  if (id) void fetchStats(id);
+
+  // Don't auto-focus the input on mobile -- it would summon the on-screen
   // keyboard the moment you tap an agent, which is jarring. Desktop users
   // expect focus.
   if (!isMobileViewport()) $input.focus();
