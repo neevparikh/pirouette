@@ -5,6 +5,39 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.8.2 — fix: steering during a turn no longer behaves like follow-up
+
+### Fixed
+
+When the user typed a message mid-turn with `mode: "steer"`, the message
+was not delivered to pi via `session.steer()` -- it was waiting on the
+per-agent lock until the in-flight `prompt()` resolved, then dispatched
+as a new turn (functionally identical to follow-up). The steering chip
+in the UI would sit there until the turn ended, and the agent never saw
+the message at a turn boundary the way it does in pi's TUI.
+
+Root cause: `AgentManager.sendMessage` held the per-agent serialization
+lock across `await session.prompt()`, which doesn't resolve until pi's
+agent loop emits `agent_end`. Any subsequent sendMessage on the same
+agent blocked behind that lock; by the time it ran, `isStreaming` was
+false and the code took the `prompt()` branch (= new turn).
+
+Fix: only hold the lock for the brief critical section that decides
+which pi API to dispatch (and starts the prompt). The long-lived
+`prompt()` promise is awaited outside the lock so subsequent
+steer/followUp calls race in, see `isStreaming=true`, and enqueue via
+pi's own internal queue. Also fixed the subtle `Promise<Promise<T>>`
+auto-flattening trap by boxing the prompt promise in `{ promptPromise }`
+so the lock chain doesn't unintentionally await it.
+
+Added 3 regression tests in `src/server/__tests__/agent-manager-steer.test.ts`
+that install a fake `AgentSession` and assert (a) the first send on an
+idle agent dispatches via `prompt()`, (b) a mid-prompt steer dispatches
+via `steer()` and resolves promptly (NOT waiting for prompt to finish),
+(c) same for followUp.
+
+---
+
 ## 0.8.1 — fix: tool-result images shouldn't be hidden behind the chevron
 
 ### Fixed

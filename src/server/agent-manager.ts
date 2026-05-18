@@ -896,12 +896,46 @@ export class AgentManager {
       images?: Array<{ data: string; mimeType: string }>;
     } = {},
   ): Promise<void> {
-    return this.withAgentLock(id, async () => {
+    // Critical: do NOT hold the agent lock across `await session.prompt()`.
+    //
+    // pi.session.prompt() returns a promise that doesn't resolve until the
+    // ENTIRE turn ends (agent_end fires). If we awaited it inside the lock,
+    // any subsequent sendMessage call -- including the one the user types
+    // mid-turn to steer the agent -- would block on the lock until the
+    // current turn finishes. By the time the lock releases, isStreaming
+    // is false, and the steer-intent message takes the `prompt()` branch
+    // instead of `steer()`. The user sees "steer behaves like follow-up".
+    //
+    // So we use the lock only for the brief critical section that decides
+    // which pi API to invoke (and captures the prompt promise if we start
+    // one). The long-lived prompt promise is awaited OUTSIDE the lock so
+    // a follow-up sendMessage can race in mid-turn, take the lock, see
+    // isStreaming=true, and dispatch via session.steer() (which is a quick
+    // enqueue, not a blocking call).
+    //
+    // Same shape as stopAgent's pre-lock abort() trick: pi's APIs are
+    // explicitly designed to be safe to call concurrently with prompt().
+    const mode = opts.mode ?? "steer";
+    const imageCount = opts.images?.length ?? 0;
+    const images =
+      imageCount > 0
+        ? opts.images!.map((i) => ({
+            type: "image" as const,
+            data: i.data,
+            mimeType: i.mimeType,
+          }))
+        : undefined;
+
+    // Wrapper around the prompt promise. We can't just return the
+    // promise itself from the lock closure: `withAgentLock` chains via
+    // `prev.then(fn, fn)`, and JavaScript auto-flattens Promise<Promise<T>>,
+    // which means returning a pending promise from `fn` would keep the
+    // lock held until that promise settles -- defeating the whole point.
+    // Boxing in a plain object defeats the flattening.
+    const result = await this.withAgentLock(id, async (): Promise<{ promptPromise: Promise<void> } | null> => {
       const handle = this.handles.get(id);
       if (!handle) throw new Error(`Agent ${id} is not running`);
 
-      const mode = opts.mode ?? "steer";
-      const imageCount = opts.images?.length ?? 0;
       console.log(
         `[agent-manager] sendMessage to ${handle.config.name} (${id}): streaming=${handle.session.isStreaming} mode=${mode}${imageCount > 0 ? ` images=${imageCount}` : ""}`,
       );
@@ -912,21 +946,12 @@ export class AgentManager {
       }
       this.setAgentState(id, "running");
 
-      // Wrap raw image data into pi's ImageContent shape. We don't import
-      // the type here to avoid pulling in pi-ai for a one-field struct;
-      // pi accepts any object with type="image"+data+mimeType.
-      const images =
-        imageCount > 0
-          ? opts.images!.map((i) => ({
-              type: "image" as const,
-              data: i.data,
-              mimeType: i.mimeType,
-            }))
-          : undefined;
-
       // Pi's API quirk: prompt() takes options object `{images}`, but
       // steer/followUp take a plain `images` arg as the 2nd parameter.
       // Hidden in agent-session.d.ts -- see steer(text, images?) etc.
+      //
+      // steer() / followUp() are quick enqueues -- await them inside the
+      // lock to surface errors before returning.
       if (handle.session.isStreaming) {
         if (mode === "followUp") {
           console.log(`[agent-manager] using followUp (agent is streaming)`);
@@ -935,29 +960,45 @@ export class AgentManager {
           console.log(`[agent-manager] using steer (agent is streaming)`);
           await handle.session.steer(message, images);
         }
-      } else {
-        console.log(`[agent-manager] using prompt (agent is idle)`);
-        await handle.session.prompt(message, images ? { images } : undefined);
+        return null;
       }
-      console.log(`[agent-manager] prompt/${mode} resolved for ${id}`);
+
+      // prompt() returns a promise immediately (synchronously sets
+      // isStreaming=true, then asynchronously runs the agent loop).
+      // Box the promise so the lock chain doesn't await it; we await
+      // outside the lock so steer calls can race in.
+      console.log(`[agent-manager] using prompt (agent is idle)`);
+      return {
+        promptPromise: handle.session.prompt(message, images ? { images } : undefined),
+      };
     });
+
+    if (result) {
+      try {
+        await result.promptPromise;
+        console.log(`[agent-manager] prompt resolved for ${id}`);
+      } catch (err) {
+        console.log(`[agent-manager] prompt rejected for ${id}: ${err}`);
+        throw err;
+      }
+    } else {
+      console.log(`[agent-manager] ${mode} enqueued for ${id}`);
+    }
   }
 
   /** Stop an agent gracefully. */
   async stopAgent(id: string): Promise<void> {
-    // Critical: trigger the abort BEFORE taking the lock.
+    // Trigger pi's abort BEFORE taking the lock.
     //
-    // sendMessage holds the agent lock across `await session.prompt()`,
-    // which doesn't resolve until the turn ends naturally. If we tried to
-    // acquire the lock first and then abort, we'd deadlock on every
-    // streaming agent — the lock waiter would never run because the
-    // holder is waiting for a turn that will never end on its own.
-    //
-    // Pi's session.abort() is explicitly designed to be called concurrently
-    // with prompt(): it fires the AbortSignal that prompt's LLM call is
-    // listening on, then awaits idle. So abort() unblocks prompt(), the
-    // sendMessage holder releases the lock, and our cleanup below can
-    // proceed.
+    // sendMessage no longer holds the lock across `await session.prompt()`
+    // (the long-lived prompt promise is awaited outside the lock so steer
+    // calls can race in), so pre-lock abort is no longer strictly required
+    // for deadlock avoidance. We still do it because:
+    //   1. Fires the abort signal immediately rather than after acquiring
+    //      the lock; cancellation feels snappier.
+    //   2. Pi's session.abort() is explicitly designed to be safe to call
+    //      concurrently with prompt() -- it fires the AbortSignal that
+    //      prompt's LLM call is listening on, then awaits idle.
     const preLockHandle = this.handles.get(id);
     if (preLockHandle) {
       try {
