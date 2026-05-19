@@ -10,6 +10,7 @@ import {
   renderMarkdown,
   shortenPath,
 } from "./render.js";
+import { renderMarkdownPi } from "./pi-markdown.js";
 
 /**
  * @typedef {Object} ChatMessage
@@ -310,15 +311,40 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     // `rawAssistant` is a global toggle owned by app.js (localStorage-backed)
     // — flipped via the `raw` button in the agent header. When on, every
     // assistant message renders as plain escaped markdown source.
-    // After markdown rendering, do a best-effort pass to inline images
-    // the assistant referenced by relative path. `agentId` is supplied
-    // by app.js via renderOpts; without it we render the markdown
-    // unmodified (safe fallback for tests / preview).
-    const md = renderMarkdown(msg.content);
-    const enhanced = opts && opts.agentId ? enhanceImagePaths(md, opts.agentId) : md;
-    const body = rawAssistant
-      ? `<pre class="whitespace-pre-wrap text-base16-600 text-base font-mono">${escHtml(msg.content)}</pre>`
-      : `<div class="md text-base16-600 text-base">${enhanced}</div>`;
+    //
+    // Otherwise: render via the pi-tui port (renderMarkdownPi) so
+    // tables/blockquotes/hrs/lists draw with literal box-drawing
+    // characters at a width tied to the bubble. `widthCols` comes
+    // through opts; app.js measures the .pi-md container's char-width
+    // capacity and re-renders on resize via ResizeObserver.
+    //
+    // Fallback: when widthCols isn't supplied (server-side render or
+    // tests), use the legacy renderMarkdown so we don't lose all
+    // formatting -- only the box-drawing fidelity differs.
+    let body;
+    if (rawAssistant) {
+      body = `<pre class="whitespace-pre-wrap text-base16-600 text-base font-mono">${escHtml(msg.content)}</pre>`;
+    } else if (opts && opts.widthCols) {
+      // The whole message renders inside a single `<pre class="pi-md">`.
+      // The renderer already wrapped at the right column width; the CSS
+      // uses `white-space: pre` (NOT pre-wrap) so the browser respects
+      // our wrap decisions and the box-drawing characters align.
+      //
+      // A ResizeObserver in app.js triggers a full renderMessages() when
+      // the container's char-capacity changes, so tables/blockquotes
+      // re-flow on window resize -- same UX as pi-cli growing the
+      // terminal.
+      let pi = renderMarkdownPi(msg.content, opts.widthCols);
+      if (opts.agentId) pi = enhanceImagePaths(pi, opts.agentId);
+      body = `<pre class="pi-md">${pi}</pre>`;
+    } else {
+      // Fallback for tests / preview where no width is available.
+      // Uses the old flow-layout marked output. Tables won't look like
+      // pi-cli but everything still renders.
+      const md = renderMarkdown(msg.content);
+      const enhanced = opts && opts.agentId ? enhanceImagePaths(md, opts.agentId) : md;
+      body = `<div class="md text-base16-600 text-base">${enhanced}</div>`;
+    }
     return `
       <div class="message-enter flex justify-start" data-msg-key="${wrapKey}">
         <div class="max-w-[90%] bg-base16-200 border border-base16-300 rounded-xl px-4 py-2">

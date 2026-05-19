@@ -373,6 +373,33 @@ window.addEventListener("resize", () => {
   updateInputPlaceholder();
 });
 
+// --- pi-md ResizeObserver ---
+//
+// Pi-tui's markdown renderer pre-wraps lines at a column width that
+// we measure from the bubble width. When that width changes (window
+// resize, sidebar opening/closing, orientation flip), the box-drawing
+// tables and wrapped paragraphs need to be re-rendered against the
+// new width or they'll either look truncated or have ragged trailing
+// space.
+//
+// We observe `#messages` (the container that owns the bubble width)
+// and trigger a full `renderMessages()` only when the COLUMN COUNT
+// actually changes -- most resize events on the window don't change
+// the column count by a meaningful amount (pixel-level jitter from
+// scrollbar appearing/disappearing, etc).
+const _piMdResizeObserver = new ResizeObserver(() => {
+  // Skip the very first tick (the observer fires once on attach with
+  // the initial size; renderMessages will already have used that
+  // width via its own measureBubbleWidthCols call).
+  const cols = measureBubbleWidthCols();
+  if (_lastRenderWidthCols !== null && cols === _lastRenderWidthCols) return;
+  _lastRenderWidthCols = cols;
+  // Skip when there's nothing useful to render.
+  if (!selectedAgentId) return;
+  renderMessages();
+});
+_piMdResizeObserver.observe($messages);
+
 // --- model picker ---
 //
 // Click `model ▾` in the agent header → popup with all available models
@@ -1240,6 +1267,68 @@ function renderAgentHeader() {
 const PLACEHOLDER_SELECT_KEY = "placeholder:select";
 const PLACEHOLDER_EMPTY_KEY = "placeholder:empty";
 const PLACEHOLDER_LOADING_KEY = "placeholder:loading";
+
+// --- pi-md width measurement ---
+//
+// The pi-tui-style markdown renderer takes a character-column count
+// and produces pre-wrapped text with literal box-drawing chars. To
+// match the rendered output to the actual bubble width we measure
+// the monospace character width once, then divide the bubble's
+// inner pixel-width by it.
+//
+// The bubble is `max-w-[90%]` of the `#messages` container, minus
+// the bubble's own px-4 padding (16 px each side). We probe by
+// rendering a hidden `<pre class="pi-md">` with 80 `x` characters
+// and reading getBoundingClientRect().
+//
+// Memoized; reset whenever theme/font changes (handled via the
+// ResizeObserver triggering on the messages container, which fires
+// on any layout-relevant change).
+let _piMdCharWidthPx = null;
+function piMdCharWidthPx() {
+  if (_piMdCharWidthPx !== null) return _piMdCharWidthPx;
+  const probe = document.createElement("pre");
+  probe.className = "pi-md";
+  probe.style.position = "absolute";
+  probe.style.visibility = "hidden";
+  probe.style.left = "-9999px";
+  probe.style.top = "0";
+  probe.style.whiteSpace = "pre";
+  probe.textContent = "x".repeat(80);
+  document.body.appendChild(probe);
+  const w = probe.getBoundingClientRect().width / 80;
+  probe.remove();
+  // Fallback when the font is still loading and the probe measured
+  // a fallback font (often ~7.2px for 14px text). Keep going; the
+  // ResizeObserver will rerender once the webfont swaps in and the
+  // probe gives a different value next time.
+  _piMdCharWidthPx = w > 0 ? w : 8;
+  return _piMdCharWidthPx;
+}
+
+/** Char-capacity of the assistant bubble at the current width.
+ *
+ *  Bubble is `max-w-[90%]` of the messages column. Subtract the
+ *  bubble's px-4 padding (16 px) on each side. Then divide by char
+ *  width. Floor for safety.
+ *
+ *  Returns at least 20 (very narrow phones); cap at 200 so a huge
+ *  desktop window doesn't force tables to draw extra-wide just
+ *  because they can — pi's TUI gets clamped by the terminal so
+ *  matching the typical 80–120 range feels right. */
+function measureBubbleWidthCols() {
+  const containerWidth = $messages.clientWidth;
+  if (!containerWidth) return 80;
+  const bubblePx = containerWidth * 0.9 - 16 * 2;
+  const charPx = piMdCharWidthPx();
+  if (charPx <= 0) return 80;
+  const cols = Math.floor(bubblePx / charPx);
+  return Math.min(200, Math.max(20, cols));
+}
+
+/** Last-rendered width-cols, so the ResizeObserver below can no-op
+ *  on layout reshuffles that don't actually change the column count. */
+let _lastRenderWidthCols = null;
 const _tmpl = document.createElement("template");
 
 function renderMessages() {
@@ -1281,9 +1370,17 @@ function renderMessages() {
       // `agentId` enables `enhanceImagePaths` in transcript.js to
       // rewrite relative image refs in assistant markdown to
       // /api/agents/<id>/file?path=...
+      //
+      // `widthCols` is the current char-capacity of the assistant
+      // bubble. Passing it triggers the pi-tui box-drawing renderer
+      // (renderMarkdownPi) instead of the flow-layout marked HTML.
+      // Width is re-measured on resize via the ResizeObserver below.
+      const cols = measureBubbleWidthCols();
+      _lastRenderWidthCols = cols;
       blocks = renderTranscriptBlocks(state, expandedItems, {
         rawAssistant: rawView,
         agentId: selectedAgentId,
+        widthCols: cols,
       });
     }
   }

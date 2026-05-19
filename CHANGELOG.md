@@ -5,6 +5,324 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.11.0 — pi-tui box-drawing markdown renderer (the real thing)
+
+### Added
+
+`src/web/pi-markdown.js` — a browser port of
+`@earendil-works/pi-tui`'s `Markdown` component. Tokenises markdown
+via `marked`, then renders **plain-text lines with literal
+box-drawing characters** the same way pi-cli does in a terminal:
+
+  - **Tables**: `┌─┬─┐` / `├─┼─┤` / `└─┴─┘` borders with `│` cell
+    separators. Column widths computed by the same algorithm pi-tui
+    uses (longest-word minimums, proportional distribution of extra
+    space, oversize-cell wrapping). Cells wrap inside their column;
+    too-narrow tables fall back to raw text.
+  - **Blockquotes**: every wrapped line gets a literal `│ ` prefix in
+    cyan (pi-tui paints this with `theme.quoteBorder`).
+  - **HR**: literal `─` characters across the available width.
+  - **Headings**: h1/h2 styled (yellow + bold + underline), h3+ get
+    an explicit `### ` / `#### ` / etc. prefix in the rendered text
+    (no `::before` pseudo-element).
+  - **Lists**: `- ` / `1. ` bullets in cyan, continuation lines
+    indented under bullet text. Nested lists indented by two spaces
+    per depth.
+  - **Code blocks**: ``` fence markers + 2-space indent on each
+    body line + hljs colorization when an explicit language is set.
+  - **Inline**: bold / italic / strikethrough / inline code each
+    wrap descendant text in a `<span class="pi-strong">` etc.
+  - **Links**: real `<a target="_blank">` inside the `<pre>`; when
+    link text differs from href, ` (href)` is appended in muted color
+    (same convention as pi-tui's terminal fallback when OSC 8 isn't
+    available).
+
+The renderer output is a single string (the body of a `<pre
+class="pi-md">`). `transcript.js` swaps to it whenever
+`renderTranscriptBlocks` receives `opts.widthCols`; without a width
+we fall back to the old flow-layout marked HTML.
+
+### Wiring
+
+`app.js`:
+
+  - `piMdCharWidthPx()` — measures the monospace cell width by
+    rendering a hidden `<pre class="pi-md">` with 80 `x` chars and
+    reading `getBoundingClientRect()`.
+  - `measureBubbleWidthCols()` — divides the `#messages` container
+    width (× 0.9 for `max-w-[90%]` − 32 px bubble padding) by the
+    char width to get a column count. Clamps to 20…200 cols.
+  - `ResizeObserver` on `#messages` — re-runs `renderMessages()`
+    only when the COLUMN COUNT actually changes (pixel-level resize
+    jitter is no-op'd via the `_lastRenderWidthCols` cache).
+
+CSS in `index.html`:
+
+  - `.pi-md` — single `<pre>` block, `white-space: pre`,
+    `overflow-x: auto` so wide tables scroll instead of breaking
+    layout.
+  - `.pi-strong / .pi-em / .pi-del / .pi-code / .pi-link / .pi-h1…6
+    / .pi-list-bullet / .pi-quote-bar / .pi-quote / .pi-hr /
+    .pi-table-border / .pi-th / .pi-code-fence / .pi-codeblock /
+    .pi-image-ref` — each maps onto the existing base16 palette so
+    every theme in the picker gets coherent colors automatically.
+
+### Tests
+
+`src/web/__tests__/pi-markdown.test.js` — 32 tests:
+
+  - `cellWidth` (ASCII, combining marks, surrogate pairs)
+  - `wrapRuns` (fit, wrap-on-whitespace, class preservation across
+    wraps, char-by-char break for oversize tokens, no
+    leading-whitespace lines)
+  - `inlineToRuns` (nested style stacks, codespan, links with/
+    without paren-href suffix)
+  - `linesToHtml` (HTML entity escaping, classed span wrapping,
+    `<a target="_blank">`, multi-line join)
+  - `renderMarkdownPi` end-to-end: h1/h3 styling, table box-drawing,
+    blockquote bar, hr, lists, code blocks, plain-text fallback
+    when marked is missing, width clamping, table reflow on width
+    change.
+
+234 total tests pass (was 202).
+
+### Verified
+
+Live on the gpu dashboard with the `interaction` agent: an
+existing assistant message with a real markdown table now renders
+the table with `┌─┬─┐` borders and aligned columns, headings with
+the `### ` prefix, nested bullet lists indented properly, inline
+code in cyan, links as real `<a>` tags inside the `<pre>`. Computed
+`font-family` resolves to `JetBrainsMono Nerd Font Mono`,
+`white-space: pre`, font-size 12.88 px — exactly the kitty-terminal
+look the user wanted.
+
+---
+
+## 0.11.0 — pi-tui box-drawing markdown renderer (the real thing)
+
+### Added
+
+`src/web/pi-markdown.js` — a browser port of
+`@earendil-works/pi-tui`'s `Markdown` component. Tokenises markdown
+via `marked`, then renders **plain-text lines with literal
+box-drawing characters** the same way pi-cli does in a terminal:
+
+  - **Tables**: `┌─┬─┐` / `├─┼─┤` / `└─┴─┘` borders with `│` cell
+    separators. Column widths computed by the same algorithm pi-tui
+    uses (longest-word minimums, proportional distribution of extra
+    space, oversize-cell wrapping). Cells wrap inside their column;
+    too-narrow tables fall back to raw text.
+  - **Blockquotes**: every wrapped line gets a literal `│ ` prefix in
+    cyan (pi-tui paints this with `theme.quoteBorder`).
+  - **HR**: literal `─` characters across the available width.
+  - **Headings**: h1/h2 styled (yellow + bold + underline), h3+ get
+    an explicit `### ` / `#### ` / etc. prefix in the rendered text
+    (no `::before` pseudo-element).
+  - **Lists**: `- ` / `1. ` bullets in cyan, continuation lines
+    indented under bullet text. Nested lists indented by two spaces
+    per depth.
+  - **Code blocks**: ``` fence markers + 2-space indent on each
+    body line + hljs colorization when an explicit language is set.
+  - **Inline**: bold / italic / strikethrough / inline code each
+    wrap descendant text in a `<span class="pi-strong">` etc.
+  - **Links**: real `<a target="_blank">` inside the `<pre>`; when
+    link text differs from href, ` (href)` is appended in muted color
+    (same convention as pi-tui's terminal fallback when OSC 8 isn't
+    available).
+
+The renderer output is a single string (the body of a `<pre
+class="pi-md">`). `transcript.js` swaps to it whenever
+`renderTranscriptBlocks` receives `opts.widthCols`; without a width
+we fall back to the old flow-layout marked HTML.
+
+### Wiring
+
+`app.js`:
+
+  - `piMdCharWidthPx()` — measures the monospace cell width by
+    rendering a hidden `<pre class="pi-md">` with 80 `x` chars and
+    reading `getBoundingClientRect()`.
+  - `measureBubbleWidthCols()` — divides the `#messages` container
+    width (× 0.9 for `max-w-[90%]` − 32 px bubble padding) by the
+    char width to get a column count. Clamps to 20…200 cols.
+  - `ResizeObserver` on `#messages` — re-runs `renderMessages()`
+    only when the COLUMN COUNT actually changes (pixel-level resize
+    jitter is no-op'd via the `_lastRenderWidthCols` cache).
+
+CSS in `index.html`:
+
+  - `.pi-md` — single `<pre>` block, `white-space: pre`,
+    `overflow-x: auto` so wide tables scroll instead of breaking
+    layout.
+  - `.pi-strong / .pi-em / .pi-del / .pi-code / .pi-link / .pi-h1…6
+    / .pi-list-bullet / .pi-quote-bar / .pi-quote / .pi-hr /
+    .pi-table-border / .pi-th / .pi-code-fence / .pi-codeblock /
+    .pi-image-ref` — each maps onto the existing base16 palette so
+    every theme in the picker gets coherent colors automatically.
+
+### Tests
+
+`src/web/__tests__/pi-markdown.test.js` — 32 tests:
+
+  - `cellWidth` (ASCII, combining marks, surrogate pairs)
+  - `wrapRuns` (fit, wrap-on-whitespace, class preservation across
+    wraps, char-by-char break for oversize tokens, no
+    leading-whitespace lines)
+  - `inlineToRuns` (nested style stacks, codespan, links with/
+    without paren-href suffix)
+  - `linesToHtml` (HTML entity escaping, classed span wrapping,
+    `<a target="_blank">`, multi-line join)
+  - `renderMarkdownPi` end-to-end: h1/h3 styling, table box-drawing,
+    blockquote bar, hr, lists, code blocks, plain-text fallback
+    when marked is missing, width clamping, table reflow on width
+    change.
+
+234 total tests pass (was 202).
+
+### Verified
+
+Live on the gpu dashboard with the `interaction` agent: an
+existing assistant message with a real markdown table now renders
+the table with `┌─┬─┐` borders and aligned columns, headings with
+the `### ` prefix, nested bullet lists indented properly, inline
+code in cyan, links as real `<a>` tags inside the `<pre>`. Computed
+`font-family` resolves to `JetBrainsMono Nerd Font Mono`,
+`white-space: pre`, font-size 12.88 px — exactly the kitty-terminal
+look the user wanted.
+
+---
+
+## 0.11.0 — pi-tui markdown port: real box-drawing tables, blockquote bars, hr
+
+### Added
+
+`src/web/pi-markdown.js` -- a browser port of pi-coding-agent's TUI
+markdown renderer (`@earendil-works/pi-tui`'s `Markdown` component).
+This produces actual pre-formatted text with literal box-drawing
+characters, the way pi-cli draws markdown in your terminal:
+
+  - Tables drawn with `┌─┬─┐ / ├─┼─┤ / └─┴─┘` borders and
+    column-width-aware cell wrapping. The width algorithm is a
+    direct port: natural widths get clamped to longest-word minimums
+    when the table is too wide, then redistributed proportionally
+    to fit.
+  - Blockquotes prefix every wrapped line with a literal `│ ` bar.
+  - Horizontal rules render as a row of `─` characters.
+  - Lists use literal `- ` / `1. ` bullets with continuation lines
+    indented under the bullet text (not the bullet).
+  - Headings h3+ get the literal `### ` prefix; h1/h2 omit the
+    prefix (styled bold + underline instead, matching pi's TUI).
+  - Code blocks are 2-space-indented between literal `` ``` `` fences;
+    hljs-highlighted output passes through directly when the
+    language is known.
+  - Inline styling (bold / italic / strikethrough / codespan / link)
+    survives the wrap algorithm via segment-and-class run model.
+
+### Changed
+
+The assistant-message branch in `src/web/transcript.js` now emits a
+single `<pre class="pi-md">` block containing the rendered output.
+The CSS uses `white-space: pre` (not pre-wrap) so the browser
+respects the pre-wrap decisions made by the renderer -- no
+double-wrapping that would misalign the box-drawing.
+
+`renderTranscriptBlocks` accepts a new `widthCols` option carrying
+the bubble's current character capacity. `src/web/app.js` measures
+this via a hidden probe element (`piMdCharWidthPx`) and recalculates
+on every render. A `ResizeObserver` on `#messages` triggers
+`renderMessages()` whenever the column count actually changes, so
+tables and blockquotes re-flow on window resize -- the same UX as
+pi-cli responding to a terminal resize.
+
+When `widthCols` isn't supplied (tests, server-side rendering), the
+code falls back to the old `renderMarkdown` flow so nothing breaks.
+
+### Tests
+
+32 new unit tests in `src/web/__tests__/pi-markdown.test.js`
+covering the cell-width measurement, whitespace-aware wrap
+algorithm, inline-token-to-run conversion, runs-to-HTML
+serialisation, and end-to-end structural properties of every
+block type (tables with ┌─┬─┐ corners and ┼ separators,
+blockquotes with `│ ` prefixes, hr as a row of `─`, lists with
+literal bullets, code-block fence markers). Total: 234 tests.
+
+### Verified
+
+On the live gpu-devpod dashboard, an existing assistant transcript
+that included a 5-column markdown table rendered with full
+box-drawing characters in JetBrains Mono Nerd Font Mono at
+`white-space: pre` -- visually matching the pi-cli output for the
+same input.
+
+---
+
+## 0.11.0 — pi-tui markdown port: real box-drawing tables, blockquote bars, hr
+
+### Added
+
+`src/web/pi-markdown.js` -- a browser port of pi-coding-agent's TUI
+markdown renderer (`@earendil-works/pi-tui`'s `Markdown` component).
+This produces actual pre-formatted text with literal box-drawing
+characters, the way pi-cli draws markdown in your terminal:
+
+  - Tables drawn with `┌─┬─┐ / ├─┼─┤ / └─┴─┘` borders and
+    column-width-aware cell wrapping. The width algorithm is a
+    direct port: natural widths get clamped to longest-word minimums
+    when the table is too wide, then redistributed proportionally
+    to fit.
+  - Blockquotes prefix every wrapped line with a literal `│ ` bar.
+  - Horizontal rules render as a row of `─` characters.
+  - Lists use literal `- ` / `1. ` bullets with continuation lines
+    indented under the bullet text (not the bullet).
+  - Headings h3+ get the literal `### ` prefix; h1/h2 omit the
+    prefix (styled bold + underline instead, matching pi's TUI).
+  - Code blocks are 2-space-indented between literal `` ``` `` fences;
+    hljs-highlighted output passes through directly when the
+    language is known.
+  - Inline styling (bold / italic / strikethrough / codespan / link)
+    survives the wrap algorithm via segment-and-class run model.
+
+### Changed
+
+The assistant-message branch in `src/web/transcript.js` now emits a
+single `<pre class="pi-md">` block containing the rendered output.
+The CSS uses `white-space: pre` (not pre-wrap) so the browser
+respects the pre-wrap decisions made by the renderer -- no
+double-wrapping that would misalign the box-drawing.
+
+`renderTranscriptBlocks` accepts a new `widthCols` option carrying
+the bubble's current character capacity. `src/web/app.js` measures
+this via a hidden probe element (`piMdCharWidthPx`) and recalculates
+on every render. A `ResizeObserver` on `#messages` triggers
+`renderMessages()` whenever the column count actually changes, so
+tables and blockquotes re-flow on window resize -- the same UX as
+pi-cli responding to a terminal resize.
+
+When `widthCols` isn't supplied (tests, server-side rendering), the
+code falls back to the old `renderMarkdown` flow so nothing breaks.
+
+### Tests
+
+32 new unit tests in `src/web/__tests__/pi-markdown.test.js`
+covering the cell-width measurement, whitespace-aware wrap
+algorithm, inline-token-to-run conversion, runs-to-HTML
+serialisation, and end-to-end structural properties of every
+block type (tables with ┌─┬─┐ corners and ┼ separators,
+blockquotes with `│ ` prefixes, hr as a row of `─`, lists with
+literal bullets, code-block fence markers). Total: 234 tests.
+
+### Verified
+
+On the live gpu-devpod dashboard, an existing assistant transcript
+that included a 5-column markdown table rendered with full
+box-drawing characters in JetBrains Mono Nerd Font Mono at
+`white-space: pre` -- visually matching the pi-cli output for the
+same input.
+
+---
+
 ## 0.10.0 — JetBrains Mono Nerd Font + pi-terminal-style markdown
 
 ### Changed
