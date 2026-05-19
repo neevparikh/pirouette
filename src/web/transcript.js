@@ -242,11 +242,15 @@ export const STREAMING_THINKING_KEY = "streaming-thinking";
  *  unconditionally. Used by both user and tool-result message renderers. */
 function renderInlineImages(images) {
   if (!Array.isArray(images) || images.length === 0) return "";
-  let html = `<div class="flex flex-wrap gap-1 justify-end max-w-[80%]">`;
+  // Flat pi-cli layout: thumbnails left-align inside the message row
+  // (the parent row already provides the column padding). Was
+  // `justify-end max-w-[80%]` back when user messages were
+  // right-aligned bubbles.
+  let html = `<div class="flex flex-wrap gap-1 justify-start">`;
   for (const img of images) {
     if (!img || typeof img.dataUrl !== "string") continue;
     html += `<a href="${img.dataUrl}" target="_blank" rel="noopener" class="block">
-      <img src="${img.dataUrl}" alt="attached ${escHtml(img.mimeType || "image")}" class="max-h-48 max-w-full rounded-lg border border-base16-300 object-contain bg-base16-100" />
+      <img src="${img.dataUrl}" alt="attached ${escHtml(img.mimeType || "image")}" class="max-h-48 max-w-full rounded border border-base16-300 object-contain bg-base16-100" />
     </a>`;
   }
   html += `</div>`;
@@ -268,19 +272,25 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     : messageKey(msg, idx);
 
   if (msg.role === "user") {
-    // Image attachments (pasted into the input on the way out, or stored
-    // on the message after a roundtrip via getMessages). Inlined as data
-    // URIs from the server -- no extra fetches. Multiple images stack as
-    // a wrapping flex row above the text bubble.
+    // Pi-cli style: user messages are inline in the flat transcript,
+    // NOT a right-aligned colored bubble. They sit at the same indent
+    // as assistant content with a slightly lighter bg-tint strip
+    // running the full width of the message column -- mirrors pi-tui's
+    // input-recall band (visible in the user's reference screenshot:
+    // "oh you made symlinks? can you just copy them in?").
+    //
+    // The text itself is colored slightly brighter than assistant prose
+    // so you can scan the transcript and spot your own utterances
+    // without needing a bubble border.
+    //
+    // Image attachments stack above the text on the same row.
     const imagesHtml = renderInlineImages(msg.images);
     return `
-      <div class="message-enter flex flex-col items-end gap-1" data-msg-key="${wrapKey}">
+      <div class="message-enter pi-row pi-row-user flex flex-col gap-1 px-4 py-2 bg-base16-200/60" data-msg-key="${wrapKey}">
         ${imagesHtml}
         ${
           msg.content
-            ? `<div class="max-w-[80%] bg-base16-blue/15 border border-base16-blue/20 rounded-xl px-4 py-2">
-          <pre class="whitespace-pre-wrap text-base16-700 text-base font-sans">${escHtml(msg.content)}</pre>
-        </div>`
+            ? `<pre class="whitespace-pre-wrap text-base16-700 font-sans">${escHtml(msg.content)}</pre>`
             : ""
         }
       </div>`;
@@ -288,68 +298,44 @@ export function renderMessage(msg, idx, expandedItems, opts) {
 
   if (msg.role === "assistant") {
     if (msg.streaming) {
-      // Streaming bubble: render plain text, NOT markdown. We do this for
-      // two reasons:
-      //   1. Markdown of in-progress text is often half-formed (`** bold`
-      //      with no closing) which causes weird flickers as fragments
-      //      flip in/out of styled state.
-      //   2. `el.innerHTML = renderMarkdown(...)` per delta tears down all
-      //      child nodes (incl. hljs spans) and rebuilds them; that's the
-      //      "flash" the user reported.
-      // app.js's updateStreamingElement() exploits this: it inserts new
-      // text as a text node before the cursor span instead of rewriting
-      // innerHTML, so streaming is silky-smooth.
-      // The bubble swaps to a markdown-rendered finalized version on
-      // message_complete (one swap = one paint, much less noticeable).
+      // Streaming row: flat pi-cli layout (no bubble). Renders plain
+      // text -- NOT markdown -- for the reasons in the original
+      // comment: half-formed markdown flickers, and rebuilding the
+      // DOM on every delta causes flash. app.js's
+      // updateStreamingElement() inserts new text before the cursor
+      // span instead of rewriting innerHTML, so streaming stays
+      // smooth. message_complete swaps to the pi-md branch above
+      // for the final paint.
       return `
-        <div class="message-enter flex justify-start" data-msg-key="${wrapKey}">
-          <div class="max-w-[90%] bg-base16-200 border border-base16-green/40 rounded-xl px-4 py-2">
-            <pre id="streaming-body" class="whitespace-pre-wrap text-base16-600 text-base font-sans">${escHtml(msg.content)}<span class="animate-pulse text-base16-green streaming-cursor">▊</span></pre>
-          </div>
+        <div class="message-enter pi-row pi-row-assistant px-4 py-1.5" data-msg-key="${wrapKey}">
+          <pre id="streaming-body" class="whitespace-pre-wrap text-base16-600 font-mono">${escHtml(msg.content)}<span class="animate-pulse text-base16-green streaming-cursor">▊</span></pre>
         </div>`;
     }
-    // `rawAssistant` is a global toggle owned by app.js (localStorage-backed)
-    // — flipped via the `raw` button in the agent header. When on, every
-    // assistant message renders as plain escaped markdown source.
+    // `rawAssistant` toggle (owned by app.js, localStorage-backed) --
+    // flipped via the `raw` button. When on, every assistant message
+    // renders as plain escaped markdown source.
     //
-    // Otherwise: render via the pi-tui port (renderMarkdownPi) so
-    // tables/blockquotes/hrs/lists draw with literal box-drawing
-    // characters at a width tied to the bubble. `widthCols` comes
-    // through opts; app.js measures the .pi-md container's char-width
-    // capacity and re-renders on resize via ResizeObserver.
-    //
-    // Fallback: when widthCols isn't supplied (server-side render or
-    // tests), use the legacy renderMarkdown so we don't lose all
-    // formatting -- only the box-drawing fidelity differs.
+    // Default path: pi-tui box-drawing renderer (renderMarkdownPi),
+    // width-tied to the bubble's column capacity. The whole pi-md
+    // block sits inline in the flat transcript -- no bubble border,
+    // no left/right alignment, just full-column flow that matches
+    // pi-cli.
     let body;
     if (rawAssistant) {
-      body = `<pre class="whitespace-pre-wrap text-base16-600 text-base font-mono">${escHtml(msg.content)}</pre>`;
+      body = `<pre class="whitespace-pre-wrap text-base16-600 font-mono">${escHtml(msg.content)}</pre>`;
     } else if (opts && opts.widthCols) {
-      // The whole message renders inside a single `<pre class="pi-md">`.
-      // The renderer already wrapped at the right column width; the CSS
-      // uses `white-space: pre` (NOT pre-wrap) so the browser respects
-      // our wrap decisions and the box-drawing characters align.
-      //
-      // A ResizeObserver in app.js triggers a full renderMessages() when
-      // the container's char-capacity changes, so tables/blockquotes
-      // re-flow on window resize -- same UX as pi-cli growing the
-      // terminal.
       let pi = renderMarkdownPi(msg.content, opts.widthCols);
       if (opts.agentId) pi = enhanceImagePaths(pi, opts.agentId);
       body = `<pre class="pi-md">${pi}</pre>`;
     } else {
       // Fallback for tests / preview where no width is available.
-      // Uses the old flow-layout marked output. Tables won't look like
-      // pi-cli but everything still renders.
       const md = renderMarkdown(msg.content);
       const enhanced = opts && opts.agentId ? enhanceImagePaths(md, opts.agentId) : md;
-      body = `<div class="md text-base16-600 text-base">${enhanced}</div>`;
+      body = `<div class="md text-base16-600">${enhanced}</div>`;
     }
     return `
-      <div class="message-enter flex justify-start" data-msg-key="${wrapKey}">
-        <div class="max-w-[90%] bg-base16-200 border border-base16-300 rounded-xl px-4 py-2">
-          ${body}
-        </div>
+      <div class="message-enter pi-row pi-row-assistant px-4 py-1.5" data-msg-key="${wrapKey}">
+        ${body}
       </div>`;
   }
 

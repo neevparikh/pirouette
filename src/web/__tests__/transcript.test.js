@@ -340,27 +340,32 @@ describe("renderMessage", () => {
     expect(html).toContain('src="data:image/png;base64,XYZ"');
   });
 
-  it("user message renders in a right-aligned bubble with escaped content", () => {
+  it("user message renders as a flat pi-cli row with escaped content", () => {
+    // v0.12.0: flat layout. User messages are inline rows (no
+    // right-aligned bubble), distinguished by a subtle bg tint via
+    // the `pi-row-user` class.
     const html = renderMessage(
       { role: "user", content: "<script>x</script>", ts: 0 },
       0,
     );
-    // v0.8.0: user messages can have image attachments above the text,
-    // so the outer wrapper is `flex flex-col items-end` (was `flex
-    // justify-end` when text-only was the only shape). Both end up
-    // right-aligned; the test just needs to verify alignment, not the
-    // specific flex incantation.
-    expect(html).toContain("items-end");
+    expect(html).toContain("pi-row-user");
     expect(html).toContain("&lt;script&gt;");
+    // Old right-aligned alignment should no longer appear.
+    expect(html).not.toContain("items-end");
+    expect(html).not.toContain("justify-end");
   });
 
-  it("assistant message renders markdown", () => {
+  it("assistant message renders markdown in a flat pi-cli row", () => {
     const html = renderMessage(
       { role: "assistant", content: "**bold**", ts: 0 },
       0,
     );
-    expect(html).toContain("justify-start");
+    expect(html).toContain("pi-row-assistant");
+    // No widthCols supplied -> falls back to the legacy renderMarkdown
+    // path which still emits a <strong> tag inside .md.
     expect(html).toMatch(/<strong>bold<\/strong>/);
+    // Old left-aligned bubble classes should not appear.
+    expect(html).not.toContain("justify-start");
   });
 
   it("streaming assistant has the streaming-body id and cursor", () => {
