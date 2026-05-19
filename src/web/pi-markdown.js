@@ -395,30 +395,39 @@ function renderList(token, depth, width) {
         { text: indentStr, classes: [] },
         { text: bullet, classes: ["pi-list-bullet"] },
       ]);
-      continue;
+    } else {
+      for (let j = 0; j < itemLines.length; j++) {
+        const line = itemLines[j];
+        if (line.isNested) {
+          // Nested list lines already have their own indent baked in.
+          out.push(line.runs);
+          continue;
+        }
+        if (j === 0) {
+          out.push([
+            { text: indentStr, classes: [] },
+            { text: bullet, classes: ["pi-list-bullet"] },
+            ...line.runs,
+          ]);
+        } else {
+          // Continuation lines: align under the bullet text, not under
+          // the bullet itself. (e.g. "- foo bar" wrapped becomes
+          //   "- foo\n  bar".)
+          out.push([
+            { text: indentStr + " ".repeat(bulletWidth), classes: [] },
+            ...line.runs,
+          ]);
+        }
+      }
     }
-    for (let j = 0; j < itemLines.length; j++) {
-      const line = itemLines[j];
-      if (line.isNested) {
-        // Nested list lines already have their own indent baked in.
-        out.push(line.runs);
-        continue;
-      }
-      if (j === 0) {
-        out.push([
-          { text: indentStr, classes: [] },
-          { text: bullet, classes: ["pi-list-bullet"] },
-          ...line.runs,
-        ]);
-      } else {
-        // Continuation lines: align under the bullet text, not under
-        // the bullet itself. (e.g. "- foo bar" wrapped becomes
-        //   "- foo\n  bar".)
-        out.push([
-          { text: indentStr + " ".repeat(bulletWidth), classes: [] },
-          ...line.runs,
-        ]);
-      }
+    // Add a blank line between items at the top level (depth 0) to
+    // give lists the same "breathing room" pi-cli has -- compare
+    // dense `- a\n- b\n- c` to spaced `- a\n\n- b\n\n- c`. Nested
+    // lists stay tight so they don't visually fragment from their
+    // parent item. Skip after the last item; the parent paragraph's
+    // spacing rule will own the boundary.
+    if (depth === 0 && i < token.items.length - 1) {
+      out.push([]);
     }
   }
   return out;

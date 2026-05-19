@@ -502,16 +502,28 @@
            Same trick a terminal would use to break up scrollback. */
         border-top: 1px solid rgba(128, 128, 128, 0.08);
       }
+      /* User input: bg-tint band runs the full container width
+         because `#messages` has no horizontal padding (px-0 on the
+         container). The strip is rendered as a slightly-darker
+         surface (heavier than the +.pi-row separator below) so
+         user turns read as paragraph blocks the way pi-cli's
+         input-recall band does in a terminal. Color comes from
+         the active base16 theme: we use a generic rgba(gray) so
+         the tint reads correctly on both light and dark schemes
+         without needing per-theme overrides. */
       .pi-row-user {
-        background: rgba(128, 128, 128, 0.06);
+        background: rgba(128, 128, 128, 0.10);
       }
-      .pi-row-user pre {
-        color: rgb(var(--color-base16-700));
-      }
-      .pi-row-assistant {
-        /* No bg-tint: assistant content uses the default page bg.
-           Inherits color from the parent (.pi-md, .md, or the
-           rawAssistant <pre>) so we don't need to repeat it here. */
+      /* Thinking / tool / tool-result / system rows: no bg-tint,
+         flow inline with assistant prose. They get their own
+         classes so we can target them later (e.g. add color
+         accents) without touching the shared .pi-row rule. */
+      .pi-row-assistant,
+      .pi-row-thinking,
+      .pi-row-tool,
+      .pi-row-system {
+        /* Default page bg; color inherited from the inner
+           .pi-md / .md / rawAssistant <pre>. */
       }
 
       /* Syntax highlighting — base16-mapped hljs classes, following the

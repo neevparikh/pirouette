@@ -286,11 +286,11 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     // Image attachments stack above the text on the same row.
     const imagesHtml = renderInlineImages(msg.images);
     return `
-      <div class="message-enter pi-row pi-row-user flex flex-col gap-1 px-4 py-1.5 bg-base16-200/60" data-msg-key="${wrapKey}">
+      <div class="message-enter pi-row pi-row-user flex flex-col gap-1 px-4 py-3" data-msg-key="${wrapKey}">
         ${imagesHtml}
         ${
           msg.content
-            ? `<pre class="pi-md-text whitespace-pre-wrap text-base16-700">${escHtml(msg.content)}</pre>`
+            ? `<pre class="pi-md-text whitespace-pre-wrap">${escHtml(msg.content)}</pre>`
             : ""
         }
       </div>`;
@@ -340,15 +340,19 @@ export function renderMessage(msg, idx, expandedItems, opts) {
   }
 
   if (msg.role === "thinking") {
-    // Streaming path: render a simple auto-scrolling live box so the text
-    // keeps flowing without triggering layout churn or chevron flicker.
-    // The id is stable so app.js can update the innerHTML in place on each
+    // Streaming path: render a simple auto-scrolling live box so the
+    // text keeps flowing without triggering layout churn. The id is
+    // stable so app.js can update the innerHTML in place on each
     // thinking_delta.
+    //
+    // Pi-cli prints thinking lines as italic + muted at the same size
+    // as surrounding prose. We match by inheriting the transcript's
+    // 14 px / 20 px rhythm via `.pi-row-thinking` (no text-[11px]).
     if (msg.streaming) {
       return `
-        <div class="message-enter px-2 py-0.5" data-msg-key="${wrapKey}">
-          <div class="text-[10px] italic text-base16-500 mb-1">thinking…</div>
-          <pre id="streaming-thinking-body" class="text-[11px] text-base16-500 italic bg-base16-100 rounded p-2 overflow-x-auto whitespace-pre-wrap font-sans max-h-48 overflow-y-auto">${escHtml(msg.content)}<span class="animate-pulse text-base16-500">▊</span></pre>
+        <div class="message-enter pi-row pi-row-thinking px-4 py-1" data-msg-key="${wrapKey}">
+          <div class="italic text-base16-500 mb-1">thinking…</div>
+          <pre id="streaming-thinking-body" class="text-base16-500 italic whitespace-pre-wrap max-h-48 overflow-y-auto">${escHtml(msg.content)}<span class="animate-pulse text-base16-500">▊</span></pre>
         </div>`;
     }
     // Finalized path: first-line preview + expand/collapse for the rest.
@@ -356,15 +360,15 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     const isExpanded = expanded.has(key);
     const preview = msg.content.split("\n")[0].slice(0, 120);
     const hasMore = msg.content.length > preview.length;
-    const chevron = hasMore ? `<span class="text-[9px] text-base16-500 ml-auto">${isExpanded ? "▼" : "▶"}</span>` : "";
+    const chevron = hasMore ? `<span class="text-base16-500 ml-auto">${isExpanded ? "▼" : "▶"}</span>` : "";
     return `
-      <div class="message-enter px-2 py-0.5" data-msg-key="${key}">
-        <div class="flex items-baseline gap-2 text-xs italic cursor-pointer hover:bg-base16-200/50 rounded px-1 py-0.5" data-toggle="${hasMore ? key : ""}">
+      <div class="message-enter pi-row pi-row-thinking px-4 py-1" data-msg-key="${key}">
+        <div class="flex items-baseline gap-2 italic cursor-pointer hover:bg-base16-200/50 rounded px-1 py-0.5" data-toggle="${hasMore ? key : ""}">
           <span class="text-base16-500">thinking</span>
-          <span class="text-base16-500 truncate italic font-sans">${escHtml(preview)}${hasMore && !isExpanded ? "…" : ""}</span>
+          <span class="text-base16-500 truncate italic">${escHtml(preview)}${hasMore && !isExpanded ? "…" : ""}</span>
           ${chevron}
         </div>
-        ${hasMore ? `<pre class="mt-1 text-[11px] text-base16-500 italic bg-base16-100 rounded p-2 overflow-x-auto whitespace-pre-wrap font-sans ${isExpanded ? "" : "hidden"}" data-expand="${key}">${escHtml(msg.content)}</pre>` : ""}
+        ${hasMore ? `<pre class="mt-1 text-base16-500 italic whitespace-pre-wrap ${isExpanded ? "" : "hidden"}" data-expand="${key}">${escHtml(msg.content)}</pre>` : ""}
       </div>`;
   }
 
@@ -373,16 +377,19 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     const key = messageKey(msg, idx);
     const isExpanded = expanded.has(key);
     const hasBody = desc.body && desc.body.length > 0;
-    const chevron = hasBody ? `<span class="text-[9px] text-base16-500 ml-auto">${isExpanded ? "▼" : "▶"}</span>` : "";
+    // Pi-cli renders tool calls inline at the same font size as
+    // surrounding prose -- not a shrunken `text-xs` sub-row. Match
+    // that here so the transcript reads at one consistent density.
+    const chevron = hasBody ? `<span class="text-base16-500 ml-auto">${isExpanded ? "▼" : "▶"}</span>` : "";
     const bodyHtml = !hasBody
       ? ""
       : desc.bodyIsRich
         ? `<div class="mt-1 ${isExpanded ? "" : "hidden"}" data-expand="${key}">${desc.body}</div>`
-        : `<pre class="mt-1 text-[11px] text-base16-500 bg-base16-100 rounded p-2 overflow-x-auto whitespace-pre-wrap ${isExpanded ? "" : "hidden"}" data-expand="${key}">${escHtml(desc.body)}</pre>`;
+        : `<pre class="mt-1 text-base16-500 bg-base16-100 rounded p-2 overflow-x-auto whitespace-pre-wrap ${isExpanded ? "" : "hidden"}" data-expand="${key}">${escHtml(desc.body)}</pre>`;
     const clickable = hasBody ? "cursor-pointer hover:bg-base16-200/50" : "";
     return `
-      <div class="message-enter px-2 py-0.5" data-msg-key="${key}">
-        <div class="flex items-baseline gap-2 text-xs font-mono ${clickable} rounded px-1 py-0.5" data-toggle="${hasBody ? key : ""}">
+      <div class="message-enter pi-row pi-row-tool px-4 py-0.5" data-msg-key="${key}">
+        <div class="flex items-baseline gap-2 ${clickable} rounded px-1 py-0.5" data-toggle="${hasBody ? key : ""}">
           <span class="text-base16-cyan">▶</span>
           <span class="text-base16-600 font-semibold">${escHtml(desc.header)}</span>
           ${desc.subtitle ? `<span class="text-base16-500 truncate">${escHtml(desc.subtitle)}</span>` : ""}
@@ -405,22 +412,19 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     const label = summary
       ? `${icon} ${msg.toolName || "done"} — ${summary}`
       : `${icon} ${msg.toolName || "done"}`;
-    const chevron = hasBody ? `<span class="text-[9px] text-base16-500 ml-auto">${isExpanded ? "▼" : "▶"}</span>` : "";
+    const chevron = hasBody ? `<span class="text-base16-500 ml-auto">${isExpanded ? "▼" : "▶"}</span>` : "";
     // Tool results can also include image content blocks (e.g. the
     // `read` tool reading a PNG, or a screenshot tool). Images render
-    // ALWAYS-VISIBLE (no chevron gating) -- because the chevron's job
-    // is hiding bulky text bodies, and an image is both more useful
-    // and more bounded (max-h-48). For `read` on an image file, the
-    // text body is literally just "Read image file [image/png]", so
-    // hiding it by default and showing the image makes the row
-    // self-explanatory.
-    //
-    // The chevron continues to gate the text body only, when one exists.
+    // ALWAYS-VISIBLE (no chevron gating) -- the chevron's job is
+    // hiding bulky text bodies; an image is more useful and bounded
+    // by max-h-48.
     const imagesHtml = renderInlineImages(msg.images);
     const hasImages = imagesHtml.length > 0;
     const expandable = hasBody;
+    // Body inherits the transcript's 14 px rhythm (was text-[11px]) so
+    // tool output reads at the same density as everything else.
     const bodyHtml = hasBody
-      ? `<pre class="mt-1 text-[11px] text-base16-500 bg-base16-100 rounded p-2 overflow-x-auto whitespace-pre-wrap max-h-64 ${isExpanded ? "" : "hidden"}" data-expand="${key}">${escHtml(contentStr)}</pre>`
+      ? `<pre class="mt-1 text-base16-500 bg-base16-100 rounded p-2 overflow-x-auto whitespace-pre-wrap max-h-64 ${isExpanded ? "" : "hidden"}" data-expand="${key}">${escHtml(contentStr)}</pre>`
       : "";
     const imagesWrap = hasImages ? `<div class="mt-1">${imagesHtml}</div>` : "";
     const imageLabelSuffix = hasImages
@@ -428,10 +432,10 @@ export function renderMessage(msg, idx, expandedItems, opts) {
       : "";
     const clickable = expandable ? "cursor-pointer hover:bg-base16-200/50" : "";
     return `
-      <div class="message-enter px-2 py-0.5" data-msg-key="${key}">
-        <div class="flex items-baseline gap-2 text-xs font-mono ${clickable} rounded px-1 py-0.5" data-toggle="${expandable ? key : ""}">
+      <div class="message-enter pi-row pi-row-tool px-4 py-0.5" data-msg-key="${key}">
+        <div class="flex items-baseline gap-2 ${clickable} rounded px-1 py-0.5" data-toggle="${expandable ? key : ""}">
           <span class="${color} font-semibold">${escHtml(label)}</span>${imageLabelSuffix}
-          ${expandable ? `<span class="text-[9px] text-base16-500 ml-auto">${isExpanded ? "\u25bc" : "\u25b6"}</span>` : ""}
+          ${expandable ? `<span class="text-base16-500 ml-auto">${isExpanded ? "\u25bc" : "\u25b6"}</span>` : ""}
         </div>
         ${bodyHtml}
         ${imagesWrap}
@@ -440,8 +444,8 @@ export function renderMessage(msg, idx, expandedItems, opts) {
 
   if (msg.role === "system") {
     return `
-      <div class="message-enter px-2 py-1" data-msg-key="${wrapKey}">
-        <div class="text-xs text-base16-orange/80 font-mono bg-base16-orange/10 rounded px-2 py-1">${escHtml(msg.content)}</div>
+      <div class="message-enter pi-row pi-row-system px-4 py-1" data-msg-key="${wrapKey}">
+        <div class="text-base16-orange/80 bg-base16-orange/10 rounded px-2 py-1">${escHtml(msg.content)}</div>
       </div>`;
   }
 

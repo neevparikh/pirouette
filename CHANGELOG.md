@@ -5,6 +5,65 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.12.2 — match pi-cli more closely: user-input section breaks, unified row density, list breathing room
+
+### Changed
+
+Comparing the dashboard to a pi-cli screenshot surfaced four
+layout/density issues; this release closes the gap (colors stay
+theme-driven; only structural/typographic changes here).
+
+**1. User-input section break.** Pi-cli prints user input as a
+paragraph-block with vertical padding around it -- visibly a
+"section break" in the transcript. v0.12.0/0.12.1 had the user row
+at the same compact `py-1.5` as assistant rows, which read as a
+column-of-thin-strips instead. Bumped the user row to `py-3` (12px
+vertical) so it visually fills like the CLI's input-recall band.
+The band already runs the full container width because
+`#messages` has `px-0` and the row wrapper spans 100 % -- probe
+confirms width 1144 == #messages clientWidth.
+
+**2. Unified row density.** Thinking, tool, tool_result, and
+system rows were all rendering at `text-[11px]` (11 px) with a
+`text-[10px]` heading and `text-[9px]` chevrons -- a different
+typographic scale than the 14 px transcript body. Pi-cli renders
+all of these at the same size as surrounding prose. Each role
+now uses a `pi-row pi-row-<role>` wrapper that inherits the page
+default 14 px / 20 px / JetBrains Mono Nerd Font Mono. Probe
+confirms all four row types report identical computed font-size
+(14px) and line-height (20px).
+
+**3. List-item breathing room.** Pi-cli puts a blank line between
+top-level list items (mirrors marked's `space` token between
+block-level children). The pi-md renderer was emitting items
+with no separator, producing a wall of dashes. `renderList` now
+appends an empty line after each top-level item (`depth === 0`)
+except the last; nested lists stay tight to avoid fragmenting
+from their parent item.
+
+**4. New row CSS classes** in index.html: `.pi-row-thinking`,
+`.pi-row-tool`, `.pi-row-system` (siblings of the existing
+`.pi-row-user` / `.pi-row-assistant`). All map onto the active
+base16 theme via existing palette tokens, so dark/light schemes
+stay coherent without per-theme overrides.
+
+### Tests
+
+234/234 still passing; transcript.test.js's flat-row assertions
+(introduced in v0.12.0) still hold.
+
+### Verified
+
+Live on the gpu dashboard with `interaction-qa`: thinking lines
+now render at 14 px (matching surrounding prose); tool-call
+summaries (`▸ 2 tool calls · edit · bash`) sit at the same
+density as everything else; the `[context compacted]` system row
+gets its own row-level tint. Same probe reports identical
+`font-size: 14px`, `line-height: 20px` across user / assistant /
+thinking / tool rows.
+
+---
+
 ## 0.12.1 — fix: user + assistant rows now share font-size, line-height, padding
 
 ### Fixed
