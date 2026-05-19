@@ -5,6 +5,70 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.10.0 — JetBrains Mono Nerd Font + pi-terminal-style markdown
+
+### Changed
+
+The whole dashboard now feels like pi-cli in a browser.
+
+**Font** — swapped Roboto Slab / Fira Code for a single mono stack:
+
+```
+JetBrainsMono Nerd Font Mono → JetBrainsMono NFM → JetBrains Mono NF
+  → JetBrainsMono Nerd Font → JetBrains Mono (webfont) → Fira Code
+  → ui-monospace → SFMono → Menlo → Monaco → Consolas → monospace
+```
+
+Users with `JetBrainsMono Nerd Font Mono` installed locally (kitty
+users especially) get the patched-glyph version; everyone else falls
+back to the Google-Fonts JetBrains Mono webfont (loaded via
+`@import`, `display=swap`). Tailwind's `font-sans` is repointed at
+the same stack so the change covers every un-classed element, not
+just prose. The `font-display` slot for the "pirouette" wordmark
+keeps its slab-serif identity.
+
+Ligatures enabled globally via
+`font-feature-settings: "calt" 1, "zero" 1` -- contextual alternates
+(`->`, `=>`, `!=`, `>=`, `<=`, `|>`, `===`, etc. ligate) plus the
+slashed zero from the kitty config the user pasted.
+
+**Markdown CSS** rewritten to mimic pi-tui's terminal renderer:
+
+  - **Headings**: bold yellow + same font-size for all levels (pi's
+    convention -- hierarchy comes from prefix + spacing). H1 also
+    underlined. H3–H6 get an explicit `### ` / `#### ` / … prefix
+    via `::before content` so the visual matches pi's literal
+    rendering of the markdown marker.
+  - **Blockquotes**: 2px left bar in cyan, italic body, faint bg
+    tint -- the CSS analogue of pi-tui's per-line `│ ` prefix.
+  - **Tables**: compact cells (0.2rem / 0.55rem padding), outer
+    frame + 1px inner borders that visually approximate pi-tui's
+    box-drawing (`┌─┬─┐ / ├─┼─┤ / └─┴─┘`). Header row gets
+    a heavier `border-bottom` for the `├─┼─┤` separator pi draws.
+    Width fits content, scrolls horizontally on overflow.
+  - **Inline code + code blocks**: use the same mono stack as the
+    surrounding prose (no font swap), faint bg, no border -- in a
+    fully-mono UI the bg-color IS the cue.
+  - **HR**: 1px border-top.
+  - **Lists**: cyan markers (matches pi's `mdListBullet`).
+
+The CSS is wired so the whole dashboard — sidebar, header buttons,
+model picker, placeholders, slash popup, input bar, transcript —
+shares the same mono stack. Ligatures kick in everywhere monospace
+would have rendered them in pi-cli.
+
+Verified with playwright on the live gpu-devpod dashboard:
+  - Computed `font-family` on `.md` resolves to `"JetBrainsMono Nerd
+    Font Mono", ...`.
+  - `font-feature-settings` resolves to `"calt", "zero"`.
+  - A real assistant transcript (interaction agent) renders bullet
+    lists, bold inline labels, and ligatured operators in the new
+    mono style.
+  - Mobile (390 px viewport) header buttons and placeholders all
+    pick up the mono stack.
+
+---
+
 ## 0.9.0 — inline images for path-referenced files in assistant output
 
 ### Added

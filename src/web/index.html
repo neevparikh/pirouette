@@ -61,17 +61,35 @@
         theme: {
           extend: {
             fontFamily: {
-              // `font-sans` (Tailwind default for un-classed text) → slab serif body.
+              // The whole UI uses a monospace stack so pirouette feels
+              // like pi-cli in a browser. `JetBrainsMono Nerd Font Mono`
+              // is the user's local kitty font; the webfont JetBrains
+              // Mono (loaded via @import in the CSS below) is the
+              // cross-platform fallback. Ligatures (+calt) and slashed
+              // zero (+zero) are enabled globally.
+              //
+              // `font-sans` is the Tailwind default for un-classed text,
+              // so pointing it at the mono stack flips the whole UI in
+              // one place. `font-mono` is identical; we keep both names
+              // for backwards-compat with existing class usage.
               sans: [
-                "Roboto Slab",
-                "ui-serif",
-                "Georgia",
-                "Cambria",
-                '"Times New Roman"',
-                "serif",
+                "JetBrainsMono Nerd Font Mono",
+                "JetBrainsMono NFM",
+                "JetBrains Mono NF",
+                "JetBrainsMono Nerd Font",
+                "JetBrains Mono",
+                "Fira Code",
+                "ui-monospace",
+                "SFMono-Regular",
+                "Menlo",
+                "Monaco",
+                "Consolas",
+                "monospace",
               ],
-              // `font-display` for the "pirouette" wordmark and anything
-              // headline-y (project names, agent names).
+              // `font-display` keeps a touch of slab-serif identity
+              // for the "pirouette" wordmark and a few headline-y
+              // labels. Switch it to the mono stack too if you want
+              // a fully-uniform look.
               display: [
                 "Zilla Slab",
                 "Roboto Slab",
@@ -79,9 +97,12 @@
                 "Georgia",
                 "serif",
               ],
-              // `font-mono` gets Fira Code with ligatures enabled globally
-              // via CSS below.
               mono: [
+                "JetBrainsMono Nerd Font Mono",
+                "JetBrainsMono NFM",
+                "JetBrains Mono NF",
+                "JetBrainsMono Nerd Font",
+                "JetBrains Mono",
                 "Fira Code",
                 "ui-monospace",
                 "SFMono-Regular",
@@ -145,41 +166,85 @@
         to { opacity: 1; transform: translateY(0); }
       }
 
-      /* Enable Fira Code programming ligatures wherever mono is used. */
-      pre, code, kbd, samp {
+      /* Web-font fallback: JetBrains Mono (no Nerd Font glyphs, just
+         the core font + ligatures). If the user has `JetBrainsMono Nerd
+         Font Mono` installed locally (kitty users, etc.), that wins via
+         the font-family stack -- the CDN download is the cross-platform
+         fallback.
+
+         display=swap so we don't FOIT on slow connections. */
+      @import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400;1,700&display=swap");
+
+      /* Mono stack used everywhere we want the pi-terminal look.
+         Lookup order:
+           1. JetBrainsMono Nerd Font Mono   -- user's local install (kitty)
+           2. JetBrainsMono NF / JetBrains Mono NF / NFM variants
+              (different name conventions used by different installers)
+           3. JetBrains Mono                 -- webfont (Google CDN)
+           4. system mono fallbacks
+
+         +calt enables contextual ligatures (-> => != etc.) and +zero
+         enables the slashed zero, matching the kitty config the user
+         pasted earlier.
+
+         Defined as a CSS custom property so .md / .md pre / .md code
+         all share one source of truth. */
+      :root {
+        --mono-stack:
+          "JetBrainsMono Nerd Font Mono",
+          "JetBrainsMono NFM",
+          "JetBrains Mono NF",
+          "JetBrainsMono Nerd Font",
+          "JetBrains Mono",
+          "Fira Code",
+          ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Monaco,
+          Consolas,
+          monospace;
+      }
+
+      /* Enable JetBrains Mono ligatures + slashed zero wherever mono is
+         used. `calt` is the contextual-alternates feature (-> != >= |>
+         etc.); `zero` swaps the round zero for a slashed one so 0/O are
+         distinguishable in dense output. */
+      pre, code, kbd, samp, .md, .md p, .md li, .md blockquote {
         font-variant-ligatures: contextual;
-        font-feature-settings: "calt" 1;
+        font-feature-settings: "calt" 1, "zero" 1;
       }
 
       /* Markdown rendering rules
        * -------------------------
-       * These mirror pi-coding-agent's markdown rendering (both the TUI
-       * Markdown component and the HTML export template), adapted for
-       * pirouette's slab-serif body stack:
-       *   - body prose: Roboto Slab (unchanged)
-       *   - code and pre: Fira Code (monospace)
-       *   - headings: all bold, uniform size — rely on spacing for hierarchy
-       *   - paragraphs: `p + p` spacing, no bottom margin on `p`
-       *   - inline code: theme-neutral alpha bg so it's visible on every theme
-       *   - pre blocks: subtle alpha bg, no border (monospace IS the cue)
-       *   - tables, hr, images: styled for parity with pi's export
-       *   - syntax highlighting: hljs classes map to base16 palette
+       * Goal: match pi-coding-agent's TUI markdown look as closely as
+       * the browser allows, since pirouette is meant to feel like the
+       * pi CLI you're already using.
+       *
+       *   - Whole transcript is monospace (JetBrains Mono Nerd Font
+       *     Mono if installed; webfont JetBrains Mono otherwise).
+       *     pi's TUI renders text in a terminal so every char shares a
+       *     cell width; we replicate that here, which makes tables /
+       *     diffs / aligned blocks render predictably and lets ligatures
+       *     (`->`, `!=`, `>=`, `|>`) kick in across the whole UI.
+       *   - Headings: bold + yellow, with explicit `### ` prefix on
+       *     h3+ (mirrors pi's TUI which always prints the `#` marker
+       *     for sub-headings). h1 also underlined.
+       *   - Blockquotes: left bar `│` styling, italic, muted color.
+       *   - Tables: compact, single-cell-pixel borders that visually
+       *     approximate pi-tui's box-drawing (`┌─┬─┐` etc.).
+       *   - Code blocks: monospace (inheriting the .md stack), faint bg,
+       *     no border (monospace + bg IS the cue, same as pi-tui).
+       *   - hljs classes still map to the base16 palette below.
        */
       .md {
-        font-family:
-          "Roboto Slab",
-          ui-serif,
-          Georgia,
-          Cambria,
-          "Times New Roman",
-          serif;
+        font-family: var(--mono-stack);
+        font-size: 0.92em;
         line-height: 1.55;
         /* Wrap long unbreakable strings (URLs, file paths, hashes) so
-           they don't push the message bubble (and thereby the page)
-           past the viewport edge on narrow screens. `anywhere` only
-           breaks where it would otherwise overflow, so normal prose
-           flow is unaffected. Code blocks (`pre`, `table`) opt out
-           below because they have their own `overflow-x: auto`. */
+           they don't push the message bubble past the viewport edge.
+           `anywhere` only breaks where it would otherwise overflow, so
+           normal prose flow is unaffected. Code blocks (`pre`, `table`)
+           opt out below because they have their own `overflow-x: auto`. */
         overflow-wrap: anywhere;
         word-break: break-word;
       }
@@ -199,8 +264,13 @@
       .md > :last-child { margin-bottom: 0; }
       .md p { margin: 0; }
       .md p + p { margin-top: 0.75rem; }
-      /* Headings: yellow + bold, with blank line before AND after to
-         match pi's TUI (which inserts spacer lines around block elements). */
+      /* Headings
+         --------
+         pi-tui prints `# `, `## `, `### ` literally for h1–h6 (h1 and
+         h2 styled bold/underline; h3+ also get the explicit prefix in
+         the body text). We replicate via ::before content so the
+         visual fidelity matches without modifying the rendered HTML.
+         All same size; hierarchy comes from prefix + spacing. */
       .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 {
         margin: 1.1rem 0 0.4rem;
         font-weight: 700;
@@ -208,6 +278,11 @@
         color: rgb(var(--color-base16-yellow));
         font-family: inherit;
       }
+      .md h1 { text-decoration: underline; text-underline-offset: 3px; }
+      .md h3::before { content: "### "; opacity: 0.6; }
+      .md h4::before { content: "#### "; opacity: 0.6; }
+      .md h5::before { content: "##### "; opacity: 0.6; }
+      .md h6::before { content: "###### "; opacity: 0.6; }
       .md > :is(h1, h2, h3, h4, h5, h6):first-child { margin-top: 0; }
       .md ul, .md ol { margin: 0.5rem 0; padding-left: 1.5rem; }
       .md ul { list-style: disc; }
@@ -223,39 +298,47 @@
       .md strong { font-weight: 700; color: rgb(var(--color-base16-700)); }
       .md em { font-style: italic; }
       .md del { text-decoration: line-through; color: rgb(var(--color-base16-500)); }
+      /* Blockquote: pi-tui prefixes every line with `│ ` (in the muted
+         quote color) and italicises content. The CSS approximation is
+         a 2px left bar in the same color + italic body. Background
+         tint helps the bar feel like a continuous block on mobile. */
       .md blockquote {
-        border-left: 3px solid rgb(var(--color-base16-400));
-        padding-left: 0.75rem;
+        border-left: 2px solid rgb(var(--color-base16-cyan));
+        padding: 0.25rem 0 0.25rem 0.75rem;
         color: rgb(var(--color-base16-500));
         margin: 0.75rem 0;
         font-style: italic;
+        background: rgba(128, 128, 128, 0.06);
       }
       .md blockquote > :first-child { margin-top: 0; }
       .md blockquote > :last-child { margin-bottom: 0; }
+      /* Horizontal rule: pi-tui draws `─`*n across the available width.
+         A plain 1px border-top is the CSS analogue. */
       .md hr {
         border: none;
         border-top: 1px solid rgb(var(--color-base16-300));
         margin: 0.75rem 0;
       }
-      /* Inline code: pi uses its `accent` color (teal-cyan in dark theme)
-         on a theme-neutral alpha bg so it stays visible on every scheme. */
+      /* Inline code + code blocks: same mono stack as .md (since the
+         whole transcript is mono now). Pi-tui paints inline code in
+         its accent color (teal-cyan in the dark theme); we keep that. */
       .md code {
-        font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-family: var(--mono-stack);
         background: rgba(128, 128, 128, 0.18);
         padding: 0.05rem 0.35rem;
         border-radius: 0.25rem;
-        font-size: 0.85em;
+        font-size: 0.95em;
         color: rgb(var(--color-base16-cyan));
       }
       .md pre {
-        font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-family: var(--mono-stack);
         background: rgba(128, 128, 128, 0.12);
         border: 0;
         border-radius: 0.4rem;
         padding: 0.5rem 0.75rem;
         margin: 0.75rem 0;
         overflow-x: auto;
-        font-size: 0.85em;
+        font-size: 0.95em;
         line-height: 1.5;
       }
       /* Code block body: pi paints non-highlighted code with `mdCodeBlock`
@@ -268,10 +351,22 @@
         color: rgb(var(--color-base16-green));
         font-size: inherit;
       }
-      /* Tables: size to their content rather than forcing 100% width so
-         they feel like pi's TUI tables (which grow to fit the data, not
-         the bubble). Header rows get a subtle accent tint instead of a
-         flat gray. */
+      /* Tables
+         ------
+         Mimic pi-tui's box-drawing tables (┌─┬─┐ / ├─┼─┤ / └─┴─┘)
+         using CSS borders. Strategy:
+           - `border-collapse: collapse` + 1px solid borders on every
+             cell gives us the inner grid (the `│` separators between
+             columns and the `─` between rows).
+           - The outer `<table>` border gives us the frame (┌ / ┐ /
+             └ / ┘). Box-drawing chars meet at right angles in pi-tui;
+             CSS borders do the same naturally.
+           - Header row gets a heavier `border-bottom` (visually = the
+             `├─┼─┤` separator pi draws between header and body).
+           - Compact padding so tables stay dense like in the terminal.
+           - `display: block; overflow-x: auto` keeps wide tables from
+             pushing the bubble off-screen on mobile.
+         Cell content is mono via the .md cascade. */
       .md table {
         border-collapse: collapse;
         margin: 0.75rem 0;
@@ -279,17 +374,20 @@
         max-width: 100%;
         display: block;
         overflow-x: auto;
+        border: 1px solid rgb(var(--color-base16-400));
       }
       .md th, .md td {
         border: 1px solid rgb(var(--color-base16-300));
-        padding: 0.35rem 0.6rem;
+        padding: 0.2rem 0.55rem;
         text-align: left;
         vertical-align: top;
+        font-size: 0.95em;
       }
       .md th {
-        background: rgba(var(--color-base16-cyan), 0.1);
+        background: rgba(128, 128, 128, 0.08);
         font-weight: 700;
         color: rgb(var(--color-base16-700));
+        border-bottom: 2px solid rgb(var(--color-base16-400));
       }
       .md img {
         max-width: 100%;
