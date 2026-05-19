@@ -259,55 +259,80 @@ describe("looksLikeImagePathRef", () => {
 });
 
 describe("enhanceImagePaths", () => {
+  // v0.12.4 changed the return shape to { html, thumbnails } so that
+  // thumbnails can render BELOW the markdown block (not inside it).
+  // Inline injection would have disrupted `<pre class="pi-md">`'s
+  // `white-space: pre` column alignment.
   it("rewrites <img src> with relative path to /file endpoint", () => {
     const html = '<img src="plots/foo.png" alt="foo">';
-    const out = enhanceImagePaths(html, "agent-1");
+    const { html: out } = enhanceImagePaths(html, "agent-1");
     expect(out).toContain('src="/api/agents/agent-1/file?path=plots%2Ffoo.png"');
     expect(out).toContain('alt="foo"');
-    // default presentational attrs added
     expect(out).toContain("max-h-64");
     expect(out).toContain('loading="lazy"');
   });
   it("does not rewrite absolute or remote img srcs", () => {
     const html =
       '<img src="https://cdn.example/x.png"><img src="/abs/y.png">';
-    const out = enhanceImagePaths(html, "agent-1");
+    const { html: out } = enhanceImagePaths(html, "agent-1");
     expect(out).toContain('src="https://cdn.example/x.png"');
     expect(out).toContain('src="/abs/y.png"');
     expect(out).not.toContain("/api/agents/agent-1/file");
   });
-  it("appends a thumbnail after <code>image-path</code> inline-code spans", () => {
+  it("emits a thumbnail strip for legacy <code>image-path</code> spans", () => {
     const html = "see <code>plots/foo.png</code> for the result";
-    const out = enhanceImagePaths(html, "agent-1");
-    // original <code> still present
-    expect(out).toContain("<code>plots/foo.png</code>");
-    // and a thumbnail link after it
-    expect(out).toContain('href="/api/agents/agent-1/file?path=plots%2Ffoo.png"');
-    expect(out).toContain('alt="plots/foo.png"');
+    const { html: out, thumbnails } = enhanceImagePaths(html, "agent-1");
+    // original <code> stays untouched -- no inline injection
+    expect(out).toBe(html);
+    // thumbnail strip carries the rewritten endpoint URL
+    expect(thumbnails).toContain('href="/api/agents/agent-1/file?path=plots%2Ffoo.png"');
+    expect(thumbnails).toContain('alt="plots/foo.png"');
+    expect(thumbnails).toContain('class="pi-image-strip');
+  });
+  it("emits a thumbnail strip for pi-md <span class=\"pi-code\"> spans", () => {
+    const html = 'see <span class="pi-code">plots/bar.png</span> here';
+    const { html: out, thumbnails } = enhanceImagePaths(html, "agent-1");
+    expect(out).toBe(html);
+    expect(thumbnails).toContain('href="/api/agents/agent-1/file?path=plots%2Fbar.png"');
+    expect(thumbnails).toContain("pi-image-strip");
+  });
+  it("deduplicates paths mentioned multiple times", () => {
+    const html =
+      '<span class="pi-code">a.png</span> and <span class="pi-code">a.png</span> again';
+    const { thumbnails } = enhanceImagePaths(html, "agent-1");
+    // Each thumbnail is one <a href=...> tile; deduped path => 1 tile.
+    const tiles = (thumbnails.match(/<a\s+href=/g) || []).length;
+    expect(tiles).toBe(1);
+  });
+  it("handles compound pi-* classes on the inline-code span", () => {
+    // pi-md may stack classes (e.g. pi-strong + pi-code when bold inline-code)
+    const html = '<span class="pi-strong pi-code">plots/foo.png</span>';
+    const { thumbnails } = enhanceImagePaths(html, "agent-1");
+    expect(thumbnails).toContain("path=plots%2Ffoo.png");
   });
   it("ignores hljs-marked code blocks (don't flood code listings)", () => {
     const html =
       '<pre><code class="hljs language-bash">plots/foo.png\nplots/bar.png</code></pre>';
-    const out = enhanceImagePaths(html, "agent-1");
-    expect(out).not.toContain("/api/agents/agent-1/file");
+    const { thumbnails } = enhanceImagePaths(html, "agent-1");
+    expect(thumbnails).toBe("");
   });
-  it("ignores <code> with non-path content", () => {
+  it("emits no thumbnails when no image-paths are present", () => {
     const html = "use <code>npm install foo</code> first";
-    const out = enhanceImagePaths(html, "agent-1");
+    const { html: out, thumbnails } = enhanceImagePaths(html, "agent-1");
     expect(out).toBe(html);
+    expect(thumbnails).toBe("");
   });
-  it("no-ops without agentId (preserves input)", () => {
+  it("no-ops without agentId: returns { html: input, thumbnails: '' }", () => {
     const html = '<img src="plots/foo.png">';
-    expect(enhanceImagePaths(html, "")).toBe(html);
-    expect(enhanceImagePaths(html, null)).toBe(html);
-    expect(enhanceImagePaths(html, undefined)).toBe(html);
+    for (const aid of ["", null, undefined]) {
+      const r = enhanceImagePaths(html, aid);
+      expect(r.html).toBe(html);
+      expect(r.thumbnails).toBe("");
+    }
   });
   it("decodes HTML entities inside <code> before path detection", () => {
-    // marked HTML-escapes ampersands but image paths don't usually have
-    // those; still, make sure decoding is at least a no-op for plain
-    // ASCII paths.
     const html = "<code>my-file.png</code>";
-    const out = enhanceImagePaths(html, "agent-1");
-    expect(out).toContain('href="/api/agents/agent-1/file?path=my-file.png"');
+    const { thumbnails } = enhanceImagePaths(html, "agent-1");
+    expect(thumbnails).toContain('href="/api/agents/agent-1/file?path=my-file.png"');
   });
 });

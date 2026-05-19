@@ -109,35 +109,46 @@ export function looksLikeImagePathRef(s) {
   return INLINE_IMAGE_EXTS.has(m[1].toLowerCase());
 }
 
-/** Best-effort: enhance a chunk of sanitized HTML so that image paths
- *  the agent referenced inline actually render as thumbnails in the
- *  dashboard.
+/** Best-effort: enhance a chunk of sanitized markdown HTML so that
+ *  image paths the agent referenced inline actually render as
+ *  thumbnails in the dashboard.
  *
- *  Two passes:
- *    1. Rewrite `<img src="plots/foo.png">` (or any `looksLikeImagePathRef`
- *       src) to point at `/api/agents/<agentId>/file?path=...`. That
- *       turns markdown `![alt](plots/foo.png)` into a working image
- *       without changing the renderMarkdown pipeline.
- *    2. Append a small thumbnail after any `<code>plots/foo.png</code>`
- *       inline-code span whose text content looks like an image path.
- *       Common in assistant output ("saved to `plots/foo.png`"); the
- *       user shouldn't have to click anywhere to see it.
+ *  Returns `{ html, thumbnails }`:
+ *    - `html`: the original input with `<img src="relative.png">`
+ *      rewritten to use the `/api/agents/<id>/file?path=...` endpoint.
+ *      Other content (inline-code spans, etc.) is untouched.
+ *    - `thumbnails`: a separate HTML strip (`<div class="pi-image-strip">
+ *      ...</div>`) containing one clickable thumbnail per unique
+ *      image-path referenced via inline code in the message. Empty
+ *      string if no paths were found. The caller renders this BELOW
+ *      the markdown block (NOT inside it) so the thumbnails don't
+ *      disrupt `<pre class="pi-md">`'s `white-space: pre` column
+ *      alignment.
  *
- *  `agentId` is required; if missing, we return the input unchanged.
- *  This function operates on a string -- no DOMParser dependency --
- *  using narrow regexes; the input has already been DOMPurified so the
- *  attribute syntax is predictable. We only ever ADD elements or rewrite
- *  attribute values; never strip user content.
+ *  Detected paths come from two source spans:
+ *    a) `<span class="pi-code">path.png</span>` -- pi-md output
+ *    b) `<code>path.png</code>` with no `hljs` class -- legacy
+ *       marked output from the `.md` fallback path
+ *  Code blocks (`<pre><code class="hljs">...`) are skipped to avoid
+ *  thumbnail-flooding when the agent lists many paths in a snippet.
+ *
+ *  `agentId` is required; if missing, we return the input unchanged
+ *  with `thumbnails: ""`.
  */
 export function enhanceImagePaths(html, agentId) {
-  if (!html || !agentId) return html;
+  if (!html || !agentId) return { html, thumbnails: "" };
 
-  // 1. Rewrite <img src="..."> for relative paths. DOMPurify normalises
-  //    to double-quoted attributes, so we only need to handle that form.
-  let out = html.replace(/<img\s+([^>]*?)src="([^"]*)"([^>]*?)>/gi, (match, before, src, after) => {
+  let out = html;
+
+  // 1. Rewrite <img src="..."> for relative paths. DOMPurify
+  //    normalises to double-quoted attributes, so we only handle
+  //    that form. This matters when the assistant emits raw HTML in
+  //    markdown -- pi-md doesn't emit <img> tags itself, but the
+  //    legacy `.md` fallback path (when no widthCols is supplied)
+  //    does.
+  out = out.replace(/<img\s+([^>]*?)src="([^"]*)"([^>]*?)>/gi, (match, before, src, after) => {
     if (!looksLikeImagePathRef(src)) return match;
     const newSrc = `/api/agents/${encodeURIComponent(agentId)}/file?path=${encodeURIComponent(src)}`;
-    // Add a few presentational defaults if the markdown didn't.
     const hasClass = /\sclass="/i.test(before) || /\sclass="/i.test(after);
     const classAttr = hasClass
       ? ""
@@ -147,29 +158,60 @@ export function enhanceImagePaths(html, agentId) {
     return `<img ${before}src="${newSrc}"${after}${classAttr}${loadingAttr}>`;
   });
 
-  // 2. After each <code>image-path</code> inline span, append a
-  //    thumbnail. We deliberately limit this to <code> (inline code) --
-  //    NOT <pre><code> (code blocks), where the agent often lists many
-  //    paths in a snippet and we'd flood the view with thumbnails.
-  //    Matching anchors at "<code>" without a preceding "<pre>" by
-  //    requiring no `class="hljs ..."` attribute (hljs only applies to
-  //    code blocks, never inline).
-  out = out.replace(/<code(?![^>]*\bclass="hljs)>([^<]+)<\/code>/gi, (match, inner) => {
-    // `inner` is HTML-escaped by marked. Decode the entities we care
-    // about so the path-shape check sees the literal string.
-    const decoded = inner
+  // 2. Collect image paths referenced in inline-code spans. Two
+  //    sources:
+  //    a) <span class="pi-code">path.png</span> -- pi-md output
+  //    b) <code>path.png</code> (no hljs class) -- legacy marked
+  //       output from the .md fallback path
+  //
+  //    We deliberately skip <pre><code class="hljs">...</code></pre>
+  //    (the hljs class is the giveaway) because code blocks often
+  //    contain dozens of paths in a snippet, and we don't want to
+  //    flood the view.
+  //
+  //    Thumbnails are NOT inserted inline -- they're returned in
+  //    a separate string the caller renders BELOW the markdown
+  //    block. Inline insertion would break `<pre class="pi-md">`'s
+  //    `white-space: pre` rhythm (an `<img>` is taller than a line
+  //    of text and would push subsequent lines out of alignment).
+  const seen = new Set();
+  const paths = [];
+  const collect = (decoded) => {
+    if (!looksLikeImagePathRef(decoded)) return;
+    if (seen.has(decoded)) return;
+    seen.add(decoded);
+    paths.push(decoded);
+  };
+  const decode = (inner) =>
+    inner
       .replace(/&amp;/g, "&")
       .replace(/&lt;/g, "<")
       .replace(/&gt;/g, ">")
       .replace(/&quot;/g, '"')
       .replace(/&#39;/g, "'");
-    if (!looksLikeImagePathRef(decoded)) return match;
-    const src = `/api/agents/${encodeURIComponent(agentId)}/file?path=${encodeURIComponent(decoded)}`;
-    // Render as a link-wrapped thumbnail so click opens full-size.
-    return `${match}<a href="${src}" target="_blank" rel="noopener" class="block my-1"><img src="${src}" alt="${decoded}" loading="lazy" class="max-h-48 rounded border border-base16-300" onerror="this.parentNode.style.display='none'" /></a>`;
-  });
+  // pi-md inline code: <span class="pi-code">...</span> (the
+  //   classes attribute may include additional pi-* classes for
+  //   nested formatting, e.g. "pi-strong pi-code")
+  for (const m of out.matchAll(/<span\s+class="[^"]*\bpi-code\b[^"]*">([^<]+)<\/span>/gi)) {
+    collect(decode(m[1]));
+  }
+  // legacy marked: <code>...</code> not inside <pre><code class="hljs">
+  for (const m of out.matchAll(/<code(?![^>]*\bclass="hljs)>([^<]+)<\/code>/gi)) {
+    collect(decode(m[1]));
+  }
 
-  return out;
+  let thumbnails = "";
+  if (paths.length > 0) {
+    // `onerror` hides paths that 404 (the assistant proposed but
+    // didn't create the file) so we don't leave broken-image icons.
+    const cells = paths.map((p) => {
+      const src = `/api/agents/${encodeURIComponent(agentId)}/file?path=${encodeURIComponent(p)}`;
+      return `<a href="${src}" target="_blank" rel="noopener" class="block" title="${p}"><img src="${src}" alt="${p}" loading="lazy" class="max-h-32 rounded border border-base16-300" onerror="this.parentNode.style.display='none'" /></a>`;
+    }).join("");
+    thumbnails = `<div class="pi-image-strip flex flex-wrap gap-2 mt-2">${cells}</div>`;
+  }
+
+  return { html: out, thumbnails };
 }
 
 /**

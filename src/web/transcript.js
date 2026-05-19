@@ -334,14 +334,24 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     if (rawAssistant) {
       body = `<pre class="whitespace-pre-wrap text-base16-600 font-mono">${escHtml(msg.content)}</pre>`;
     } else if (opts && opts.widthCols) {
-      let pi = renderMarkdownPi(msg.content, opts.widthCols);
-      if (opts.agentId) pi = enhanceImagePaths(pi, opts.agentId);
-      body = `<pre class="pi-md">${pi}</pre>`;
+      const pi = renderMarkdownPi(msg.content, opts.widthCols);
+      // enhanceImagePaths returns { html, thumbnails }: thumbnails
+      // render BELOW the <pre class="pi-md"> block (not inside it)
+      // because injecting `<a><img>` into a `white-space: pre` block
+      // would break the column-aligned text layout. Image-path
+      // references in inline code (<span class="pi-code">foo.png</span>)
+      // become thumbnail tiles in the strip.
+      const { html: piHtml, thumbnails } = opts.agentId
+        ? enhanceImagePaths(pi, opts.agentId)
+        : { html: pi, thumbnails: "" };
+      body = `<pre class="pi-md">${piHtml}</pre>${thumbnails}`;
     } else {
       // Fallback for tests / preview where no width is available.
       const md = renderMarkdown(msg.content);
-      const enhanced = opts && opts.agentId ? enhanceImagePaths(md, opts.agentId) : md;
-      body = `<div class="md text-base16-600">${enhanced}</div>`;
+      const { html: enhancedHtml, thumbnails } = opts && opts.agentId
+        ? enhanceImagePaths(md, opts.agentId)
+        : { html: md, thumbnails: "" };
+      body = `<div class="md text-base16-600">${enhancedHtml}</div>${thumbnails}`;
     }
     return `
       <div class="message-enter pi-row pi-row-assistant px-4 py-1.5" data-msg-key="${wrapKey}">

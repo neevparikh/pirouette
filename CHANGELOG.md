@@ -5,6 +5,50 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.12.4 — restore inline image thumbnails (broken since v0.11.0 pi-md switch)
+
+### Fixed
+
+v0.9.0 introduced thumbnails for `<code>plots/foo.png</code>` inline
+code mentions in assistant prose. v0.11.0 switched the markdown
+renderer to `pi-markdown.js`, which emits `<span class="pi-code">`
+instead of `<code>` -- the `enhanceImagePaths` regex no longer
+matched anything, so thumbnails silently stopped rendering.
+
+Fix: `enhanceImagePaths` now matches BOTH source spans:
+  - `<span class="pi-code">...</span>` (pi-md output)
+  - `<code>...</code>` (legacy marked output, `.md` fallback path)
+It also tolerates compound classes (e.g. `<span class="pi-strong
+  pi-code">`).
+
+More important: thumbnails no longer get injected INLINE into the
+HTML. Pi-md's `<pre class="pi-md">` uses `white-space: pre`, so an
+`<a><img>` tile inside would push subsequent lines out of column
+alignment. Instead, `enhanceImagePaths` now returns
+`{ html, thumbnails }`. The transcript renderer drops `html` into
+the `<pre>` block as before, then renders the `thumbnails` strip
+separately BELOW the block. Empty when no paths found.
+
+Unique paths are deduplicated (mentioning the same file twice
+yields one tile). Each tile is a clickable `<a><img>` with
+`loading="lazy"` and `onerror="this.parentNode.style.display='none'"`
+so a path the agent proposed-but-never-created just disappears
+instead of leaving a broken-image icon.
+
+`pi-cli` itself doesn't render thumbnails for code-referenced paths
+-- it shows the inline code as styled text. This is a pirouette
+enhancement specific to the browser dashboard. The actual file is
+served by the existing `GET /api/agents/:id/file?path=...` endpoint
+(v0.9.0); no new server surface.
+
+### Tests
+
+Updated `render.test.js` for the new `{ html, thumbnails }` return
+shape; added cases for compound class names, deduplication, and
+pi-md `<span class="pi-code">` matching. 237 total tests pass.
+
+---
+
 ## 0.12.3 — render markdown on user messages (blockquotes, bold, code spans)
 
 ### Fixed
