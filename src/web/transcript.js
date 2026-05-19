@@ -286,11 +286,11 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     // Image attachments stack above the text on the same row.
     const imagesHtml = renderInlineImages(msg.images);
     return `
-      <div class="message-enter pi-row pi-row-user flex flex-col gap-1 px-4 py-2 bg-base16-200/60" data-msg-key="${wrapKey}">
+      <div class="message-enter pi-row pi-row-user flex flex-col gap-1 px-4 py-1.5 bg-base16-200/60" data-msg-key="${wrapKey}">
         ${imagesHtml}
         ${
           msg.content
-            ? `<pre class="whitespace-pre-wrap text-base16-700 font-sans">${escHtml(msg.content)}</pre>`
+            ? `<pre class="pi-md-text whitespace-pre-wrap text-base16-700">${escHtml(msg.content)}</pre>`
             : ""
         }
       </div>`;

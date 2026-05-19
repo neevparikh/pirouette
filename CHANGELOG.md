@@ -5,6 +5,40 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.12.1 — fix: user + assistant rows now share font-size, line-height, padding
+
+### Fixed
+
+v0.12.0 introduced the flat pi-cli transcript layout but didn't
+equalise typography between user and assistant rows. Probing the
+live dashboard with playwright found three mismatches:
+
+| | user | assistant |
+|---|---|---|
+| row padding | `py-2` = 8 px | `py-1.5` = 6 px |
+| text font-size | 14 px | **12.88 px** (from `.pi-md { font-size: 0.92em }`) |
+| text line-height | 20 px | 18.68 px |
+
+Same font family, but user text was ~9 % larger and rows were 2 px
+taller per side. Visible as inconsistent vertical rhythm when
+scrolling through the transcript.
+
+Fix:
+
+  - `transcript.js` user row: `px-4 py-2` → `px-4 py-1.5` to match
+    the assistant row.
+  - `index.html` `.pi-md` and `.md`: drop the `font-size: 0.92em`
+    override; use `font-size: inherit` instead so both inherit the
+    page-default 14 px / 1.43 line-height the user row uses.
+
+Verified with the playwright probe: all four cells (user row, user
+`<pre>`, assistant row, assistant `<pre class="pi-md">`) now
+report identical computed `font-size: 14px`, `line-height: 20px`,
+`padding: 6px 16px`, `font-family: JetBrainsMono Nerd Font Mono`.
+234/234 tests still pass.
+
+---
+
 ## 0.12.0 — flat pi-cli transcript layout (no more left/right bubbles)
 
 ### Changed

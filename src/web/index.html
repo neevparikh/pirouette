@@ -238,7 +238,11 @@
        */
       .md {
         font-family: var(--mono-stack);
-        font-size: 0.92em;
+        /* Match the user-row <pre> + .pi-md typographic rhythm so
+           the legacy flow-layout fallback (used when widthCols is
+           absent -- tests / preview) doesn't render at a different
+           size than the rest of the transcript. */
+        font-size: inherit;
         line-height: 1.55;
         /* Wrap long unbreakable strings (URLs, file paths, hashes) so
            they don't push the message bubble past the viewport edge.
@@ -414,8 +418,16 @@
          scroll instead of breaking the layout. */
       .pi-md {
         font-family: var(--mono-stack);
-        font-size: 0.92em;
-        line-height: 1.45;
+        /* Inherit font-size (and the corresponding line-height) from
+           the parent .pi-row so user and assistant rows share the same
+           typographic rhythm. Previously this had `font-size: 0.92em`
+           + `line-height: 1.45`, which made assistant text ~9 %
+           smaller than user text -- visible as inconsistent row
+           heights when scrolling. The `<pre>` in the user row uses
+           the page-default 14 px / line-height 1.43; we now match
+           that here. */
+        font-size: inherit;
+        line-height: inherit;
         white-space: pre;
         margin: 0;
         background: none;
