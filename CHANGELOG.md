@@ -5,6 +5,28 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.12.3 — render markdown on user messages (blockquotes, bold, code spans)
+
+### Fixed
+
+Pi-cli renders user input through the same markdown pipeline it
+uses for assistant output -- so a `> quoted line` in user input
+draws with the `│ ` blockquote bar + italic body. Pirouette was
+stripping all markdown from user text and just escaping HTML, so
+the raw `>` survived verbatim.
+
+Fix: route `msg.role === "user"` through `renderMarkdownPi(...)`
+the same way assistant messages are when `widthCols` is supplied.
+Blockquotes, bold, italic, codespan, links, lists, hr, and tables
+all now render in user input the way they do for the assistant.
+Fallback path (no widthCols, tests/preview) still uses the plain
+escaped `<pre>` so unit tests don't need a width measurement.
+
+234/234 tests pass; no test changes needed since the existing
+user-message tests use plain text (no widthCols).
+
+---
+
 ## 0.12.2 — match pi-cli more closely: user-input section breaks, unified row density, list breathing room
 
 ### Changed

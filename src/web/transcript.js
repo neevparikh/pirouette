@@ -283,16 +283,26 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     // so you can scan the transcript and spot your own utterances
     // without needing a bubble border.
     //
+    // User text goes through the SAME pi-tui markdown renderer the
+    // assistant uses. Pi-cli does this -- a `> quoted line` in user
+    // input renders with the `│ ` blockquote bar + italic body, bold
+    // / italic / inline-code / lists all work. Falls back to the
+    // plain-text `<pre>` when no widthCols (tests / preview).
+    //
     // Image attachments stack above the text on the same row.
     const imagesHtml = renderInlineImages(msg.images);
+    let userBody = "";
+    if (msg.content) {
+      if (opts && opts.widthCols) {
+        userBody = `<pre class="pi-md">${renderMarkdownPi(msg.content, opts.widthCols)}</pre>`;
+      } else {
+        userBody = `<pre class="whitespace-pre-wrap">${escHtml(msg.content)}</pre>`;
+      }
+    }
     return `
       <div class="message-enter pi-row pi-row-user flex flex-col gap-1 px-4 py-3" data-msg-key="${wrapKey}">
         ${imagesHtml}
-        ${
-          msg.content
-            ? `<pre class="pi-md-text whitespace-pre-wrap">${escHtml(msg.content)}</pre>`
-            : ""
-        }
+        ${userBody}
       </div>`;
   }
 
