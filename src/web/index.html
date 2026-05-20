@@ -633,13 +633,9 @@
             <span id="agent-name" class="text-base16-600 font-bold font-display">select an agent</span>
             <span id="agent-status" class="text-xs text-base16-500 truncate"></span>
           </div>
-          <div id="agent-info" class="text-[10px] text-base16-500 mt-1 font-mono truncate hidden md:block"></div>
-          <!-- Live footer: tokens / context / cost / thinking. Populated by
-               fetchStats() whenever the agent state changes or an agent is
-               selected. Same data pi's TUI footer shows.
-               Hidden on mobile to keep the header compact — you can still
-               see the data on desktop or via the agent's own session. -->
-          <div id="agent-stats" class="text-[10px] text-base16-500 mt-0.5 font-mono truncate hidden md:block"></div>
+          <!-- v0.13.6: agent-info + agent-stats moved out of the header
+               and down to the footer (#agent-info-line / #agent-stats-line
+               below). The header now just shows name + status + actions. -->
         </div>
         <div class="flex gap-1 md:gap-2 flex-none flex-wrap justify-end">
           <!-- Global raw-view toggle. Off = rendered markdown (default).
@@ -806,15 +802,39 @@
            Sits at the very bottom of the main column, below the input
            bar. On overflow (lots of projects/agents) it scrolls
            horizontally; on narrow viewports the chips just wrap. -->
-      <footer id="agent-footer" class="flex-none bg-base16-200/40 px-3 md:px-6 py-2 flex items-stretch gap-3 overflow-x-auto">
-        <div id="agent-list" class="flex items-stretch gap-3 flex-1 min-w-0">
-          <div class="text-base16-500 text-sm italic">loading…</div>
+      <!-- v0.13.6: pi-cli-style three-row footer.
+             Row 1 (chips):      horizontal agent chips grouped by project
+             Row 2 (identity):   agent info -- project, model, branch,
+                                 worktree, thinking level, id
+             Row 3 (stats):      tokens/cost/context (left) +
+                                 (provider) model · thinking (right)
+           Mirrors pi-cli's bottom strip which carries the workdir +
+           session title on line 1 and ↑tok ↓tok cost context% +
+           model on line 2. We add a 3rd row for the multi-agent picker
+           that pi-cli doesn't need.
+
+           The chip row scrolls horizontally on overflow; the info +
+           stats rows are single-line truncated. -->
+      <footer id="agent-footer" class="flex-none bg-base16-200/40 px-3 md:px-6 py-2 flex flex-col gap-1">
+        <!-- Row 1: agent chips + new-project button -->
+        <div class="flex items-stretch gap-3 min-w-0 overflow-x-auto">
+          <div id="agent-list" class="flex items-stretch gap-3 flex-1 min-w-0">
+            <div class="text-base16-500 text-sm italic">loading…</div>
+          </div>
+          <button
+            id="new-project-btn"
+            class="flex-none px-3 py-1.5 rounded-lg bg-base16-300 text-base16-600 hover:bg-base16-400/30 cursor-pointer text-xs whitespace-nowrap self-center"
+            title="Create a new project (group of agents sharing a repo)"
+          >+ new project</button>
         </div>
-        <button
-          id="new-project-btn"
-          class="flex-none px-3 py-1.5 rounded-lg bg-base16-300 text-base16-600 hover:bg-base16-400/30 cursor-pointer text-xs whitespace-nowrap self-center"
-          title="Create a new project (group of agents sharing a repo)"
-        >+ new project</button>
+        <!-- Row 2: agent info line (project · model · branch · worktree · thinking · id) -->
+        <div id="agent-info-line" class="text-[11px] text-base16-500 font-mono truncate"></div>
+        <!-- Row 3: pi-cli-style stats line (tokens/cost/context on the
+             left, (provider) model · thinking on the right) -->
+        <div class="flex items-baseline justify-between gap-3 text-[11px] font-mono">
+          <div id="agent-stats-line" class="text-base16-500 truncate min-w-0 flex-1"></div>
+          <div id="agent-model-line" class="text-base16-500 truncate flex-none"></div>
+        </div>
       </footer>
     </main>
 

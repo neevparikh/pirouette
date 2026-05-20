@@ -5,6 +5,45 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.13.6 — unindent tool name; move usage info to a pi-cli-style footer
+
+### Changed
+
+- **Unindent tool name**: dropped `px-1` from the inner header div
+  of the tool / tool_result rows. Tool name now aligns with the
+  tool body (16 px from the left), instead of being 4 px more
+  indented than the body. Matches the prose `.pi-md` indent.
+
+- **Move agent identity + usage stats to the footer**, in a pi-cli-
+  style three-row layout:
+    - Row 1 (existing): horizontal agent chips grouped by project.
+    - Row 2 (new `#agent-info-line`): identity line
+      (project · model · branch · worktree · thinking · id),
+      mirroring pi-cli's `~/repos/... (main) · session-title`.
+    - Row 3 (new `#agent-stats-line` + `#agent-model-line`):
+      tokens / cost / context% on the left (color-banded by
+      context fill, same as pi's TUI), `(provider) model ·
+      thinking` right-aligned. Same shape as pi-cli's
+      `↑4.0k ↓1.2M R630M ... 92.4%/1.0M (auto)    (hawk)
+      claude-opus-4-7 · high`.
+  Removed `#agent-info` + `#agent-stats` from the agent header --
+  the top now just shows agent name + status + action buttons.
+
+- `formatStatsLine` no longer appends model + thinking-level;
+  added `formatModelLine` for the right-aligned model span.
+  `renderAgentHeader` populates `$agentInfo` / `$agentStats` /
+  `$agentModel` in their new footer slots.
+
+Probe on a running agent: info line shows the identity tuple,
+stats line shows `↑7 ↓260 R7.2k W8.6k $0.064 ?/1.0M`, model line
+shows `(hawk) claude-opus-4-7`. Stopped agents get an empty stats
+line but still show the model on the right (falls back to
+`agent.model`).
+
+237 tests pass; typecheck + build clean.
+
+---
+
 ## 0.13.5 — drop ▶ / ✓ / ✗ glyphs; bigger gaps between turns
 
 ### Changed

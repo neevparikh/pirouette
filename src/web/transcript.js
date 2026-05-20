@@ -412,7 +412,7 @@ export function renderMessage(msg, idx, expandedItems, opts) {
         : `<pre class="mt-1 text-base16-500 whitespace-pre-wrap">${escHtml(desc.body)}</pre>`;
     return `
       <div class="message-enter pi-row pi-row-tool pi-row-tool-call px-4 py-1" data-msg-key="${key}">
-        <div class="flex items-baseline gap-2 px-1">
+        <div class="flex items-baseline gap-2">
           <span class="text-base16-cyan font-semibold">${escHtml(desc.header)}</span>
           ${desc.subtitle ? `<span class="text-base16-500 truncate">${escHtml(desc.subtitle)}</span>` : ""}
         </div>
@@ -448,7 +448,7 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     const nameClass = isError ? "text-base16-red font-semibold" : "text-base16-cyan font-semibold";
     return `
       <div class="message-enter pi-row pi-row-tool pi-row-tool-result px-4 py-1" data-msg-key="${key}">
-        <div class="flex items-baseline gap-2 px-1">
+        <div class="flex items-baseline gap-2">
           <span class="${nameClass}">${escHtml(toolName)}</span>
           ${summary ? `<span class="text-base16-500">— ${escHtml(summary)}</span>` : ""}
           ${imageLabelSuffix}

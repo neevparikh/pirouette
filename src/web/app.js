@@ -68,8 +68,13 @@ let reconnectTimer = null;
 const $agentList = document.getElementById("agent-list");
 const $agentName = document.getElementById("agent-name");
 const $agentStatus = document.getElementById("agent-status");
-const $agentInfo = document.getElementById("agent-info");
-const $agentStats = document.getElementById("agent-stats");
+// v0.13.6: agent-info + agent-stats moved out of the header and into the
+// footer (#agent-info-line + #agent-stats-line + #agent-model-line). The
+// stats line is now split: tokens/cost/context on the left, model + thinking
+// on the right, mirroring pi-cli's bottom strip.
+const $agentInfo = document.getElementById("agent-info-line");
+const $agentStats = document.getElementById("agent-stats-line");
+const $agentModel = document.getElementById("agent-model-line");
 const $messages = document.getElementById("messages");
 const $input = document.getElementById("message-input");
 const $sendBtn = document.getElementById("send-btn");
@@ -1127,10 +1132,13 @@ function formatTokens(n) {
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
-/** One-line stats string, same ordering / glyphs as pi's TUI footer:
- *    ↑input ↓output R<cacheRead> W<cacheWrite> $cost  ·  <ctx%>/<ctxWindow>
+/** Left side of the pi-cli stats line: tokens + cost + context %.
+ *  Same ordering / glyphs as pi's TUI footer:
+ *    ↑input ↓output R<cacheRead> W<cacheWrite> $cost  <ctx%>/<ctxWindow>
  *  Context is omitted if we don't know the window; individual token parts
- *  omitted when zero. */
+ *  are omitted when zero. The model + thinking-level used to live at the
+ *  end of this line; v0.13.6 split them out to a separate right-aligned
+ *  span (`formatModelLine`). */
 function formatStatsLine(stats) {
   const parts = [];
   const t = stats.tokens;
@@ -1144,10 +1152,20 @@ function formatStatsLine(stats) {
     const pctStr = pct == null ? "?" : `${pct.toFixed(1)}%`;
     parts.push(`${pctStr}/${formatTokens(stats.contextWindow)}`);
   }
-  if (stats.thinkingLevel && stats.thinkingLevel !== "off" && stats.model?.reasoning) {
-    parts.push(`thinking: ${stats.thinkingLevel}`);
-  }
   return parts.join("  ");
+}
+
+/** Right side of the pi-cli stats line: `(provider) model · thinking`.
+ *  Pi-cli puts this on the right edge of the bottom strip. */
+function formatModelLine(stats) {
+  if (!stats.model) return "";
+  const provider = stats.model.provider ? `(${stats.model.provider}) ` : "";
+  const name = stats.model.id || "";
+  const thinking =
+    stats.thinkingLevel && stats.thinkingLevel !== "off" && stats.model.reasoning
+      ? ` · ${stats.thinkingLevel}`
+      : "";
+  return `${provider}${name}${thinking}`;
 }
 
 /** Matches pi's color bands: error > 90%, warning > 70%, neutral otherwise. */
@@ -1165,7 +1183,7 @@ function renderAgentHeader() {
     $agentStatus.textContent = "";
     $agentInfo.textContent = "";
     $agentStats.textContent = "";
-    $agentStats.classList.add("hidden");
+    if ($agentModel) $agentModel.textContent = "";
     // Hide every action pill when no agent is selected. Until now
     // raw/model/fork stayed visible and competed for layout space with
     // the placeholder agent name, which on a phone caused a 3-line wrap
@@ -1229,17 +1247,25 @@ function renderAgentHeader() {
   $agentInfo.title = `project: ${agent.projectName}\nworktree: ${agent.worktreePath}`;
 
   // Live footer-style stats (matches pi's TUI footer): tokens, cost,
-  // context %, thinking level. Populated by fetchStats(). Hidden for
-  // stopped / errored agents where the server has no live session.
+  // context %. Model + thinking on the right side. Populated by
+  // fetchStats(). Hidden / blank for stopped / errored agents where
+  // the server has no live session.
   const stats = statsByAgent[agent.id];
   if (stats) {
     $agentStats.textContent = formatStatsLine(stats);
-    $agentStats.classList.remove("hidden");
     // Colorize when context fills up, matching pi's warning/error bands.
-    $agentStats.className = `text-[10px] mt-0.5 font-mono truncate ${statsColorClass(stats.contextPercent)}`;
+    $agentStats.className = `truncate min-w-0 flex-1 ${statsColorClass(stats.contextPercent)}`;
+    if ($agentModel) $agentModel.textContent = formatModelLine(stats);
   } else {
-    $agentStats.classList.add("hidden");
     $agentStats.textContent = "";
+    $agentStats.className = "text-base16-500 truncate min-w-0 flex-1";
+    if ($agentModel) {
+      // When stats aren't available (e.g. stopped agent) we still
+      // know the model from the agent record itself -- show it so the
+      // identity row stays informative.
+      const m = agent.model || "";
+      $agentModel.textContent = m;
+    }
   }
 
   const running = agent.state !== "stopped";
