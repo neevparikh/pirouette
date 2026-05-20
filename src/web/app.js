@@ -398,6 +398,23 @@ function closeActionsDrawer() {
 function closeAllDrawers() {
   closeSidebar();
   closeActionsDrawer();
+  closeAllPickers();
+}
+// v0.13.13: pickers (model / thinking / theme) become bottom-sheet
+// modals on mobile. Dismissing the backdrop or pressing Esc should
+// close any open picker too. Implementations close-safely if the
+// picker functions aren't hoisted yet (they're declared further
+// down in the file).
+function closeAllPickers() {
+  if ($modelPicker && !$modelPicker.classList.contains("hidden")) {
+    $modelPicker.classList.add("hidden");
+  }
+  if ($thinkingPicker && !$thinkingPicker.classList.contains("hidden")) {
+    $thinkingPicker.classList.add("hidden");
+  }
+  if ($themePicker && !$themePicker.classList.contains("hidden")) {
+    $themePicker.classList.add("hidden");
+  }
 }
 if ($mobileMenuBtn) {
   $mobileMenuBtn.addEventListener("click", () => {

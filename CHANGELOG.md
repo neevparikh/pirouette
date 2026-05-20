@@ -5,6 +5,43 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.13.13 — polished mobile drawers + bottom-sheet pickers
+
+### Changed
+
+- **Hamburger button stripped of its FAB chrome.** Was a 40×40
+  rounded-full button with bg + shadow. Now just a bare `☰` glyph
+  in `text-base16-600` with a hover rect for visibility. Tap
+  target preserved.
+- **Right drawer buttons no longer stretch full-width.** Switched
+  `align-items: stretch` → `flex-start` and dropped the
+  `width: 100%` overrides. Buttons sit at their natural content
+  width (drawer auto-sizes between 140px min and 80vw max), so the
+  drawer looks like a contextual menu rather than a stack of
+  banners. The colored pills (fork purple, stop yellow, delete
+  red) read correctly at their natural widths.
+- **Model / thinking / theme pickers are now bottom-sheet modals
+  on mobile.** Below the `md` breakpoint, when one of
+  `#model-picker` / `#thinking-picker` / `#theme-picker` is shown,
+  CSS repositions it as a full-width sheet anchored to the bottom
+  of the viewport (`position: fixed; bottom: 0; left/right: 0;
+  max-height: 75vh; border-radius: 0.75rem 0.75rem 0 0`). Full
+  model names visible without truncation; native iOS feel.
+- **Drawers animate via `left` / `right` instead of `transform`.**
+  `transform` on an ancestor creates a containing block for
+  `position: fixed` descendants, which was trapping the bottom
+  sheets inside the drawer (the picker was showing up as a
+  cramped dropdown anchored to the model button, not as a sheet).
+  Switched to `left: -100vw → 0` (left drawer) and
+  `right: -100vw → 0` (right drawer); fixed-position descendants
+  now escape correctly.
+- **Backdrop tap + Esc also close any open picker** (new
+  `closeAllPickers()` called from `closeAllDrawers()`).
+
+237 tests pass.
+
+---
+
 ## 0.13.12 — mobile drawer polish; one-per-line info; drop placeholder text
 
 ### Changed

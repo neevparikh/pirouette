@@ -628,17 +628,17 @@
        * -------------------------------------------------------------- */
       @media (max-width: 767px) {
         /* Left drawer: projects + agent chips. Full-height slide-in
-         * from the left (matches the v0.13.10 layout, which the user
-         * preferred over the fit-content variant). Squared corners,
-         * subtle right-edge border. */
+         * from the left. Animated via `left` (not `transform`)
+         * because a transformed ancestor creates a containing block
+         * for `position: fixed` descendants -- which would trap the
+         * bottom-sheet pickers inside the drawer. v0.13.13. */
         #agent-footer {
           position: fixed;
           top: 0;
-          left: 0;
+          left: -100vw;
           bottom: 0;
           width: min(85vw, 320px);
-          transform: translateX(-100%);
-          transition: transform 0.2s ease;
+          transition: left 0.2s ease;
           z-index: 50;
           overflow-y: auto;
           background: rgb(var(--color-base16-100));
@@ -646,7 +646,7 @@
           padding: 1rem 0.75rem;
           gap: 0.75rem;
         }
-        #agent-footer.drawer-open { transform: translateX(0); }
+        #agent-footer.drawer-open { left: 0; }
         /* Force every nested flex container inside the left drawer to
          * stack vertically. The desktop footer is a series of horizontal
          * flex rows (outer row that holds #agent-list + #new-project-btn;
@@ -692,18 +692,20 @@
         /* Right drawer: top-right action buttons.
          *
          * Anchored to the top-right and grows down from the kebab.
-         * Narrow (220px) and only as tall as the button list needs.
-         * Squared corners, subtle left-edge border, soft shadow. */
+         * v0.13.13: buttons fit their content (no full-width stretch)
+         * so the drawer looks like a contextual menu, not a stack of
+         * banners. align-items: flex-start instead of stretch. */
         #header-actions {
           position: fixed;
           top: 0;
-          right: 0;
+          right: -100vw;
           bottom: auto;
-          width: min(60vw, 220px);
+          width: auto;
+          min-width: 140px;
+          max-width: 80vw;
           height: auto;
           max-height: 80vh;
-          transform: translateX(100%);
-          transition: transform 0.2s ease;
+          transition: right 0.2s ease;
           z-index: 50;
           overflow-y: auto;
           background: rgb(var(--color-base16-100));
@@ -712,19 +714,44 @@
           box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
           padding: 0.75rem 0.625rem !important;
           flex-direction: column !important;
-          align-items: stretch !important;
+          align-items: flex-start !important;
           justify-content: flex-start !important;
           flex-wrap: nowrap !important;
-          gap: 0.5rem !important;
+          gap: 0.375rem !important;
         }
-        #header-actions.drawer-open { transform: translateX(0); }
-        /* Stretch buttons full-width inside the right drawer. */
-        #header-actions > button,
-        #header-actions > div { width: 100%; }
+        #header-actions.drawer-open { right: 0; }
+        /* Buttons sit at their natural content width (the desktop pill
+         * styling already gives them sensible padding). Dropdown
+         * wrappers (#model + #thinking + #theme) follow the same
+         * intrinsic-sizing rule. */
         #header-actions > button { text-align: left !important; }
-        /* Dropdown anchors (model/thinking/theme) -- align dropdowns
-         * relative to the drawer's right edge. */
-        #header-actions > div.relative > button { width: 100%; text-align: left; }
+
+        /* Bottom-sheet pickers (v0.13.13).
+         *
+         * Below `md`, when one of the model / thinking / theme pickers
+         * is shown (`:not(.hidden)`), reposition it as a full-width
+         * sheet anchored to the bottom of the viewport. This escapes
+         * the right drawer's `overflow-y: auto` clipping (which was
+         * truncating long model names) and gives a native iOS feel
+         * — the picker slides up over the dimmed page, drawer remains
+         * behind it at higher z-index. */
+        #model-picker:not(.hidden),
+        #thinking-picker:not(.hidden),
+        #theme-picker:not(.hidden) {
+          position: fixed !important;
+          left: 0 !important;
+          right: 0 !important;
+          bottom: 0 !important;
+          top: auto !important;
+          margin: 0 !important;
+          width: 100% !important;
+          max-width: 100% !important;
+          max-height: 75vh !important;
+          border-radius: 0.75rem 0.75rem 0 0 !important;
+          border-bottom: none !important;
+          box-shadow: 0 -4px 20px rgb(0 0 0 / 0.25) !important;
+          z-index: 60 !important;
+        }
 
         /* Backdrop. */
         #mobile-backdrop {
@@ -872,15 +899,13 @@
       <div id="messages" class="flex-1 overflow-y-auto px-0 py-2"></div>
 
       <!-- Mobile: hamburger button (bottom-left of screen) opens the
-           left drawer holding #agent-footer (projects + agent chips).
-           Hidden on `md+` via CSS. Positioned `fixed` so it floats over
-           the input bar without consuming layout space. The input bar
-           reserves left-side padding for it (`pl-14 md:pl-3`) so the
-           floating button doesn't sit on top of the textarea text.
-           v0.13.10. -->
+           left drawer. v0.13.13: stripped the circular FAB chrome --
+           just a bare `☰` glyph sitting in the input-bar's left
+           padding zone. 40×40 tap target with a hover/active rect for
+           visibility; no bg, no shadow, no rounded-full. -->
       <button
         id="mobile-menu-btn"
-        class="fixed left-2 bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-40 w-10 h-10 rounded-full bg-base16-300 text-base16-700 shadow-lg flex items-center justify-center text-xl font-mono cursor-pointer hover:bg-base16-400/60"
+        class="fixed left-2 bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-40 w-10 h-10 flex items-center justify-center text-2xl font-mono text-base16-600 hover:bg-base16-200 active:bg-base16-300/60 cursor-pointer rounded"
         aria-label="open agents menu"
       >☰</button>
 
