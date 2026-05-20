@@ -491,40 +491,62 @@
          terminal-style transcript where adjacent messages butt up
          directly. The `pi-row` `py-*` provides intra-row spacing;
          the bg-tint contrast makes the boundary readable. */
+      /* Pi-cli's actual layout convention (from the user's reference
+         screenshots):
+           - User input, tool calls, and tool results all sit on a
+             subtly-tinted background block.
+           - Assistant prose sits on the page's default (untinted)
+             background.
+           - Consecutive blocks are separated by a small VERTICAL GAP
+             where the page bg shows through -- NOT a 1px hairline.
+           - A tool call and its immediately-following tool result
+             fuse into one block (no gap between them) because they
+             belong to the same logical operation.
+         No left bars, no chevrons, no per-row borders. */
       .pi-row {
-        /* Anchored content can scroll horizontally inside the row
-           (pi-md tables on a narrow viewport) without breaking the
-           outer column. */
+        /* Default: a small gap above each row so it reads as a
+           separate block from whatever precedes it. Even consecutive
+           same-color rows get this gap, per the user spec. */
+        margin-top: 0.375rem; /* 6 px */
+        /* min-width:0 lets a wide pi-md table scroll inside without
+           breaking the outer column. */
         min-width: 0;
       }
-      .pi-row + .pi-row {
-        /* Subtle separator -- 1px hairline in the surrounding gray.
-           Same trick a terminal would use to break up scrollback. */
-        border-top: 1px solid rgba(128, 128, 128, 0.08);
+      .pi-row:first-child {
+        margin-top: 0;
       }
-      /* User input: bg-tint band runs the full container width
-         because `#messages` has no horizontal padding (px-0 on the
-         container). The strip is rendered as a slightly-darker
-         surface (heavier than the +.pi-row separator below) so
-         user turns read as paragraph blocks the way pi-cli's
-         input-recall band does in a terminal. Color comes from
-         the active base16 theme: we use a generic rgba(gray) so
-         the tint reads correctly on both light and dark schemes
-         without needing per-theme overrides. */
-      .pi-row-user {
-        background: rgba(128, 128, 128, 0.10);
+      /* Tool call + its tool result fuse: no gap between them so they
+         visually read as one operation. Uses sub-classes attached in
+         transcript.js (pi-row-tool-call / pi-row-tool-result) on top
+         of the shared `.pi-row-tool` color hook. */
+      .pi-row-tool-call + .pi-row-tool-result {
+        margin-top: 0;
       }
-      /* Assistant / thinking / system / tool rows have no bg-tint --
-         they flow inline at the page surface. Color is inherited from
-         the inner .pi-md / .md / rawAssistant <pre>.
+      /* Same-class user rows or back-to-back tool calls also stay
+         visually separated by the default gap above. */
 
-         Tool rows differentiate from prose via the inline color
-         accent on the tool name (text-base16-cyan) and the dim body
-         text (text-base16-500), not via any spatial bar or tint. */
+      /* Background tint: shared by user / tool-call / tool-result so
+         all three "non-prose" turn types sit on the same surface
+         tone. Assistant rows skip the tint (use the page's default
+         base16-100 background).
+
+         Uses the theme's base16-200 token, which is the standard
+         base16 spec slot for "slightly different surface" -- exactly
+         what we want. Visible on both dark schemes (200 lighter than
+         100) and light schemes (200 darker than 100) without
+         per-theme overrides.
+
+         An earlier attempt used rgba(128, 128, 128, 0.08) for
+         theme-independence, but on light themes that's only a 3-10
+         unit color difference -- effectively invisible. base16-200
+         is the right answer. */
+      .pi-row-user,
+      .pi-row-tool {
+        background: rgb(var(--color-base16-200));
+      }
       .pi-row-assistant,
       .pi-row-thinking,
-      .pi-row-system,
-      .pi-row-tool { }
+      .pi-row-system { }
 
       /* Syntax highlighting — base16-mapped hljs classes, following the
        * same palette conventions as neevparikh.github.io's Shiki setup.

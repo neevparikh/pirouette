@@ -411,8 +411,8 @@ export function renderMessage(msg, idx, expandedItems, opts) {
         ? `<div class="mt-1">${desc.body}</div>`
         : `<pre class="mt-1 text-base16-500 whitespace-pre-wrap">${escHtml(desc.body)}</pre>`;
     return `
-      <div class="message-enter pi-row pi-row-tool px-4 py-0.5" data-msg-key="${key}">
-        <div class="flex items-baseline gap-2 px-1 py-0.5">
+      <div class="message-enter pi-row pi-row-tool pi-row-tool-call px-4 py-1" data-msg-key="${key}">
+        <div class="flex items-baseline gap-2 px-1">
           <span class="text-base16-cyan">▶</span>
           <span class="text-base16-cyan font-semibold">${escHtml(desc.header)}</span>
           ${desc.subtitle ? `<span class="text-base16-500 truncate">${escHtml(desc.subtitle)}</span>` : ""}
@@ -447,8 +447,8 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     // color so the icon's success/error tone doesn't bleed into the
     // tool name.
     return `
-      <div class="message-enter pi-row pi-row-tool px-4 py-0.5" data-msg-key="${key}">
-        <div class="flex items-baseline gap-2 px-1 py-0.5">
+      <div class="message-enter pi-row pi-row-tool pi-row-tool-result px-4 py-1" data-msg-key="${key}">
+        <div class="flex items-baseline gap-2 px-1">
           <span class="${color} font-semibold">${icon}</span>
           <span class="text-base16-cyan font-semibold">${escHtml(toolName)}</span>
           ${summary ? `<span class="text-base16-500">— ${escHtml(summary)}</span>` : ""}

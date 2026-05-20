@@ -5,6 +5,97 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.12.9 — pi-cli block layout: bg-tinted blocks + gaps, no hairline, no opacity
+
+### Changed
+
+Fully restructure the transcript layout to match what pi-cli
+actually does in the user's reference screenshots:
+
+  - **Background-tinted blocks** for non-prose turn types (user
+    input, tool calls, tool results). All three share the same
+    surface tint (`base16-200`), so the visual category is "this
+    is not assistant prose".
+  - **Assistant rows have no tint** -- they sit on the page's
+    default surface (`base16-100` via the body class).
+  - **Small gaps between blocks** (`margin-top: 6 px`) so user can
+    see each block as its own logical turn, even when two blocks
+    share the same color.
+  - **Tool call + tool result fuse** into one block: the rule
+    `.pi-row-tool-call + .pi-row-tool-result { margin-top: 0 }`
+    collapses the gap between them, so a (call, result) pair
+    reads as one operation -- but the NEXT call gets a fresh gap.
+  - **Hairline border removed.** `.pi-row + .pi-row { border-top }`
+    was the "weird thin line" the user kept seeing.
+  - **Opacity nudge removed.** v0.12.8's `opacity: 0.7` on tool
+    bodies was a band-aid for the missing bg distinction; with
+    bg-tinted blocks, the surface separation does the work and
+    opacity is unnecessary.
+
+New sub-classes `pi-row-tool-call` and `pi-row-tool-result` added
+on top of the existing `pi-row-tool` color hook so CSS can
+distinguish call from result for the call+result fusion rule.
+
+### Tokens
+
+The tint uses `var(--color-base16-200)` -- the standard base16
+spec slot for "slightly different surface". Theme-aware: light
+themes get a slightly darker block surface, dark themes get a
+slightly lighter one. Probed on `base24-softstack-light`: body
+bg `rgb(251, 247, 232)`, block bg `rgb(248, 242, 219)` -- visibly
+distinct.
+
+### Verified
+
+Screenshot on the live gpu dashboard shows the layout matching
+the user's pi-cli reference: prose flows on the page bg, tool
+blocks sit on a tinted surface with visible gaps between them,
+tool call+result fuse into single blocks.
+
+237 tests pass; typecheck + build clean.
+
+---
+
+## 0.12.8 — fix: tool bodies blend with prose on themes that share a hue family
+
+### Fixed
+
+v0.12.7 colored tool bodies at `base16-500` (muted) and assistant
+prose at `base16-600` (body). On most themes that's a clear gray-
+vs-darker-gray separation. On `base24-softstack-light` (and
+likely other themes where the designer chose a single hue family
+for the muted/body slots) the two colors are both shades of
+brown -- the tool body reads as "slightly different shade of
+prose" rather than a different category of content. User caught
+this live.
+
+Fix: theme-independent dimming via `opacity: 0.7` on tool bodies.
+Whatever color the theme assigns to `base16-500`, this nudges it
+further from prose by blending it with the page bg. The tool-call
+header (icon + name + summary) stays at full opacity so the
+accent colors (green/red icon, cyan name) keep their pop.
+
+```css
+.pi-row-tool > pre,
+.pi-row-tool > div.mt-1 {
+  opacity: 0.7;
+}
+```
+
+Probe on `base24-softstack-light` confirms:
+  - prose color = `rgb(60, 54, 49)` at opacity 1.0
+  - tool body color = `rgb(101, 82, 68)` at opacity 0.7
+  - effective tool-body luminance ≈ `rgb(146, 132, 117)` after
+    blending with the cream bg -- clearly lighter than the
+    `rgb(60, 54, 49)` prose.
+
+No color hard-coding: all tokens still come from the theme. The
+opacity is the theme-independent equalizer.
+
+237 tests pass; typecheck + build clean.
+
+---
+
 ## 0.12.7 — always-expanded inline tool calls + no chevrons (full pi-cli match)
 
 ### Changed
