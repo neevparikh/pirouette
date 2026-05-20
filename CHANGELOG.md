@@ -5,6 +5,28 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.13.14 — hamburger glyph: smaller, lighter, baseline-aligned with message text
+
+### Changed
+
+- Hamburger glyph bumped down from `text-2xl` to `text-base` and
+  given `font-normal` + `text-base16-500` so it visually matches
+  the placeholder/message text weight.
+- Moved the button from `position: fixed` (bottom-left of the
+  viewport) into the input bar's textarea flex row as the first
+  child (`md:hidden flex-none`). It now baselines naturally with
+  the textarea content and the send button on the right, instead
+  of floating slightly above and to the left.
+- Dropped the `pl-14 md:pl-6` left padding on the input bar that
+  was reserving space for the previously-floating button.
+- The old absolute-positioned button is removed from the DOM; the
+  inline button keeps the same `id="mobile-menu-btn"` so the
+  existing toggle JS works unchanged.
+
+237 tests pass.
+
+---
+
 ## 0.13.13 — polished mobile drawers + bottom-sheet pickers
 
 ### Changed

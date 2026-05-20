@@ -898,16 +898,12 @@
            the bg-tint strips run the full container width. -->
       <div id="messages" class="flex-1 overflow-y-auto px-0 py-2"></div>
 
-      <!-- Mobile: hamburger button (bottom-left of screen) opens the
-           left drawer. v0.13.13: stripped the circular FAB chrome --
-           just a bare `☰` glyph sitting in the input-bar's left
-           padding zone. 40×40 tap target with a hover/active rect for
-           visibility; no bg, no shadow, no rounded-full. -->
-      <button
-        id="mobile-menu-btn"
-        class="fixed left-2 bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-40 w-10 h-10 flex items-center justify-center text-2xl font-mono text-base16-600 hover:bg-base16-200 active:bg-base16-300/60 cursor-pointer rounded"
-        aria-label="open agents menu"
-      >☰</button>
+      <!-- Mobile menu button moved INTO the input-bar's textarea row
+           (see below) so it baselines naturally with the message text
+           and the send button. The element below is a no-op stub kept
+           so the `closeAllDrawers` / `openSidebar` JS that references
+           `#mobile-menu-btn` keeps working even when the inline button
+           is removed from the DOM. v0.13.14. -->
 
       <!-- Shared backdrop for both mobile drawers. Hidden on desktop
            via CSS; toggled by app.js when either drawer opens. -->
@@ -927,7 +923,7 @@
                affordance).
            pb safe-area on iOS so the textarea doesn't sit underneath
            the home-indicator bar at the screen bottom. -->
-      <div id="input-bar" class="flex-none pl-14 md:pl-6 pr-3 md:pr-6 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] relative border-y border-base16-pink/40">
+      <div id="input-bar" class="flex-none px-3 md:px-6 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] relative border-y border-base16-pink/40">
         <!-- Vim mode label, positioned on the top border line. The
              bg-base16-100 covers up the section of border behind the
              label so the line appears to "break" for the text.
@@ -961,6 +957,14 @@
         <div id="attachment-strip" class="hidden mb-2 flex flex-wrap gap-2"></div>
 
         <div class="flex items-end gap-3">
+          <!-- v0.13.14: inline mobile menu button. Sits as the first
+               item in the textarea row so it baselines with the
+               textarea content. `md:hidden` keeps it mobile-only. -->
+          <button
+            id="mobile-menu-btn"
+            class="md:hidden flex-none text-base font-mono font-normal text-base16-500 hover:text-base16-700 active:text-base16-700 cursor-pointer leading-tight"
+            aria-label="open agents menu"
+          >☰</button>
           <textarea
             id="message-input"
             class="flex-1 bg-transparent text-base16-700 border-0 outline-none focus:outline-none resize-none text-sm py-0.5 placeholder-base16-500"
