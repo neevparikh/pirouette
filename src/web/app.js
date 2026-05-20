@@ -955,8 +955,14 @@ function renderAgentRow(a, _depth = 0) {
     a.parentAgentId ? `forked from ${a.parentAgentId}` : null,
   ].filter(Boolean);
   const isActive = a.id === selectedAgentId;
+  // Active state: a colored-but-translucent tint instead of a lighter
+  // shade of the surface. The translucency over the footer bg gives
+  // the chip a "dark with color cast" feel (e.g. selected-tab in
+  // macOS sidebars). Uses the theme's cyan accent (matches our tool
+  // name accent + chevrons elsewhere) at ~25% opacity so it reads
+  // as a tinted selection without being a saturated color block.
   const activeClass = isActive
-    ? "bg-base16-300/70 text-base16-700"
+    ? "bg-base16-cyan/25 text-base16-700"
     : "text-base16-600 hover:bg-base16-300/40";
   return `
     <button
@@ -1060,7 +1066,7 @@ function renderAgentList() {
       return `
         <div class="flex items-center gap-1.5 flex-none">
           <button
-            class="flex items-baseline gap-1 cursor-pointer px-1 py-1 rounded ${isSelected ? "bg-base16-300/40" : "hover:bg-base16-300/20"}"
+            class="flex items-baseline gap-1 cursor-pointer px-1 py-1 rounded ${isSelected ? "bg-base16-cyan/15" : "hover:bg-base16-300/20"}"
             data-project-select="${escHtml(p.name)}"
             title="${escHtml(subtitle + " · " + as.length + " agent" + (as.length === 1 ? "" : "s"))}"
           >

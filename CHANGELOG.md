@@ -5,6 +5,33 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.13.1 — colored translucent highlight on active footer chip
+
+### Changed
+
+v0.13.0 used `bg-base16-300/70` for the active-agent chip --
+effectively a lighter shade of the page bg. On the
+softstack-light theme that comes out almost white (the surface
+token lightens, not darkens, the chip). User asked for a colored
+translucent tint instead, so the chip reads as "selected" with a
+clear color cast on any theme.
+
+Fix in `renderAgentRow` + `renderAgentList`:
+  - Active agent chip: `bg-base16-300/70` → `bg-base16-cyan/25`.
+    Theme's cyan accent at 25 % opacity over the footer
+    surface. On light themes the result is a sage-green tinted
+    block; on dark themes it'll be a cyan-tinted dark block.
+    Same accent already used for tool names + chevrons.
+  - Selected project label: `bg-base16-300/40` →
+    `bg-base16-cyan/15`. Subtler than the active chip so the
+    hierarchy stays readable (project label is the group; agent
+    chip is the selection).
+
+Probe on softstack-light: active bg = `rgba(76, 122, 93, 0.25)`,
+inactive = transparent. Visibly distinct on the cream footer.
+
+---
+
 ## 0.13.0 — sidebar → footer (pi-cli-style multi-agent picker)
 
 ### Changed
