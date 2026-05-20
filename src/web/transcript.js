@@ -392,35 +392,30 @@ export function renderMessage(msg, idx, expandedItems, opts) {
       </div>`;
   }
 
+  // Tool / tool_result rows: pi-cli renders these inline in the
+  // transcript, ALWAYS expanded, NO chevron. Color is the only
+  // differentiator from assistant prose:
+  //   - tool name -> cyan accent (text-base16-cyan)
+  //   - args / subtitle -> muted (text-base16-500)
+  //   - body / output -> muted (text-base16-500)
+  //   - assistant prose stays at default (~ text-base16-700)
+  // No bg-tint, no border bar, no fold. The whole row is read-only;
+  // the user can't collapse a tool body, matching pi-cli's behavior.
   if (msg.role === "tool") {
     const desc = describeToolCall(msg.toolName, msg.args);
     const key = messageKey(msg, idx);
-    const isExpanded = expanded.has(key);
     const hasBody = desc.body && desc.body.length > 0;
-    // Pi-cli renders the tool NAME in a clear accent color (cyan in
-    // its default dark theme) so it visually pops out of the
-    // surrounding prose. Was previously `base16-600 font-semibold`
-    // here -- same color as prose body, only bold -- which made
-    // tool calls blend in with assistant text.
-    //
-    // The body (tool args / detail) renders inline at the page bg
-    // (no bg-tint box) with `base16-500` muted text. Pi-cli does
-    // this same way: dim text on the page bg, no "code-block" framing.
-    // The visual contrast comes from color + dim, not from boxing.
-    const chevron = hasBody ? `<span class="text-base16-500 ml-auto">${isExpanded ? "▼" : "▶"}</span>` : "";
     const bodyHtml = !hasBody
       ? ""
       : desc.bodyIsRich
-        ? `<div class="mt-1 ${isExpanded ? "" : "hidden"}" data-expand="${key}">${desc.body}</div>`
-        : `<pre class="mt-1 text-base16-500 overflow-x-auto whitespace-pre-wrap ${isExpanded ? "" : "hidden"}" data-expand="${key}">${escHtml(desc.body)}</pre>`;
-    const clickable = hasBody ? "cursor-pointer hover:bg-base16-200/50" : "";
+        ? `<div class="mt-1">${desc.body}</div>`
+        : `<pre class="mt-1 text-base16-500 whitespace-pre-wrap">${escHtml(desc.body)}</pre>`;
     return `
       <div class="message-enter pi-row pi-row-tool px-4 py-0.5" data-msg-key="${key}">
-        <div class="flex items-baseline gap-2 ${clickable} rounded px-1 py-0.5" data-toggle="${hasBody ? key : ""}">
+        <div class="flex items-baseline gap-2 px-1 py-0.5">
           <span class="text-base16-cyan">▶</span>
           <span class="text-base16-cyan font-semibold">${escHtml(desc.header)}</span>
           ${desc.subtitle ? `<span class="text-base16-500 truncate">${escHtml(desc.subtitle)}</span>` : ""}
-          ${chevron}
         </div>
         ${bodyHtml}
       </div>`;
@@ -433,44 +428,31 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     const contentStr = typeof msg.content === "string" ? msg.content : String(msg.content ?? "");
     const summary = describeToolResult(msg.toolName, contentStr, isError);
     const key = messageKey(msg, idx);
-    const isExpanded = expanded.has(key);
-
     const hasBody = contentStr.trim().length > 0;
     const toolName = msg.toolName || "done";
-    const chevron = hasBody ? `<span class="text-base16-500 ml-auto">${isExpanded ? "▼" : "▶"}</span>` : "";
-    // Tool results can also include image content blocks (e.g. the
-    // `read` tool reading a PNG, or a screenshot tool). Images render
-    // ALWAYS-VISIBLE (no chevron gating) -- the chevron's job is
-    // hiding bulky text bodies; an image is more useful and bounded
-    // by max-h-48.
+    // Images render alongside the text body. The text body is always
+    // visible (no chevron gate) so pi-cli's auto-expand semantics
+    // hold for both text + image content.
     const imagesHtml = renderInlineImages(msg.images);
     const hasImages = imagesHtml.length > 0;
-    const expandable = hasBody;
-    // Body sits inline on the page bg (no rounded tint box) with
-    // muted text -- matches pi-cli, where tool output is dimmer
-    // text on the same bg, not boxed.
     const bodyHtml = hasBody
-      ? `<pre class="mt-1 text-base16-500 overflow-x-auto whitespace-pre-wrap max-h-64 ${isExpanded ? "" : "hidden"}" data-expand="${key}">${escHtml(contentStr)}</pre>`
+      ? `<pre class="mt-1 text-base16-500 whitespace-pre-wrap">${escHtml(contentStr)}</pre>`
       : "";
     const imagesWrap = hasImages ? `<div class="mt-1">${imagesHtml}</div>` : "";
     const imageLabelSuffix = hasImages
       ? ` <span class="text-base16-500">· ${msg.images.length} image${msg.images.length === 1 ? "" : "s"}</span>`
       : "";
-    const clickable = expandable ? "cursor-pointer hover:bg-base16-200/50" : "";
-    // Split the success icon (green/red) from the tool name (cyan accent
-    // so it matches the tool-call header above) and the summary text
-    // (muted base16-500). Previously the whole "✓ read — 1 line" string
-    // was rendered in the same green as the checkmark, which dragged
-    // the tool name into the success-indicator color instead of giving
-    // it its own accent.
+    // Three independent spans: success icon (green/red), tool name
+    // (cyan accent), summary (muted). Each carries its own theme
+    // color so the icon's success/error tone doesn't bleed into the
+    // tool name.
     return `
       <div class="message-enter pi-row pi-row-tool px-4 py-0.5" data-msg-key="${key}">
-        <div class="flex items-baseline gap-2 ${clickable} rounded px-1 py-0.5" data-toggle="${expandable ? key : ""}">
+        <div class="flex items-baseline gap-2 px-1 py-0.5">
           <span class="${color} font-semibold">${icon}</span>
           <span class="text-base16-cyan font-semibold">${escHtml(toolName)}</span>
           ${summary ? `<span class="text-base16-500">— ${escHtml(summary)}</span>` : ""}
           ${imageLabelSuffix}
-          ${expandable ? `<span class="text-base16-500 ml-auto">${isExpanded ? "\u25bc" : "\u25b6"}</span>` : ""}
         </div>
         ${bodyHtml}
         ${imagesWrap}

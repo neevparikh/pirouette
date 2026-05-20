@@ -5,6 +5,49 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.12.7 — always-expanded inline tool calls + no chevrons (full pi-cli match)
+
+### Changed
+
+Pi-cli renders tool calls and results inline at full content, with
+no chevron and no fold mechanic. The only thing distinguishing
+tools from prose is color: the tool name carries a cyan accent,
+the body / args / output text is muted (`base16-500`), and the
+surrounding prose stays at the body color.
+
+v0.12.5 / v0.12.6 had me adding spatial cues (`.pi-row-tool`
+left-bar, collapsible chevrons) to compensate for low color
+contrast on certain themes. The user requested I drop those
+entirely and rely on color alone, matching pi-cli's terminal.
+
+Fix in `transcript.js`:
+  - **Tool row**: dropped chevron, `data-toggle`, `cursor-pointer`,
+    and `hidden` body gating. Body always renders. `bodyIsRich`
+    branch and plain-pre branch both unconditionally include
+    `mt-1 text-base16-500 whitespace-pre-wrap`. No `max-h-*` or
+    `overflow-*` overrides -- long output relies on the page
+    scroll, same as pi-cli's terminal scrollback.
+  - **Tool result row**: same treatment. Icon (green/red) + name
+    (cyan) + summary (muted) still split into three spans so each
+    carries its own theme color. Image attachments still render
+    always-visible below the text body.
+
+Fix in `index.html`:
+  - **`.pi-row-tool` left-bar removed.** The 2 px cyan border-left
+    added in v0.12.5 came back out. Tool rows now look identical
+    to assistant rows structurally; differentiation is purely via
+    color on the row's children.
+
+237 tests pass; typecheck + build clean.
+
+### Verified
+
+Live on gpu with the `interaction` agent: every tool row is
+fully expanded inline with no chevron, body in muted color, name
+in cyan. Compare with pi-cli reference: same flow.
+
+---
+
 ## 0.12.6 — drop tool-call grouping widget (match pi-cli's inline flow)
 
 ### Changed

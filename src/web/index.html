@@ -514,23 +514,17 @@
       .pi-row-user {
         background: rgba(128, 128, 128, 0.10);
       }
-      /* Assistant / thinking / system rows have no bg-tint -- they
-         flow inline at the page surface. Color is inherited from the
-         inner .pi-md / .md / rawAssistant <pre>. */
+      /* Assistant / thinking / system / tool rows have no bg-tint --
+         they flow inline at the page surface. Color is inherited from
+         the inner .pi-md / .md / rawAssistant <pre>.
+
+         Tool rows differentiate from prose via the inline color
+         accent on the tool name (text-base16-cyan) and the dim body
+         text (text-base16-500), not via any spatial bar or tint. */
       .pi-row-assistant,
       .pi-row-thinking,
-      .pi-row-system { }
-      /* Tool rows get a subtle cyan left-bar so the whole tool block
-         is spatially distinct from prose, in addition to the inline
-         cyan tool-name accent. Without the bar, on dark themes
-         where base16-500 and base16-600 (prose) shade together, the
-         tool sections blend into prose at scan distance. 2px stays
-         unobtrusive; the color flows through the active theme.
-         The content shifts 2 px right relative to other rows but
-         that's barely perceptible. */
-      .pi-row-tool {
-        border-left: 2px solid rgb(var(--color-base16-cyan));
-      }
+      .pi-row-system,
+      .pi-row-tool { }
 
       /* Syntax highlighting — base16-mapped hljs classes, following the
        * same palette conventions as neevparikh.github.io's Shiki setup.
