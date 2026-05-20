@@ -5,6 +5,15 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.13.4 — tone down block tint to 3 %
+
+### Changed
+
+v0.13.3's `0.10` alpha on the green tint was still too saturated;
+user asked to drop to `0.03`. Single-line change in index.html.
+
+---
+
 ## 0.13.3 — colored translucent tint on tool/user blocks
 
 ### Changed
