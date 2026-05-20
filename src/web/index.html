@@ -626,7 +626,7 @@
            buttons drop below the name when they can't fit, with
            `md:flex-nowrap` restoring the single-row desktop layout
            (which has plenty of horizontal real estate). -->
-      <header id="agent-header" class="flex-none px-3 md:px-6 py-1.5 bg-base16-200/50 flex flex-wrap md:flex-nowrap items-center justify-between gap-2">
+      <header id="agent-header" class="flex-none px-3 md:px-6 py-2.5 bg-base16-200/50 flex flex-wrap md:flex-nowrap items-center justify-between gap-2">
         <h1 class="text-base font-bold text-base16-600 font-mono flex-none">pirouette</h1>
         <!-- v0.13.8: agent name + status removed from the header. Agent
              identity lives in the footer's info line; the top now just
@@ -686,6 +686,12 @@
           <button id="agent-resume-btn" class="hidden text-xs px-2 py-1 rounded bg-base16-green/20 text-base16-green hover:bg-base16-green/30 cursor-pointer">resume</button>
           <button id="agent-delete-btn" class="hidden text-xs px-2 py-1 rounded bg-base16-red/20 text-base16-red hover:bg-base16-red/30 cursor-pointer" title="Remove this agent (stops it and deletes its state). Hold Shift to also delete worktree + sessions.">delete</button>
 
+          <!-- Vim toggle button. v0.13.9: lives up here alongside the
+               other top-bar action buttons (was on the input bar's
+               border lines in 0.13.7/0.13.8). Same pill styling as
+               raw / notify / theme / etc. -->
+          <button id="vim-toggle-btn" class="text-xs px-2 py-1 rounded bg-base16-300/40 text-base16-500 hover:bg-base16-300/70 cursor-pointer font-mono" title="Toggle vim modal editing (persists)">vim: off</button>
+
           <!-- Browser-notification toggle. Click to request permission +
                toggle. When enabled, an agent finishing its turn (transition
                to `waiting_input`) fires a `Notification` if the dashboard
@@ -741,15 +747,6 @@
           <span id="vim-mode-label" class="text-sm font-mono text-base16-pink"></span>
         </div>
 
-        <!-- Vim toggle (top border, right). v0.13.8: moved from the
-             bottom border up here so all vim controls live on one line. -->
-        <div class="absolute -top-3 right-4 md:right-7 px-1.5 bg-base16-100 leading-none z-10">
-          <button
-            id="vim-toggle-btn"
-            class="text-sm font-mono cursor-pointer text-base16-500 hover:text-base16-700"
-            title="Toggle vim modal editing (persists)"
-          >vim: off</button>
-        </div>
 
         <!-- Autocomplete popup: absolute, anchored to the top of the input
              bar so it floats above the textarea. Shown only while typing @. -->

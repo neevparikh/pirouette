@@ -5,6 +5,25 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.13.9 — move vim toggle to the top action row; restore some header breathing room
+
+### Changed
+
+- **Vim toggle button moved to the top action row**, alongside
+  `raw / model / thinking / fork / stop / delete / notify /
+  theme`. Uses the same pill styling (`text-xs px-2 py-1 rounded
+  bg-base16-300/40`). The bottom-border position from 0.13.7 and
+  the top-border-right position from 0.13.8 are gone; INSERT label
+  on the top border is unchanged.
+- **Header padding restored** from `py-1.5` to `py-2.5`. v0.13.8
+  squashed the top bar too aggressively; this puts a little
+  breathing room back without going all the way to the old
+  `py-2 md:py-3 + h-[88px]`.
+
+237 tests pass.
+
+---
+
 ## 0.13.8 — mono everywhere, drop agent name + status, fold stats next to model
 
 ### Changed
