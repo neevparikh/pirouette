@@ -5,6 +5,29 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.13.3 — colored translucent tint on tool/user blocks
+
+### Changed
+
+The `.pi-row-user` + `.pi-row-tool` bg was `rgb(var(--color-
+base16-300))` -- a slightly different surface token. User asked
+to try a translucent COLOR ACCENT instead, so the block reads
+as a tinted surface rather than a tinted lighter shade.
+
+- `.pi-row-user`, `.pi-row-tool`:
+  `rgb(var(--color-base16-300))`
+  → `rgb(var(--color-base16-green) / 0.10)`.
+  10 % green over the page bg. On light themes (e.g. softstack
+  light) this reads as a subtle olive/khaki block; on dark
+  themes it'd be a sage-green wash. Theme-aware via the `green`
+  token; switch to `orange` (warmer terracotta) or any other
+  accent token in one line if you want a different cast.
+
+Probe: pageBg `rgb(251, 247, 232)`, blockBg `rgba(108, 120, 46,
+0.1)`. Visibly distinct olive cast over the cream surface.
+
+---
+
 ## 0.13.2 — quieter active-chip highlight (typography + subtle wash)
 
 ### Changed

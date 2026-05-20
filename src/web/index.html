@@ -542,12 +542,17 @@
          is the right answer. */
       .pi-row-user,
       .pi-row-tool {
-        /* base16-300 is one step darker than base16-200 on light
-           themes and one step lighter on dark themes. v0.12.9 used
-           base16-200 which the user said was too subtle on the cream
-           softstack-light theme. Bumping to 300 gives a noticeably
-           stronger tint while still using a theme-aware token. */
-        background: rgb(var(--color-base16-300));
+        /* Translucent green accent for non-prose blocks.
+           Previously used `base16-300` (a slightly-darker surface
+           token). The user wanted a clear color cast instead. 10%
+           green over the page bg gives a subtle warm-amber tint on
+           light themes (since green at low opacity mixes with cream
+           to feel olive/khaki) and a clear sage-green wash on dark
+           themes. Token is theme-aware so the relative intensity
+           stays consistent across schemes. Switch to
+           `--color-base16-orange` if you want a warmer
+           amber/terracotta tint instead. */
+        background: rgb(var(--color-base16-green) / 0.10);
       }
       .pi-row-assistant,
       .pi-row-thinking,
