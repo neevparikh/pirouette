@@ -5,6 +5,55 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.13.10 — mobile: bring back slide-in drawers (projects + actions)
+
+### Added
+
+The v0.13.0 desktop refactor (footer-as-chip-strip + actions inline
+in the header) made the mobile layout awkward: chip strip wrapped
+awkwardly, action button row spilled to a second line, identity
+info cramped into ~390px width.
+
+v0.13.10 restores **mobile-only slide-in drawers** -- the
+elements that work fine on desktop become CSS-driven drawers below
+the `md` breakpoint (<768px).
+
+- **Left drawer (`#agent-footer`)**: opens via a fixed `☰`
+  hamburger button at the bottom-left of the screen. Contains the
+  same project + agent chips + new-project button + identity
+  line + stats line, but flowing vertically (each project section
+  is a column with its agents stacked beneath).
+- **Right drawer (`#header-actions`)**: opens via a `⋮` kebab
+  button in the top-right of the header. Contains the same
+  raw / model / thinking / fork / stop / resume / delete / vim /
+  notify / theme buttons stretched to full width and stacked
+  vertically.
+- **Shared `#mobile-backdrop`** dims the rest of the page and
+  closes whichever drawer is open on tap. Esc also closes both.
+- **Mutually exclusive**: opening one drawer closes the other.
+
+Desktop layout is unchanged -- the drawers use
+`@media (max-width: 767px)` CSS that toggles
+`position: fixed + transform: translateX(±100%)`. Above `md` the
+elements stay in their inline positions and the toggle buttons +
+backdrop are `display: none`.
+
+### Changed
+
+- Input bar gains `pl-14` on mobile (was `pl-3`) so the floating
+  hamburger doesn't sit on top of the textarea text.
+- Footer's "identity (left) | tokens+model (right)" row
+  whitespace-wraps + stacks on mobile so neither line gets
+  truncated to nothing by the other.
+- Reanimated the previously-stubbed `openSidebar()` /
+  `closeSidebar()` helpers in app.js to drive the left drawer
+  (callers in `selectAgent` and the resize handler now do the
+  right thing again on mobile).
+
+237 tests pass.
+
+---
+
 ## 0.13.9 — move vim toggle to the top action row; restore some header breathing room
 
 ### Changed

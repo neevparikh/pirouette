@@ -348,17 +348,82 @@ if (localStorage.getItem("pirouette-vim-mode") === "1" && !isMobileViewport()) {
 
 // --- mobile sidebar drawer ---
 //
-// v0.13.0 dropped the left sidebar in favor of a footer below the input
-// bar. The old `$sidebar` / `openSidebar` / `closeSidebar` /
-// `$sidebarToggle` plumbing is no longer wired; the variables are kept as
-// no-op stubs so any leftover call sites don't crash. `closeSidebar` /
-// `openSidebar` are still referenced from a few places (selectAgent,
-// resize handler) -- those become no-ops too.
-const $sidebar = null;
-const $sidebarBackdrop = null;
-const $sidebarToggle = null;
-function openSidebar() {}
-function closeSidebar() {}
+// v0.13.0 dropped the desktop left sidebar in favor of a footer below the
+// input bar. v0.13.10 brings back *mobile* drawers: below the `md`
+// breakpoint, #agent-footer slides in from the left (hamburger button
+// at the bottom-left of the screen) and #header-actions slides in from
+// the right (kebab button in the header). Above `md` everything stays
+// inline and the toggle buttons + backdrop are hidden via CSS.
+//
+// `closeSidebar()` / `openSidebar()` are called from a handful of
+// places (selectAgent, resize handler) and now close/open the LEFT
+// drawer. The right drawer has its own toggle path. The shared
+// #mobile-backdrop dims the page and closes whichever drawer is open
+// on tap.
+const $mobileMenuBtn = document.getElementById("mobile-menu-btn");
+const $mobileActionsBtn = document.getElementById("mobile-actions-btn");
+const $mobileBackdrop = document.getElementById("mobile-backdrop");
+const $headerActions = document.getElementById("header-actions");
+const $agentFooter = document.getElementById("agent-footer");
+// Aliases kept for legacy call-sites:
+const $sidebar = $agentFooter;
+const $sidebarBackdrop = $mobileBackdrop;
+const $sidebarToggle = $mobileMenuBtn;
+function _setBackdrop() {
+  if (!$mobileBackdrop) return;
+  const anyOpen =
+    ($agentFooter && $agentFooter.classList.contains("drawer-open")) ||
+    ($headerActions && $headerActions.classList.contains("drawer-open"));
+  $mobileBackdrop.classList.toggle("hidden", !anyOpen);
+}
+function openSidebar() {
+  if ($agentFooter) $agentFooter.classList.add("drawer-open");
+  // Mutual exclusion: opening the left drawer closes the right one.
+  if ($headerActions) $headerActions.classList.remove("drawer-open");
+  _setBackdrop();
+}
+function closeSidebar() {
+  if ($agentFooter) $agentFooter.classList.remove("drawer-open");
+  _setBackdrop();
+}
+function openActionsDrawer() {
+  if ($headerActions) $headerActions.classList.add("drawer-open");
+  if ($agentFooter) $agentFooter.classList.remove("drawer-open");
+  _setBackdrop();
+}
+function closeActionsDrawer() {
+  if ($headerActions) $headerActions.classList.remove("drawer-open");
+  _setBackdrop();
+}
+function closeAllDrawers() {
+  closeSidebar();
+  closeActionsDrawer();
+}
+if ($mobileMenuBtn) {
+  $mobileMenuBtn.addEventListener("click", () => {
+    if ($agentFooter && $agentFooter.classList.contains("drawer-open")) {
+      closeSidebar();
+    } else {
+      openSidebar();
+    }
+  });
+}
+if ($mobileActionsBtn) {
+  $mobileActionsBtn.addEventListener("click", () => {
+    if ($headerActions && $headerActions.classList.contains("drawer-open")) {
+      closeActionsDrawer();
+    } else {
+      openActionsDrawer();
+    }
+  });
+}
+if ($mobileBackdrop) {
+  $mobileBackdrop.addEventListener("click", closeAllDrawers);
+}
+// Esc closes any open drawer.
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeAllDrawers();
+});
 window.addEventListener("resize", () => {
   updateInputPlaceholder();
 });
