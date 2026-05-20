@@ -5,6 +5,29 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.13.2 — quieter active-chip highlight (typography + subtle wash)
+
+### Changed
+
+v0.13.1's `bg-base16-cyan/25` highlight on the active chip read
+as a saturated sage-green block on light themes -- user said
+"too bright compared to pi-cli". Pi-cli's emphasis convention is
+mostly TYPOGRAPHY (color + weight) rather than fills, so the
+active chip now leans on the same.
+
+- Active agent chip: `bg-base16-cyan/25 text-base16-700`
+  → `bg-base16-cyan/10 text-base16-cyan font-semibold`.
+  Bold cyan text does most of the visual work; the 10 % wash
+  is just enough to outline the selection.
+- Selected project label: `bg-base16-cyan/15`
+  → `bg-base16-cyan/8`. Even subtler since it's a group
+  indicator, not the actual selected item.
+
+Probe: active bg = `rgba(76, 122, 93, 0.1)`, color =
+`rgb(76, 122, 93)`, weight 600.
+
+---
+
 ## 0.13.1 — colored translucent highlight on active footer chip
 
 ### Changed
