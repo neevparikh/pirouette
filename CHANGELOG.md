@@ -5,6 +5,83 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.13.0 — sidebar → footer (pi-cli-style multi-agent picker)
+
+### Changed
+
+Layout restructure to mimic pi-cli's terminal shape: instead of a
+left sidebar listing agents/projects, the picker now lives in a
+footer strip BELOW the input bar.
+
+  - **Removed `<aside id="sidebar">`** entirely. The old vertical
+    project sections + agent rows are gone. Mobile drawer
+    backdrop and hamburger toggle also gone (no drawer to open).
+  - **Added `<footer id="agent-footer">`** below the input bar.
+    Contains `#agent-list` (same ID, same event handlers) +
+    `#new-project-btn`. Overflow-x-auto so many projects scroll
+    horizontally.
+  - **Brand + notify + theme buttons** moved into the agent
+    header at the top right.
+  - **renderAgentList** refactored: each project becomes a
+    horizontal group (project label, then agent chips inline,
+    then optional project-delete `×`). Projects flow
+    left-to-right separated by a 1 px vertical divider.
+  - **renderAgentRow** redesigned from full-width sidebar rows
+    into compact chips: status dot + agent name, with `↳` glyph
+    on forks. Active agent gets the `base16-300/70` highlight.
+    The agent's model / state / fork-from info still surfaces via
+    the button's `title` (hover tooltip) so we don't lose
+    discoverability.
+  - **`<body>` from `flex` to `flex-col`** because main is no
+    longer a side-by-side child of an aside.
+  - **app.js stubs** the old `openSidebar` / `closeSidebar` /
+    `$sidebar` references as no-ops so existing call sites in
+    selectAgent + resize handler don't crash. (Those call sites
+    only fired on mobile drawer state; they're now harmless.)
+  - Placeholder text "select an agent from the sidebar"
+    updated to "… from the footer".
+
+Verified on the live gpu dashboard: 4 agent chips visible, all
+three projects (interaction-models / nla-reproduction / scratchpad)
+grouped with their agents, vertical dividers between groups, `+
+new project` button at the right end. Tool blocks + bg-tinting +
+gaps from v0.12.10 all still in place.
+
+237 tests pass; typecheck + build clean.
+
+---
+
+## 0.12.10 — darker block tint + drop chrome borders
+
+### Changed
+
+  - **Block bg tint**: `var(--color-base16-200)` →
+    `var(--color-base16-300)`. One step darker on light themes,
+    one step lighter on dark themes. Still uses a theme-aware
+    token; just a stronger version. On softstack-light the tint
+    moves from `rgb(248, 242, 219)` to `rgb(244, 235, 209)` --
+    against the page bg `rgb(251, 247, 232)` that's a 7–23 unit
+    difference per channel instead of the previous 3–13, so the
+    blocks now read as clearly distinct surfaces.
+  - **Removed all chrome borders** between major regions:
+      - sidebar's right border (`border-r border-base16-300`)
+      - sidebar's internal header bottom border
+      - sidebar's internal input-bar top border
+      - agent header bottom border (`border-b border-base16-300`)
+      - main input bar top border (`border-t border-base16-300`)
+    Borders on popovers/modals (model picker, theme picker,
+    skill autocomplete) are kept -- they need a delimiting edge
+    against the page content underneath. The textarea's own
+    border + focus outline is also kept (form-field cue).
+
+Visually the dashboard now looks like one continuous surface
+with bg-tone variation between turn types -- no lines or panels
+separating regions, matching the user's reference.
+
+237 tests pass; typecheck + build clean.
+
+---
+
 ## 0.12.9 — pi-cli block layout: bg-tinted blocks + gaps, no hairline, no opacity
 
 ### Changed

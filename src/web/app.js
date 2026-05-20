@@ -340,36 +340,18 @@ if (localStorage.getItem("pirouette-vim-mode") === "1" && !isMobileViewport()) {
 
 // --- mobile sidebar drawer ---
 //
-// Below `md` (768px) the sidebar is an off-canvas drawer: hidden by default,
-// slid in via the hamburger button in the agent header, dismissed by tapping
-// the backdrop or pressing Escape. At md+ this is all a no-op — the sidebar
-// is a regular flex child and these controls don't affect it.
-const $sidebar = document.getElementById("sidebar");
-const $sidebarBackdrop = document.getElementById("sidebar-backdrop");
-const $sidebarToggle = document.getElementById("sidebar-toggle");
-
-function openSidebar() {
-  $sidebar.classList.remove("-translate-x-full");
-  $sidebarBackdrop.classList.remove("hidden");
-}
-function closeSidebar() {
-  $sidebar.classList.add("-translate-x-full");
-  $sidebarBackdrop.classList.add("hidden");
-}
-$sidebarToggle?.addEventListener("click", openSidebar);
-$sidebarBackdrop?.addEventListener("click", closeSidebar);
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !$sidebarBackdrop.classList.contains("hidden")) {
-    closeSidebar();
-  }
-});
-// If the user resizes from mobile to desktop with the drawer open, drop the
-// drawer's transform/backdrop so we don't have phantom state at md+ widths.
-// Also re-run the placeholder logic so the long/short variant matches the
-// current viewport (rotating a phone or resizing the browser window
-// otherwise leaves a stale string).
+// v0.13.0 dropped the left sidebar in favor of a footer below the input
+// bar. The old `$sidebar` / `openSidebar` / `closeSidebar` /
+// `$sidebarToggle` plumbing is no longer wired; the variables are kept as
+// no-op stubs so any leftover call sites don't crash. `closeSidebar` /
+// `openSidebar` are still referenced from a few places (selectAgent,
+// resize handler) -- those become no-ops too.
+const $sidebar = null;
+const $sidebarBackdrop = null;
+const $sidebarToggle = null;
+function openSidebar() {}
+function closeSidebar() {}
 window.addEventListener("resize", () => {
-  if (!isMobileViewport()) closeSidebar();
   updateInputPlaceholder();
 });
 
@@ -947,46 +929,44 @@ function isActiveState(state) {
   return state === "running" || state === "cloning" || state === "starting";
 }
 
-/** Compact per-agent list row. */
-function renderAgentRow(a, depth = 0) {
-  const activity = currentActivity[a.id];
-  const shortModel = a.model
-    ? a.model.split("/").pop().replace(/^claude-|^gpt-|-2\d{7}$/g, "")
-    : "default";
-  let subline;
-  if (a.state === "cloning") {
-    subline = `<div class="text-xs text-base16-cyan truncate">↥ cloning…</div>`;
-  } else if (a.state === "error" && a.errorMessage) {
-    subline = `<div class="text-xs text-base16-red truncate">error · ${escHtml(a.errorMessage).slice(0, 60)}</div>`;
-  } else if (activity) {
-    subline = `<div class="text-xs text-base16-cyan truncate">▶ ${escHtml(activity.tool)}${activity.subtitle ? " · " + escHtml(activity.subtitle).slice(0, 40) : ""}</div>`;
-  } else {
-    const label = a.state === "waiting_input" ? "your turn" : a.state;
-    subline = `<div class="text-xs text-base16-500 truncate">${escHtml(label)} · <span class="text-base16-500">${escHtml(shortModel)}</span></div>`;
-  }
+/** Compact agent chip (pi-cli-style horizontal footer entry).
+ *
+ *  v0.13.0: redesigned from a full-width sidebar row into a small
+ *  horizontal pill. Same `data-agent-id` so click handling stays the
+ *  same. Shows: status dot + agent name. The forked-from / model /
+ *  state info still surfaces via the button's `title` (hover) so we
+ *  don't lose discoverability. Forks just stack inline like any other
+ *  agent -- the visual indent tree only made sense in a vertical list. */
+function renderAgentRow(a, _depth = 0) {
   const dot = isActiveState(a.state)
     ? `${statusColor(a.state)} pulse-dot`
     : statusColor(a.state);
-  // Indent forks under their parent. Each level adds a fixed gutter (12px)
-  // so trees are visually obvious without crowding the row text. The first
-  // child of a fork gets a `↳` glyph; deeper levels just stack indent.
-  const padLeft = 24 + depth * 12;
-  const forkMark = depth > 0
-    ? `<span class="text-base16-500 text-xs flex-none">↳</span>`
-    : "";
+  const activity = currentActivity[a.id];
+  const stateLabel =
+    a.state === "cloning" ? "cloning"
+    : a.state === "error" ? `error: ${(a.errorMessage || "").slice(0, 40)}`
+    : activity ? `▶ ${activity.tool}`
+    : a.state === "waiting_input" ? "your turn"
+    : a.state;
+  const titleParts = [
+    a.name,
+    a.model || "default",
+    `state: ${stateLabel}`,
+    a.parentAgentId ? `forked from ${a.parentAgentId}` : null,
+  ].filter(Boolean);
+  const isActive = a.id === selectedAgentId;
+  const activeClass = isActive
+    ? "bg-base16-300/70 text-base16-700"
+    : "text-base16-600 hover:bg-base16-300/40";
   return `
     <button
-      class="w-full text-left pr-4 py-2 flex items-center gap-2.5 hover:bg-base16-300/30 cursor-pointer ${a.id === selectedAgentId ? "bg-base16-300/50" : ""}"
-      style="padding-left: ${padLeft}px"
+      class="flex items-center gap-1.5 px-2 py-1 rounded ${activeClass} cursor-pointer text-sm whitespace-nowrap font-display"
       data-agent-id="${a.id}"
-      title="${escHtml(a.name)} — ${escHtml(a.model || "default")}${a.parentAgentId ? " — forked from " + escHtml(a.parentAgentId) : ""}"
+      title="${escHtml(titleParts.join(" — "))}"
     >
-      ${forkMark}
       <span class="w-2 h-2 rounded-full flex-none ${dot}"></span>
-      <div class="min-w-0 flex-1">
-        <div class="text-sm text-base16-600 truncate font-display">${escHtml(a.name)}</div>
-        ${subline}
-      </div>
+      ${a.parentAgentId ? '<span class="text-base16-500 text-xs">↳</span>' : ""}
+      <span class="truncate">${escHtml(a.name)}</span>
     </button>
   `;
 }
@@ -1027,12 +1007,12 @@ function orderAgentsAsTree(projectAgents) {
 function renderAgentList() {
   if (projects.length === 0) {
     $agentList.innerHTML =
-      '<div class="p-4 text-base16-500 text-sm italic">no projects yet</div>';
+      '<div class="text-base16-500 text-sm italic px-1 py-1.5">no projects yet</div>';
     return;
   }
 
   // Group agents by project. Projects with no agents still render so the
-  // user can see them and click "+" to add one.
+  // user can see them and click `@name` in the input to add one.
   const agentsByProject = new Map();
   for (const p of projects) agentsByProject.set(p.name, []);
   for (const a of agents) {
@@ -1040,6 +1020,14 @@ function renderAgentList() {
     agentsByProject.get(a.projectName).push(a);
   }
 
+  // v0.13.0: horizontal layout. Each project is a horizontal group --
+  // project name (clickable, doubles as "select project" affordance) +
+  // a row of agent chips. Multiple projects flow left-to-right; the
+  // outer footer scrolls horizontally on overflow.
+  //
+  // Forks no longer indent (renderAgentRow ignores depth) -- a chip
+  // row can't show a tree visually. The `↳` glyph stays on forked
+  // chips so the relationship is still discoverable.
   const sections = projects
     .slice()
     .sort((a, b) => {
@@ -1052,42 +1040,40 @@ function renderAgentList() {
       const as = (agentsByProject.get(p.name) ?? []).sort((x, y) =>
         x.name.localeCompare(y.name),
       );
-      const isCollapsed = collapsedProjects.has(p.name);
       const isSelected = selectedProjectName === p.name;
-      const arrow = isCollapsed ? "▸" : "▾";
       const subtitle = p.repoUrl
-        ? escHtml(p.repoUrl.replace(/^https?:\/\//, ""))
+        ? p.repoUrl.replace(/^https?:\/\//, "")
         : p.name === "scratchpad"
           ? "default (bare)"
           : "bare";
-      const rowsHtml = isCollapsed
-        ? ""
-        : as.length > 0
-          ? orderAgentsAsTree(as)
-              .map(({ agent, depth }) => renderAgentRow(agent, depth))
-              .join("")
-          : `<div class="pl-6 pr-4 py-2 text-xs text-base16-500 italic">no agents — type <code class="text-base16-orange">@name</code> below</div>`;
+      const chipsHtml = as.length > 0
+        ? orderAgentsAsTree(as)
+            .map(({ agent }) => renderAgentRow(agent))
+            .join("")
+        : `<span class="text-xs text-base16-500 italic px-1 py-1 self-center">no agents — type <code class="text-base16-orange">@name</code></span>`;
       const delBtn =
         p.name === "scratchpad"
           ? ""
-          : `<button class="text-base16-500 hover:text-base16-red text-sm ml-1 cursor-pointer" data-project-delete="${escHtml(p.name)}" title="delete project">×</button>`;
+          : `<button class="text-base16-500 hover:text-base16-red text-xs cursor-pointer self-center" data-project-delete="${escHtml(p.name)}" title="delete project">×</button>`;
+      // Each project section: label on the left, agent chips after.
+      // Wrapped in a flex container that stays one row.
       return `
-        <div>
-          <div class="flex items-center justify-between pl-2 pr-3 py-2 ${isSelected ? "bg-base16-300/30" : ""} hover:bg-base16-300/20">
-            <button class="flex-1 flex items-center gap-1.5 text-left cursor-pointer min-w-0" data-project-select="${escHtml(p.name)}">
-              <span class="text-base16-500 text-xs w-3 flex-none" data-project-toggle="${escHtml(p.name)}">${arrow}</span>
-              <div class="min-w-0 flex-1">
-                <div class="text-base text-base16-700 font-bold truncate font-display tracking-wider">${escHtml(p.name)}</div>
-                <div class="text-xs text-base16-500 truncate">${subtitle} · ${as.length} agent${as.length === 1 ? "" : "s"}</div>
-              </div>
-            </button>
-            ${delBtn}
-          </div>
-          ${rowsHtml}
+        <div class="flex items-center gap-1.5 flex-none">
+          <button
+            class="flex items-baseline gap-1 cursor-pointer px-1 py-1 rounded ${isSelected ? "bg-base16-300/40" : "hover:bg-base16-300/20"}"
+            data-project-select="${escHtml(p.name)}"
+            title="${escHtml(subtitle + " · " + as.length + " agent" + (as.length === 1 ? "" : "s"))}"
+          >
+            <span class="text-base16-700 font-bold font-display text-sm whitespace-nowrap">${escHtml(p.name)}</span>
+          </button>
+          ${chipsHtml}
+          ${delBtn}
         </div>
       `;
     })
-    .join("");
+    // Visual divider between projects so it's obvious which chips
+    // belong to which group when many projects are visible.
+    .join('<span class="flex-none self-stretch w-px bg-base16-300/60" aria-hidden="true"></span>');
 
   $agentList.innerHTML = sections;
 
@@ -1339,7 +1325,7 @@ function renderMessages() {
   if (!selectedAgentId) {
     blocks = [{
       key: PLACEHOLDER_SELECT_KEY,
-      html: '<div data-msg-key="placeholder:select" class="text-base16-500 text-xs italic text-center mt-8">select an agent from the sidebar, or type <code class="text-base16-orange">@name your message</code> below</div>',
+      html: '<div data-msg-key="placeholder:select" class="text-base16-500 text-xs italic text-center mt-8">select an agent from the footer, or type <code class="text-base16-orange">@name your message</code> below</div>',
     }];
   } else {
     const state = stateFor(selectedAgentId);
