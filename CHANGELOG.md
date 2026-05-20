@@ -5,6 +5,43 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.13.8 — mono everywhere, drop agent name + status, fold stats next to model
+
+### Changed
+
+Multiple bundled tweaks toward a fully pi-cli-style look.
+
+- **Mono everywhere**: replaced the last `font-display` (slab-serif)
+  hold-outs with `font-mono`. Brand `pirouette`, agent chips,
+  project labels are all in JetBrains Mono Nerd Font Mono now.
+- **Agent name + status removed from the top header**. The header
+  is just brand + per-agent action buttons. `#agent-name` and
+  `#agent-status` are kept as `display: none` shells so the
+  existing renderAgentHeader code can still write into them
+  without crashing -- they just have no visible output. Identity
+  lives in the footer.
+- **"your turn" status text gone**. The state-classification
+  switch in renderAgentHeader is unused now (no `#agent-status`
+  to render into).
+- **Header tightened**: dropped fixed `md:h-[88px]`, switched
+  vertical padding from `py-2 md:py-3` to `py-1.5`.
+- **Stats + model on one line**. v0.13.6 had a 3-row footer
+  (chips, identity, stats+model). v0.13.8 collapses to 2 rows:
+  row 1 = chips, row 2 = identity (left) + tokens-and-model
+  (right). `formatStatsLine` and `formatModelLine` outputs are
+  concatenated into `#agent-stats-line`; `#agent-model-line` is
+  gone.
+- **Vim controls moved to the top border line**. INSERT label is
+  on the top-left (was), `vim: on/off` toggle is on the top-right
+  (was on the bottom border). Both at `text-sm` to match the
+  body font size, instead of the old `text-[10px]`.
+
+237 tests pass; typecheck + build clean. Verified on the live
+gpu dashboard: brand + chips + identity + stats all in the same
+mono stack, footer is 2 rows, header is just brand + actions.
+
+---
+
 ## 0.13.7 — pi-cli-style input bar (horizontal border lines, vim label on top)
 
 ### Changed

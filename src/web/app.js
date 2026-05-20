@@ -68,13 +68,12 @@ let reconnectTimer = null;
 const $agentList = document.getElementById("agent-list");
 const $agentName = document.getElementById("agent-name");
 const $agentStatus = document.getElementById("agent-status");
-// v0.13.6: agent-info + agent-stats moved out of the header and into the
-// footer (#agent-info-line + #agent-stats-line + #agent-model-line). The
-// stats line is now split: tokens/cost/context on the left, model + thinking
-// on the right, mirroring pi-cli's bottom strip.
+// v0.13.8: identity (left) + tokens+model (right) live on a single
+// footer row. The earlier #agent-model-line is gone; renderAgentHeader
+// concatenates the stats string and the model string into
+// #agent-stats-line directly.
 const $agentInfo = document.getElementById("agent-info-line");
 const $agentStats = document.getElementById("agent-stats-line");
-const $agentModel = document.getElementById("agent-model-line");
 const $messages = document.getElementById("messages");
 const $input = document.getElementById("message-input");
 const $sendBtn = document.getElementById("send-btn");
@@ -976,7 +975,7 @@ function renderAgentRow(a, _depth = 0) {
     : "text-base16-600 hover:bg-base16-300/40";
   return `
     <button
-      class="flex items-center gap-1.5 px-2 py-1 rounded ${activeClass} cursor-pointer text-sm whitespace-nowrap font-display"
+      class="flex items-center gap-1.5 px-2 py-1 rounded ${activeClass} cursor-pointer text-sm whitespace-nowrap font-mono"
       data-agent-id="${a.id}"
       title="${escHtml(titleParts.join(" — "))}"
     >
@@ -1080,7 +1079,7 @@ function renderAgentList() {
             data-project-select="${escHtml(p.name)}"
             title="${escHtml(subtitle + " · " + as.length + " agent" + (as.length === 1 ? "" : "s"))}"
           >
-            <span class="text-base16-700 font-bold font-display text-sm whitespace-nowrap">${escHtml(p.name)}</span>
+            <span class="text-base16-700 font-bold font-mono text-sm whitespace-nowrap">${escHtml(p.name)}</span>
           </button>
           ${chipsHtml}
           ${delBtn}
@@ -1182,16 +1181,14 @@ function statsColorClass(pct) {
 
 function renderAgentHeader() {
   const agent = agents.find((a) => a.id === selectedAgentId);
+  // v0.13.8: agent name + status hidden in the header. $agentName /
+  // $agentStatus DOM nodes still exist (display: hidden) so existing
+  // code that touches their textContent stays a no-op rather than a
+  // crash; we just don't visually render the values anywhere.
   if (!agent) {
-    $agentName.textContent = "select an agent or type @name below";
-    $agentStatus.textContent = "";
     $agentInfo.textContent = "";
     $agentStats.textContent = "";
-    if ($agentModel) $agentModel.textContent = "";
-    // Hide every action pill when no agent is selected. Until now
-    // raw/model/fork stayed visible and competed for layout space with
-    // the placeholder agent name, which on a phone caused a 3-line wrap
-    // that overlapped the buttons.
+    // Hide every action pill when no agent is selected.
     $stopBtn.classList.add("hidden");
     $resumeBtn.classList.add("hidden");
     $deleteBtn.classList.add("hidden");
@@ -1209,37 +1206,11 @@ function renderAgentHeader() {
   $modelBtn.classList.remove("hidden");
   $thinkingBtn.classList.remove("hidden");
 
-  $agentName.textContent = agent.name;
-
-  const activity = currentActivity[agent.id];
-  let statusText = agent.state;
-  let statusColorClass = "text-base16-500";
-  if (agent.state === "running" && activity) {
-    const elapsed = Math.floor((Date.now() - activity.since) / 1000);
-    const elapsedStr = elapsed > 1 ? ` · ${elapsed}s` : "";
-    statusText = `▶ ${activity.tool}${activity.subtitle ? " · " + activity.subtitle.slice(0, 60) : ""}${elapsedStr}`;
-    statusColorClass = "text-base16-cyan";
-  } else if (agent.state === "running" || agent.state === "starting") {
-    statusText = `${agent.state}…`;
-    statusColorClass = "text-base16-green";
-  } else if (agent.state === "cloning") {
-    statusText = `↥ cloning…`;
-    statusColorClass = "text-base16-cyan";
-  } else if (agent.state === "waiting_input") {
-    statusText = "your turn";
-    statusColorClass = "text-base16-orange";
-  } else if (agent.state === "idle") {
-    statusColorClass = "text-base16-yellow";
-  } else if (agent.state === "error") {
-    statusText = agent.errorMessage ? `error: ${agent.errorMessage}` : "error";
-    statusColorClass = "text-base16-red";
-  }
-  $agentStatus.textContent = statusText;
-  $agentStatus.className = `text-xs font-mono truncate ${statusColorClass}`;
-
+  // Build the footer's left-side identity line: project · branch ·
+  // worktree · thinking · id. Model lives on the right side (next
+  // to the token stats) so it's intentionally omitted here.
   const parts = [];
   parts.push(agent.projectName);
-  parts.push(agent.model || "(default)");
   if (agent.branchName) parts.push(agent.branchName);
   parts.push(shortenPath(agent.worktreePath));
   if (agent.thinkingLevel && agent.thinkingLevel !== "off") {
@@ -1250,27 +1221,24 @@ function renderAgentHeader() {
   $agentInfo.textContent = parts.join(" · ");
   $agentInfo.title = `project: ${agent.projectName}\nworktree: ${agent.worktreePath}`;
 
-  // Live footer-style stats (matches pi's TUI footer): tokens, cost,
-  // context %. Model + thinking on the right side. Populated by
-  // fetchStats(). Hidden / blank for stopped / errored agents where
-  // the server has no live session.
+  // Build the footer's right-side combined stats+model line:
+  // ↑tok ↓tok $cost ctx% (provider) model · thinking
+  // Token usage and model identity sit next to each other on the
+  // same line (v0.13.8 layout change).
   const stats = statsByAgent[agent.id];
+  let rightSide = "";
   if (stats) {
-    $agentStats.textContent = formatStatsLine(stats);
-    // Colorize when context fills up, matching pi's warning/error bands.
-    $agentStats.className = `truncate min-w-0 flex-1 ${statsColorClass(stats.contextPercent)}`;
-    if ($agentModel) $agentModel.textContent = formatModelLine(stats);
+    const s = formatStatsLine(stats);
+    const m = formatModelLine(stats);
+    rightSide = [s, m].filter(Boolean).join("  ");
+    $agentStats.className = `truncate flex-none ${statsColorClass(stats.contextPercent)}`;
   } else {
-    $agentStats.textContent = "";
-    $agentStats.className = "text-base16-500 truncate min-w-0 flex-1";
-    if ($agentModel) {
-      // When stats aren't available (e.g. stopped agent) we still
-      // know the model from the agent record itself -- show it so the
-      // identity row stays informative.
-      const m = agent.model || "";
-      $agentModel.textContent = m;
-    }
+    // Stopped / errored agent: stats unavailable; still show the model
+    // from the agent record so the right side stays informative.
+    rightSide = agent.model || "";
+    $agentStats.className = "text-base16-500 truncate flex-none";
   }
+  $agentStats.textContent = rightSide;
 
   const running = agent.state !== "stopped";
   $stopBtn.classList.toggle("hidden", !running);

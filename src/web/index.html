@@ -626,17 +626,15 @@
            buttons drop below the name when they can't fit, with
            `md:flex-nowrap` restoring the single-row desktop layout
            (which has plenty of horizontal real estate). -->
-      <header id="agent-header" class="flex-none md:h-[88px] px-3 md:px-6 py-2 md:py-3 bg-base16-200/50 flex flex-wrap md:flex-nowrap items-center md:items-start justify-between gap-2 md:gap-4">
-        <h1 class="text-xl font-bold text-base16-600 font-display flex-none">pirouette</h1>
-        <div class="min-w-0 flex-1">
-          <div class="flex items-baseline gap-2">
-            <span id="agent-name" class="text-base16-600 font-bold font-display">select an agent</span>
-            <span id="agent-status" class="text-xs text-base16-500 truncate"></span>
-          </div>
-          <!-- v0.13.6: agent-info + agent-stats moved out of the header
-               and down to the footer (#agent-info-line / #agent-stats-line
-               below). The header now just shows name + status + actions. -->
-        </div>
+      <header id="agent-header" class="flex-none px-3 md:px-6 py-1.5 bg-base16-200/50 flex flex-wrap md:flex-nowrap items-center justify-between gap-2">
+        <h1 class="text-base font-bold text-base16-600 font-mono flex-none">pirouette</h1>
+        <!-- v0.13.8: agent name + status removed from the header. Agent
+             identity lives in the footer's info line; the top now just
+             carries the brand + per-agent action buttons. Header is
+             also tighter (`py-1.5`, no fixed `h-[88px]`). -->
+        <div class="flex-1"></div>
+        <span id="agent-name" class="hidden"></span>
+        <span id="agent-status" class="hidden"></span>
         <div class="flex gap-1 md:gap-2 flex-none flex-wrap justify-end">
           <!-- Global raw-view toggle. Off = rendered markdown (default).
                On = every assistant message shows its plain markdown source.
@@ -737,10 +735,20 @@
         <!-- Vim mode label, positioned on the top border line. The
              bg-base16-100 covers up the section of border behind the
              label so the line appears to "break" for the text.
-             Empty (and invisible) when vim is off; populated by
-             VimMode.onModeChange. -->
-        <div class="absolute -top-2 left-4 md:left-7 px-1.5 bg-base16-100 leading-none z-10">
-          <span id="vim-mode-label" class="text-[10px] font-mono text-base16-pink"></span>
+             Empty (and invisible) when vim is off. v0.13.8: bumped
+             to `text-sm` to match the body text rhythm. -->
+        <div class="absolute -top-3 left-4 md:left-7 px-1.5 bg-base16-100 leading-none z-10">
+          <span id="vim-mode-label" class="text-sm font-mono text-base16-pink"></span>
+        </div>
+
+        <!-- Vim toggle (top border, right). v0.13.8: moved from the
+             bottom border up here so all vim controls live on one line. -->
+        <div class="absolute -top-3 right-4 md:right-7 px-1.5 bg-base16-100 leading-none z-10">
+          <button
+            id="vim-toggle-btn"
+            class="text-sm font-mono cursor-pointer text-base16-500 hover:text-base16-700"
+            title="Toggle vim modal editing (persists)"
+          >vim: off</button>
         </div>
 
         <!-- Autocomplete popup: absolute, anchored to the top of the input
@@ -790,15 +798,6 @@
           </div>
         </div>
 
-        <!-- Vim toggle button positioned on the bottom border line, on
-             the right. Mirrors the vim mode label positioning above. -->
-        <div class="absolute -bottom-2 right-4 md:right-7 px-1.5 bg-base16-100 leading-none z-10">
-          <button
-            id="vim-toggle-btn"
-            class="text-[10px] font-mono cursor-pointer text-base16-500 hover:text-base16-700"
-            title="Toggle vim modal editing (persists)"
-          >vim: off</button>
-        </div>
       </div>
 
       <!-- Agent / project picker footer (v0.13.0).
@@ -811,20 +810,14 @@
            Sits at the very bottom of the main column, below the input
            bar. On overflow (lots of projects/agents) it scrolls
            horizontally; on narrow viewports the chips just wrap. -->
-      <!-- v0.13.6: pi-cli-style three-row footer.
-             Row 1 (chips):      horizontal agent chips grouped by project
-             Row 2 (identity):   agent info -- project, model, branch,
-                                 worktree, thinking level, id
-             Row 3 (stats):      tokens/cost/context (left) +
-                                 (provider) model · thinking (right)
-           Mirrors pi-cli's bottom strip which carries the workdir +
-           session title on line 1 and ↑tok ↓tok cost context% +
-           model on line 2. We add a 3rd row for the multi-agent picker
-           that pi-cli doesn't need.
-
-           The chip row scrolls horizontally on overflow; the info +
-           stats rows are single-line truncated. -->
-      <footer id="agent-footer" class="flex-none bg-base16-200/40 px-3 md:px-6 py-2 flex flex-col gap-1">
+      <!-- v0.13.8: pi-cli-style two-row footer.
+             Row 1: horizontal agent chips grouped by project
+             Row 2: identity on the left, tokens + model on the right
+           Identity = project · branch · worktree · thinking · id
+           Tokens+model = ↑tok ↓tok $cost ctx% (provider) model · think
+           Mirrors pi-cli's bottom strip; v0.13.6 had a separate stats
+           row that the user wanted folded into the identity row. -->
+      <footer id="agent-footer" class="flex-none bg-base16-200/40 px-3 md:px-6 py-1.5 flex flex-col gap-1">
         <!-- Row 1: agent chips + new-project button -->
         <div class="flex items-stretch gap-3 min-w-0 overflow-x-auto">
           <div id="agent-list" class="flex items-stretch gap-3 flex-1 min-w-0">
@@ -832,17 +825,14 @@
           </div>
           <button
             id="new-project-btn"
-            class="flex-none px-3 py-1.5 rounded-lg bg-base16-300 text-base16-600 hover:bg-base16-400/30 cursor-pointer text-xs whitespace-nowrap self-center"
+            class="flex-none px-3 py-1 rounded-lg bg-base16-300 text-base16-600 hover:bg-base16-400/30 cursor-pointer text-xs whitespace-nowrap self-center font-mono"
             title="Create a new project (group of agents sharing a repo)"
           >+ new project</button>
         </div>
-        <!-- Row 2: agent info line (project · model · branch · worktree · thinking · id) -->
-        <div id="agent-info-line" class="text-[11px] text-base16-500 font-mono truncate"></div>
-        <!-- Row 3: pi-cli-style stats line (tokens/cost/context on the
-             left, (provider) model · thinking on the right) -->
-        <div class="flex items-baseline justify-between gap-3 text-[11px] font-mono">
-          <div id="agent-stats-line" class="text-base16-500 truncate min-w-0 flex-1"></div>
-          <div id="agent-model-line" class="text-base16-500 truncate flex-none"></div>
+        <!-- Row 2: identity (left) + stats+model (right) on one line -->
+        <div class="flex items-baseline justify-between gap-4 text-xs font-mono">
+          <div id="agent-info-line" class="text-base16-500 truncate min-w-0 flex-1"></div>
+          <div id="agent-stats-line" class="text-base16-500 truncate flex-none"></div>
         </div>
       </footer>
     </main>
