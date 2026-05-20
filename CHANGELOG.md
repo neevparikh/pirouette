@@ -5,6 +5,24 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.13.15 — vim label centered on the input border; drop drawer hairlines
+
+### Changed
+
+- Vim mode label (`INSERT` etc.) on the input bar's top border
+  line: switched from a fixed `-top-3` offset (which left the
+  label slightly above the line) to `top-0 -translate-y-1/2`, so
+  the label's midline sits exactly on the border at any
+  font-size.
+- Removed the 1px `base16-300` hairline borders on the mobile
+  drawers (left drawer's right edge; right drawer's bottom + left
+  edges). The drop-shadow alone is enough visual separation; the
+  hairline read as a stray pale stripe on cream themes.
+
+237 tests pass.
+
+---
+
 ## 0.13.14 — hamburger glyph: smaller, lighter, baseline-aligned with message text
 
 ### Changed
