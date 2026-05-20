@@ -1136,18 +1136,30 @@ function renderAgentList() {
           ? ""
           : `<button class="text-base16-500 hover:text-base16-red text-xs cursor-pointer self-center" data-project-delete="${escHtml(p.name)}" title="delete project">×</button>`;
       // Each project section: label on the left, agent chips after.
-      // Wrapped in a flex container that stays one row.
+      // Wrapped in a flex container that stays one row on desktop.
+      //
+      // On mobile (in the left drawer) the outer flex flips to column
+      // via CSS, but we want the project name + delete-x to stay on
+      // the same row at the TOP of the column (not have the x get
+      // stretched to its own line and centered awkwardly below the
+      // chips). The `header-row` wrapper uses `flex justify-between`
+      // by default (mobile: name on left, x on right), but switches
+      // to `display: contents` on `md+` so it collapses into its
+      // parent and the desktop layout (name, chips..., x) is
+      // preserved unchanged.
       return `
         <div class="flex items-center gap-1.5 flex-none">
-          <button
-            class="flex items-baseline gap-1 cursor-pointer px-1 py-1 rounded ${isSelected ? "bg-base16-cyan/8" : "hover:bg-base16-300/20"}"
-            data-project-select="${escHtml(p.name)}"
-            title="${escHtml(subtitle + " · " + as.length + " agent" + (as.length === 1 ? "" : "s"))}"
-          >
-            <span class="text-base16-700 font-bold font-mono text-sm whitespace-nowrap">${escHtml(p.name)}</span>
-          </button>
+          <div class="flex items-center justify-between gap-1.5 md:contents">
+            <button
+              class="flex items-baseline gap-1 cursor-pointer px-1 py-1 rounded ${isSelected ? "bg-base16-cyan/8" : "hover:bg-base16-300/20"}"
+              data-project-select="${escHtml(p.name)}"
+              title="${escHtml(subtitle + " · " + as.length + " agent" + (as.length === 1 ? "" : "s"))}"
+            >
+              <span class="text-base16-700 font-bold font-mono text-sm whitespace-nowrap">${escHtml(p.name)}</span>
+            </button>
+            ${delBtn || '<span class="md:hidden" aria-hidden="true"></span>'}
+          </div>
           ${chipsHtml}
-          ${delBtn}
         </div>
       `;
     })
@@ -1207,33 +1219,66 @@ function formatTokens(n) {
  *  are omitted when zero. The model + thinking-level used to live at the
  *  end of this line; v0.13.6 split them out to a separate right-aligned
  *  span (`formatModelLine`). */
-function formatStatsLine(stats) {
+/** Build the parts list for the stats line. v0.13.12: returns an array
+ *  of small strings (one per logical group) so the renderer can emit
+ *  them as separate `<span class="info-part">` elements. On desktop
+ *  CSS joins them inline with `·` separators; on mobile (drawer) each
+ *  part lands on its own line. */
+function formatStatsParts(stats) {
   const parts = [];
   const t = stats.tokens;
-  if (t.input) parts.push(`↑${formatTokens(t.input)}`);
-  if (t.output) parts.push(`↓${formatTokens(t.output)}`);
-  if (t.cacheRead) parts.push(`R${formatTokens(t.cacheRead)}`);
-  if (t.cacheWrite) parts.push(`W${formatTokens(t.cacheWrite)}`);
+  const toks = [];
+  if (t.input) toks.push(`↑${formatTokens(t.input)}`);
+  if (t.output) toks.push(`↓${formatTokens(t.output)}`);
+  if (t.cacheRead) toks.push(`R${formatTokens(t.cacheRead)}`);
+  if (t.cacheWrite) toks.push(`W${formatTokens(t.cacheWrite)}`);
+  if (toks.length) parts.push(toks.join(" "));
   if (stats.cost) parts.push(`$${stats.cost.toFixed(3)}`);
   if (stats.contextWindow) {
     const pct = stats.contextPercent;
     const pctStr = pct == null ? "?" : `${pct.toFixed(1)}%`;
     parts.push(`${pctStr}/${formatTokens(stats.contextWindow)}`);
   }
-  return parts.join("  ");
+  return parts;
 }
 
-/** Right side of the pi-cli stats line: `(provider) model · thinking`.
- *  Pi-cli puts this on the right edge of the bottom strip. */
-function formatModelLine(stats) {
-  if (!stats.model) return "";
+/** Right-side parts: `(provider) model` and (optionally) `thinking: level`.
+ *  Two items so the model id and reasoning effort land on different
+ *  lines on mobile. */
+function formatModelParts(stats) {
+  if (!stats.model) return [];
   const provider = stats.model.provider ? `(${stats.model.provider}) ` : "";
   const name = stats.model.id || "";
-  const thinking =
-    stats.thinkingLevel && stats.thinkingLevel !== "off" && stats.model.reasoning
-      ? ` · ${stats.thinkingLevel}`
-      : "";
-  return `${provider}${name}${thinking}`;
+  const modelStr = `${provider}${name}`;
+  const out = [];
+  if (modelStr) out.push(modelStr);
+  if (
+    stats.thinkingLevel &&
+    stats.thinkingLevel !== "off" &&
+    stats.model.reasoning
+  ) {
+    out.push(`thinking: ${stats.thinkingLevel}`);
+  }
+  return out;
+}
+
+/** Legacy string formatters (kept for tests + any plain-text fallback).
+ *  Identical output to the pre-0.13.12 implementations. */
+function formatStatsLine(stats) {
+  return formatStatsParts(stats).join("  ");
+}
+function formatModelLine(stats) {
+  return formatModelParts(stats).join(" · ");
+}
+
+/** Render a list of strings as `<span class="info-part">` elements.
+ *  Used for the identity line and the stats+model line. The `info-part`
+ *  CSS handles inline-vs-block layout and the dot separator. */
+function renderInfoParts(parts) {
+  return parts
+    .filter((p) => p != null && p !== "")
+    .map((p) => `<span class="info-part">${escHtml(String(p))}</span>`)
+    .join("");
 }
 
 /** Matches pi's color bands: error > 90%, warning > 70%, neutral otherwise. */
@@ -1274,6 +1319,8 @@ function renderAgentHeader() {
   // Build the footer's left-side identity line: project · branch ·
   // worktree · thinking · id. Model lives on the right side (next
   // to the token stats) so it's intentionally omitted here.
+  // v0.13.12: emitted as `<span class="info-part">` elements so CSS
+  // can lay them out inline (desktop) or stacked (mobile drawer).
   const parts = [];
   parts.push(agent.projectName);
   if (agent.branchName) parts.push(agent.branchName);
@@ -1283,27 +1330,23 @@ function renderAgentHeader() {
   }
   if (agent.createdAt) parts.push(relTime(new Date(agent.createdAt).getTime()));
   parts.push(`id: ${agent.id}`);
-  $agentInfo.textContent = parts.join(" · ");
+  $agentInfo.innerHTML = renderInfoParts(parts);
   $agentInfo.title = `project: ${agent.projectName}\nworktree: ${agent.worktreePath}`;
 
-  // Build the footer's right-side combined stats+model line:
-  // ↑tok ↓tok $cost ctx% (provider) model · thinking
-  // Token usage and model identity sit next to each other on the
-  // same line (v0.13.8 layout change).
+  // Build the footer's right-side combined stats+model parts list.
+  // v0.13.12: emitted as separate spans (one per logical group:
+  // token counters, cost, context %, model, thinking) so they wrap
+  // cleanly on mobile.
   const stats = statsByAgent[agent.id];
-  let rightSide = "";
+  let rightParts;
   if (stats) {
-    const s = formatStatsLine(stats);
-    const m = formatModelLine(stats);
-    rightSide = [s, m].filter(Boolean).join("  ");
+    rightParts = [...formatStatsParts(stats), ...formatModelParts(stats)];
     $agentStats.className = `truncate flex-none ${statsColorClass(stats.contextPercent)}`;
   } else {
-    // Stopped / errored agent: stats unavailable; still show the model
-    // from the agent record so the right side stays informative.
-    rightSide = agent.model || "";
+    rightParts = agent.model ? [agent.model] : [];
     $agentStats.className = "text-base16-500 truncate flex-none";
   }
-  $agentStats.textContent = rightSide;
+  $agentStats.innerHTML = renderInfoParts(rightParts);
 
   const running = agent.state !== "stopped";
   $stopBtn.classList.toggle("hidden", !running);
@@ -1393,10 +1436,9 @@ function renderMessages() {
   // path — no special-cased innerHTML rewrites that would force a flash.
   let blocks;
   if (!selectedAgentId) {
-    blocks = [{
-      key: PLACEHOLDER_SELECT_KEY,
-      html: '<div data-msg-key="placeholder:select" class="text-base16-500 text-xs italic text-center mt-8">select an agent from the footer, or type <code class="text-base16-orange">@name your message</code> below</div>',
-    }];
+    // v0.13.12: dropped the verbose "select an agent from the footer..."
+    // placeholder. The chip strip / drawer is self-explanatory.
+    blocks = [];
   } else {
     const state = stateFor(selectedAgentId);
     const isEmpty =

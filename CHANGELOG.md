@@ -5,6 +5,52 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.13.12 — mobile drawer polish; one-per-line info; drop placeholder text
+
+### Changed
+
+- **Left drawer restored to full-height + squared corners.** v0.13.11's
+  fit-content + rounded variant didn't feel right; we're back to the
+  v0.13.10 full-height shape (just a flat slide-in panel with a
+  hairline right border).
+- **Right drawer narrower + squared corners.** 280px → 220px;
+  rounded bottom-left corner removed.
+- **Project `×` button placement fixed.** Was getting cross-axis
+  centered below the chips in the mobile drawer because the project
+  section's flex container flips to `flex-direction: column;
+  align-items: stretch`. Now the project name + `×` are wrapped in a
+  `flex justify-between md:contents` container so on mobile they sit
+  on the same row (name left, `×` right) and on desktop the wrapper
+  is `display: contents` so the desktop layout (name, chips…, `×`)
+  is unchanged.
+- **Identity + stats info, one item per line on mobile.**
+  `formatStatsLine` / `formatModelLine` refactored into
+  `formatStatsParts` / `formatModelParts` array-returning variants.
+  Each part renders as a `<span class="info-part">`; CSS lays them
+  out inline with `·` separators on desktop and as block-per-part
+  on mobile inside the drawer. Result:
+  ```
+  scratchpad
+  agent/default-9a799314
+  /data/.../scratchpad/default-9a799314
+  3d ago
+  id: 9a799314
+
+  ↑7 ↓260 R7.2k W8.6k
+  $0.064
+  ?/1.0M
+  (hawk) claude-opus-4-7
+  ```
+  String-returning legacy formatters kept for tests + plain-text
+  fallbacks.
+- **Dropped the "select an agent from the footer…" placeholder.**
+  It was visual clutter on every fresh load; the chip strip / drawer
+  is self-explanatory.
+
+237 tests pass.
+
+---
+
 ## 0.13.11 — mobile drawers: fit content, anchor to their toggle buttons
 
 ### Changed
