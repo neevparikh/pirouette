@@ -5,6 +5,32 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.13.11 — mobile drawers: fit content, anchor to their toggle buttons
+
+### Changed
+
+The v0.13.10 drawers were full-height (`top: 0; bottom: 0`) which
+left a lot of empty space below the actual menu items. Reworked
+to have each drawer "grow from" its toggle button:
+
+- **Left drawer**: `top: auto; bottom: 0; height: auto;
+  max-height: 80vh; border-top-right-radius: 0.75rem`. The panel
+  is anchored at the bottom-left (where the `☰` hamburger lives)
+  and grows upward to fit content.
+- **Right drawer**: `top: 0; bottom: auto; height: auto;
+  max-height: 80vh; border-bottom-left-radius: 0.75rem`. The panel
+  is anchored at the top-right (where the `⋮` kebab lives) and
+  grows downward to fit content.
+- Soft drop-shadows added (`0 ±4px 16px rgb(0 0 0 / 0.15)`) so the
+  panels feel like overlays rather than chrome.
+
+Makes the drawers feel contextual -- like a menu popping out of
+the button you tapped, not a full-height sidebar.
+
+237 tests pass.
+
+---
+
 ## 0.13.10 — mobile: bring back slide-in drawers (projects + actions)
 
 ### Added
