@@ -5,6 +5,61 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.12.5 — tool calls and prose now visually distinct (color hierarchy)
+
+### Changed
+
+In pi-cli, tool calls and assistant prose use different colors:
+the tool name renders in a clear accent color (cyan in the default
+dark theme) so you can scan the transcript and spot tool
+boundaries instantly. The tool output body is dim text on the
+page bg with no "code-block" framing.
+
+Pirouette was rendering the tool name in `base16-600 font-semibold`
+-- the same color as prose body, only bold -- which made tool
+calls blend into the surrounding text. Tool output bodies were
+in a `bg-base16-100 rounded p-2` tinted box that added visual
+noise without communicating "this is tool output" via color.
+
+Fixes in `transcript.js`:
+
+  - **Tool call header**: tool name now `text-base16-cyan font-
+    semibold` (was `text-base16-600 font-semibold`). Same accent
+    as the chevron, so both share a visual identity. Subtitle
+    (path / args) stays `base16-500` muted -- secondary but
+    legible.
+  - **Tool result label**: split into three runs so the success
+    icon (`✓` / `✗`) keeps its own green/red color, the tool
+    name uses cyan accent, and the summary text (`— 3 lines`)
+    sits in muted gray. Previously all three were in the same
+    `${color} font-semibold` span, which dragged the tool name
+    into the success-indicator green/red.
+  - **Tool output body**: drop the `bg-base16-100 rounded p-2`
+    tinted-box framing. Body now sits inline on the page bg with
+    `text-base16-500` muted color -- matches pi-cli where tool
+    output is just dimmer text on the same surface, not a
+    boxed code block. Same change for the tool-call body branch.
+
+Probe on the live dashboard with the `interaction` agent
+(opus-4-7 base16 light theme) confirms three distinct colors:
+  - tool name: `rgb(76, 122, 93)` (cyan accent)
+  - subtitle / body: `rgb(101, 82, 68)` (muted)
+  - assistant prose: `rgb(60, 54, 49)` (full body)
+
+All color choices go through `base16-cyan` / `base16-500` etc.
+palette tokens, so dark/light themes pick up the right accents
+automatically -- no hard-coded colors.
+
+### Tests
+
+Updated two existing tests in `transcript.test.js` that asserted
+the old single-span `✓ read` shape. They now assert the three
+separate spans (icon, tool name in cyan, summary in muted gray)
+and check that the icon carries the right success/error color.
+237 tests still passing.
+
+---
+
 ## 0.12.4 — restore inline image thumbnails (broken since v0.11.0 pi-md switch)
 
 ### Fixed

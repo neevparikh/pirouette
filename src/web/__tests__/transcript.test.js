@@ -394,6 +394,11 @@ describe("renderMessage", () => {
   });
 
   it("tool result uses summary label", () => {
+    // v0.12.5: the success icon, tool name, and summary are now
+    // rendered in three separate <span>s so they can carry different
+    // colors (icon = success/error color, name = cyan accent,
+    // summary = muted). The icon + name no longer share one <span>,
+    // so we assert on the pieces.
     const html = renderMessage(
       {
         role: "tool_result",
@@ -404,7 +409,8 @@ describe("renderMessage", () => {
       },
       0,
     );
-    expect(html).toContain("✓ read");
+    expect(html).toContain("✓");
+    expect(html).toMatch(/<span[^>]*class="text-base16-cyan[^"]*"[^>]*>read<\/span>/);
     expect(html).toContain("3 lines");
   });
 
@@ -419,7 +425,11 @@ describe("renderMessage", () => {
       },
       0,
     );
-    expect(html).toContain("✗ bash");
+    expect(html).toContain("✗");
+    // Error icon carries the red text class
+    expect(html).toMatch(/<span[^>]*class="text-base16-red[^"]*"[^>]*>✗<\/span>/);
+    // Tool name still cyan (so user can scan-spot it even on error)
+    expect(html).toMatch(/<span[^>]*class="text-base16-cyan[^"]*"[^>]*>bash<\/span>/);
   });
 
   it("thinking renders collapsed by default", () => {
