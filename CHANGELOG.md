@@ -5,6 +5,36 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.13.7 — pi-cli-style input bar (horizontal border lines, vim label on top)
+
+### Changed
+
+Input bar redesigned to match pi-cli's terminal input strip:
+
+- **Horizontal border lines** top + bottom (`border-y border-base16-
+  pink/40`). Theme-aware via the `pink` token (resolves to a
+  peachy orange on the softstack-light theme).
+- **Vim mode label sits ON the top border line**, absolutely-positioned
+  at `-top-2` with `bg-base16-100` so the line visually "breaks" for
+  the label. Empty when vim is off; invisible cutout disappears.
+- **Vim toggle button** mirrors the label on the bottom border line
+  (right side instead of left). Same bg-cutout trick.
+- **Textarea stripped** of its colored fill, rounded box, and field
+  border. Just text on the page surface, no outline, no focus ring.
+  `bg-transparent text-base16-700 border-0 outline-none focus:
+  outline-none`.
+- **Send button** stripped of its colored fill -- now a quiet text
+  button (`text-base16-blue hover:text-base16-700`). Pi-cli has no
+  send button at all (Enter sends), but mobile web users still need
+  an obvious affordance.
+- **Mode labels** changed from `-- INSERT --` / `-- NORMAL --` to
+  bare `INSERT` / `NORMAL` / `VISUAL` (pi-cli convention). Pending
+  operator now appended as `[2d]` instead of inside the dashes.
+
+237 tests pass; typecheck + build clean.
+
+---
+
 ## 0.13.6 — unindent tool name; move usage info to a pi-cli-style footer
 
 ### Changed

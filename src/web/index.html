@@ -719,74 +719,83 @@
         </div>
       </div>
 
-      <!-- Input bar (with @mention autocomplete).
-           pb safe-area on iOS so the textarea doesn't sit underneath the
-           home-indicator bar at the screen bottom. -->
-      <div id="input-bar" class="flex-none px-3 md:px-6 pt-2 md:pt-3 pb-[max(0.375rem,env(safe-area-inset-bottom))] bg-base16-200/30 relative">
+      <!-- Input bar (pi-cli styled).
+           v0.13.7: redesigned to match pi-cli's terminal input strip:
+             - Horizontal pink border lines on top and bottom (matches
+               pi-cli's INSERT-mode separators).
+             - Vim mode label sits ON the top border line, with a
+               bg color matching the page so the line breaks where
+               the label is (classic terminal-UI trick).
+             - Textarea has no box, no rounded corners, no field bg --
+               just text on the page surface.
+             - Send button stripped of its colored fill (kept as a
+               text button so web users on mobile still have an obvious
+               affordance).
+           pb safe-area on iOS so the textarea doesn't sit underneath
+           the home-indicator bar at the screen bottom. -->
+      <div id="input-bar" class="flex-none px-3 md:px-6 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] relative border-y border-base16-pink/40">
+        <!-- Vim mode label, positioned on the top border line. The
+             bg-base16-100 covers up the section of border behind the
+             label so the line appears to "break" for the text.
+             Empty (and invisible) when vim is off; populated by
+             VimMode.onModeChange. -->
+        <div class="absolute -top-2 left-4 md:left-7 px-1.5 bg-base16-100 leading-none z-10">
+          <span id="vim-mode-label" class="text-[10px] font-mono text-base16-pink"></span>
+        </div>
+
         <!-- Autocomplete popup: absolute, anchored to the top of the input
              bar so it floats above the textarea. Shown only while typing @. -->
         <div
           id="mention-popup"
-          class="hidden absolute bottom-full left-3 right-3 md:left-6 md:right-6 mb-1 bg-base16-200 border border-base16-300 rounded-lg shadow-lg max-h-56 overflow-y-auto z-10"
+          class="hidden absolute bottom-full left-3 right-3 md:left-6 md:right-6 mb-2 bg-base16-200 border border-base16-300 rounded-lg shadow-lg max-h-56 overflow-y-auto z-10"
         ></div>
 
         <!-- Slash-command popup. Mirrors the mention popup; shown when the
              input starts with `/`. Lists pirouette's client/server commands
-             plus discovered `/skill:<name>` entries from /api/skills. The
-             two popups are mutually exclusive (the `^/` and `^@` regexes
-             are disjoint), so they share the same anchor without colliding. -->
+             plus discovered `/skill:<name>` entries from /api/skills. -->
         <div
           id="slash-popup"
-          class="hidden absolute bottom-full left-3 right-3 md:left-6 md:right-6 mb-1 bg-base16-200 border border-base16-300 rounded-lg shadow-lg max-h-72 overflow-y-auto z-10"
+          class="hidden absolute bottom-full left-3 right-3 md:left-6 md:right-6 mb-2 bg-base16-200 border border-base16-300 rounded-lg shadow-lg max-h-72 overflow-y-auto z-10"
         ></div>
 
         <!-- Queue chips. Populated by app.js when the agent has pending
-             steering or follow-up messages (mirroring pi's TUI). Stays
-             above the textarea so the user can see what they've already
-             queued and avoid re-sending. -->
+             steering or follow-up messages (mirroring pi's TUI). -->
         <div id="queue-strip" class="hidden mb-2 flex flex-wrap gap-1.5"></div>
 
-        <!-- Image-attachment preview strip. Populated by app.js when the
-             user pastes an image into the input. Each pill shows a small
-             thumbnail of the attached image and a remove (×) button.
-             Cleared when the message is sent. -->
+        <!-- Image-attachment preview strip. -->
         <div id="attachment-strip" class="hidden mb-2 flex flex-wrap gap-2"></div>
 
-        <div class="flex items-stretch gap-2">
+        <div class="flex items-end gap-3">
           <textarea
             id="message-input"
-            class="flex-1 bg-base16-200 text-base16-700 border border-base16-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:border-base16-blue placeholder-base16-500"
+            class="flex-1 bg-transparent text-base16-700 border-0 outline-none focus:outline-none resize-none text-sm py-0.5 placeholder-base16-500"
             placeholder="@name your message — or select an agent"
             rows="1"
           ></textarea>
           <!-- Send button doubles as a steer / follow-up chooser when the
                agent is currently streaming. Default "steer" (interrupt)
-               matches pi's TUI default. -->
-          <div class="flex flex-col gap-0.5">
+               matches pi's TUI default. Styled as a quiet text-button --
+               pi-cli has no send button (Enter sends), but web users on
+               mobile need an obvious affordance. -->
+          <div class="flex flex-col gap-0.5 items-end">
             <button
               id="send-btn"
-              class="px-4 py-2 rounded-lg border border-transparent bg-base16-blue/20 text-base16-blue hover:bg-base16-blue/30 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed text-sm whitespace-nowrap"
-            >
-              send
-            </button>
+              class="text-base16-blue hover:text-base16-700 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed text-sm font-mono whitespace-nowrap"
+            >send</button>
             <button
               id="send-mode-btn"
-              class="hidden text-[10px] px-1 py-0.5 rounded text-base16-500 hover:text-base16-600 cursor-pointer font-mono whitespace-nowrap"
+              class="hidden text-[10px] rounded text-base16-500 hover:text-base16-600 cursor-pointer font-mono whitespace-nowrap"
               title="Click to switch between steer (interrupt) and follow-up (queue)"
             >mode: steer</button>
           </div>
         </div>
 
-        <!-- Status strip below the input. Shows vim mode, pending operator,
-             and a small toggle. Hidden text-only when vim is off so the
-             input bar stays compact. -->
-        <div class="flex items-center justify-between mt-1 text-[10px] font-mono">
-          <div id="vim-mode-label" class="text-base16-500">
-            <!-- populated by VimMode.onModeChange — e.g. "-- NORMAL [2d] --" -->
-          </div>
+        <!-- Vim toggle button positioned on the bottom border line, on
+             the right. Mirrors the vim mode label positioning above. -->
+        <div class="absolute -bottom-2 right-4 md:right-7 px-1.5 bg-base16-100 leading-none z-10">
           <button
             id="vim-toggle-btn"
-            class="px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer text-base16-500 hover:text-base16-700"
+            class="text-[10px] font-mono cursor-pointer text-base16-500 hover:text-base16-700"
             title="Toggle vim modal editing (persists)"
           >vim: off</button>
         </div>

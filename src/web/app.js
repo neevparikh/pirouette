@@ -120,26 +120,30 @@ const $thinkingList = document.getElementById("thinking-list");
 // `closeMentionPopup` can reach into it via the `vim` reference.
 const vim = new VimMode($input, {
   onModeChange: (mode, pending) => {
+    // v0.13.7: dropped the `-- ... --` dashes (pi-cli style is just
+    // `INSERT` / `NORMAL` / `VISUAL` uppercase). When vim is off the
+    // label is empty; the host element sits on the input bar's top
+    // border line and the bg-cutout effect just disappears.
     if (!vim.isEnabled()) {
       $vimLabel.textContent = "";
       return;
     }
-    let label = "-- INSERT --";
-    let color = "text-base16-500";
+    let label = "INSERT";
+    let color = "text-base16-pink";
     if (mode === "normal") {
-      label = "-- NORMAL --";
+      label = "NORMAL";
       color = "text-base16-cyan";
     } else if (mode === "visual") {
-      label = "-- VISUAL --";
+      label = "VISUAL";
       color = "text-base16-purple";
     } else if (mode === "visual_line") {
-      label = "-- VISUAL LINE --";
+      label = "VISUAL LINE";
       color = "text-base16-purple";
     } else if (mode === "insert") {
-      label = "-- INSERT --";
-      color = "text-base16-green";
+      label = "INSERT";
+      color = "text-base16-pink";
     }
-    if (pending) label = label.replace(/\s--$/, ` [${pending}] --`);
+    if (pending) label = `${label} [${pending}]`;
     $vimLabel.textContent = label;
     $vimLabel.className = `text-[10px] font-mono ${color}`;
   },
