@@ -5,6 +5,52 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.12.6 — drop tool-call grouping widget (match pi-cli's inline flow)
+
+### Changed
+
+Pi-cli doesn't group consecutive tool calls into a `▸ N tool calls`
+collapsible widget -- each tool call renders inline in the flow,
+with the tool name in cyan and the body in dim text. Pirouette was
+showing a collapsed group widget after the turn ended, which (a)
+hid which tools actually ran without expanding, and (b) on dark
+themes where 500-tier and 600-tier shades are close together,
+made collapsed widgets visually indistinguishable from prose.
+
+Fix: `renderTranscriptBlocks` now emits per-message rows for every
+tool / tool_result, always. No grouping wrapper, no fold. The
+widget rendered the same content in a collapsed shell anyway; we
+just skip the shell.
+
+  - Loop simplified: was `if (isToolRow) { walk-forward, group,
+    emit run:i:j }` + `else { emit msg:i }`; now just `for each
+    msg: emit messageKey(msg, idx)`. Same per-message rendering
+    machinery (renderMessage) handles tool/tool_result rows as
+    before. Per-row chevron still lets the user expand/collapse a
+    single long body.
+  - Helpers `isToolRow`, `summarizeToolRun`, `renderToolRun`
+    removed (nothing calls them anymore).
+  - `.pi-row-tool` gets a 2 px cyan left-bar in `index.html` so
+    the tool block is spatially distinct from prose, in addition
+    to the inline cyan tool-name accent. Helps on themes where
+    color tiers shade together.
+
+Updated `transcript.test.js`: the "completed run -> `run:0:1`"
+assertion now expects per-row keys `tc:c1:tool`, `tc:c1:tool_result`,
+`msg:2`.
+
+### Verified
+
+On the live gpu dashboard with the `interaction` agent (737
+tool/tool_result rows visible), DOM check confirms 0 `run:*` widgets
+and 737 inline `.pi-row-tool` blocks. Screenshot shows each `▶ bash
+<args>` and `✓ bash` row sitting inline with assistant prose above
+and below, matching pi-cli's terminal flow.
+
+237 tests pass; typecheck + build clean.
+
+---
+
 ## 0.12.5 — tool calls and prose now visually distinct (color hierarchy)
 
 ### Changed

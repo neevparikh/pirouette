@@ -487,52 +487,11 @@ export function renderMessage(msg, idx, expandedItems, opts) {
   return "";
 }
 
-/** Is this a tool call / tool result row? Used to group consecutive runs. */
-function isToolRow(msg) {
-  return msg.role === "tool" || msg.role === "tool_result";
-}
-
-/** Build a short human summary of a tool run, e.g. `bash · read · edit` or
- *  `bash · read · edit +2 more`. Dedupes by tool name. */
-function summarizeToolRun(msgs) {
-  const names = [];
-  const seen = new Set();
-  for (const m of msgs) {
-    const n = m.toolName || (m.role === "tool" ? "tool" : "result");
-    if (m.role !== "tool") continue; // count only calls, not results
-    if (seen.has(n)) continue;
-    seen.add(n);
-    names.push(n);
-  }
-  if (names.length <= 3) return names.join(" · ");
-  return `${names.slice(0, 3).join(" · ")} +${names.length - 3} more`;
-}
-
-/** Wrap a completed run of tool rows in a collapsible widget. */
-function renderToolRun(run, firstIdx, expanded, renderOpts) {
-  const calls = run.filter((m) => m.role === "tool").length;
-  const errors = run.filter((m) => m.role === "tool_result" && m.isError).length;
-  const key = `run:${firstIdx}:${firstIdx + run.length - 1}`;
-  const isExpanded = expanded.has(key);
-  const summary = summarizeToolRun(run);
-  const errSuffix = errors > 0 ? ` · ${errors} error${errors === 1 ? "" : "s"}` : "";
-  const header = `${calls} tool call${calls === 1 ? "" : "s"}${summary ? " · " + summary : ""}${errSuffix}`;
-  const arrow = isExpanded ? "▼" : "▸";
-  const bodyHtml = isExpanded
-    ? run
-        .map((m, i) => renderMessage(m, firstIdx + i, expanded, renderOpts))
-        .join("")
-    : "";
-  const errColor = errors > 0 ? "text-base16-red" : "text-base16-500";
-  return `
-    <div class="message-enter px-2 py-0.5" data-msg-key="${key}">
-      <div class="flex items-baseline gap-2 text-xs font-mono cursor-pointer hover:bg-base16-200/50 rounded px-1 py-0.5" data-toggle="${key}">
-        <span class="text-base16-500">${arrow}</span>
-        <span class="${errColor}">${escHtml(header)}</span>
-      </div>
-      ${isExpanded ? `<div class="ml-3 border-l border-base16-300/50 pl-2" data-expand="${key}">${bodyHtml}</div>` : ""}
-    </div>`;
-}
+// v0.12.6 dropped the collapsible "X tool calls" grouping widget --
+// pi-cli has no such concept. Tool/tool_result messages now render as
+// individual flat rows in the transcript, with per-row chevrons for
+// expanding long bodies. `isToolRow` / `summarizeToolRun` /
+// `renderToolRun` helpers were removed alongside.
 
 /** Render a full transcript (final messages + in-flight streaming).
  *  Returns an HTML string.
@@ -562,11 +521,19 @@ export function renderTranscript(state, expandedItems, opts) {
  *  the `data-msg-key` attribute on the block's top-level wrapper.
  *
  *  Blocks emitted, in order:
- *    1. Each finalized non-tool message (key = `messageKey(msg, idx)`)
- *    2. Each completed tool run (key = `run:<firstIdx>:<lastIdx>`) OR each
- *       live tool/tool_result row (key = `tc:<callId>:<role>`)
- *    3. Streaming thinking bubble if any (key = `STREAMING_THINKING_KEY`)
- *    4. Streaming text bubble if any   (key = `STREAMING_TEXT_KEY`)
+ *    1. Each message rendered as its own row, keyed by
+ *       `messageKey(msg, idx)` for non-tool messages and
+ *       `tc:<callId>:<role>` for tool / tool_result rows.
+ *    2. Streaming thinking bubble if any (key = `STREAMING_THINKING_KEY`)
+ *    3. Streaming text bubble if any   (key = `STREAMING_TEXT_KEY`)
+ *
+ *  Previously consecutive tool/tool_result messages were grouped into a
+ *  collapsible `<run:...>` widget showing `▸ N tool calls`. That widget
+ *  doesn't exist in pi-cli -- pi prints each tool call inline with the
+ *  surrounding prose, no group header, no fold. Tool name in cyan, tool
+ *  body dim. We match that here by emitting per-message blocks always.
+ *  Per-message chevrons still let the user expand/collapse a single tool
+ *  body when its output is long.
  *
  *  @param {TranscriptState} state
  *  @param {Set<string>} [expandedItems]
@@ -579,35 +546,11 @@ export function renderTranscriptBlocks(state, expandedItems, opts) {
   const blocks = [];
   const msgs = state.messages;
 
-  let i = 0;
-  while (i < msgs.length) {
-    if (isToolRow(msgs[i])) {
-      let j = i;
-      while (j < msgs.length && isToolRow(msgs[j])) j++;
-      const run = msgs.slice(i, j);
-      const isLive = j === msgs.length;
-      if (isLive) {
-        run.forEach((m, k) => {
-          blocks.push({
-            key: messageKey(m, i + k),
-            html: renderMessage(m, i + k, expanded, renderOpts),
-          });
-        });
-      } else {
-        const runKey = `run:${i}:${i + run.length - 1}`;
-        blocks.push({
-          key: runKey,
-          html: renderToolRun(run, i, expanded, renderOpts),
-        });
-      }
-      i = j;
-    } else {
-      blocks.push({
-        key: messageKey(msgs[i], i),
-        html: renderMessage(msgs[i], i, expanded, renderOpts),
-      });
-      i += 1;
-    }
+  for (let i = 0; i < msgs.length; i++) {
+    blocks.push({
+      key: messageKey(msgs[i], i),
+      html: renderMessage(msgs[i], i, expanded, renderOpts),
+    });
   }
 
   // Streaming bubbles use stable keys so they share DOM across deltas.

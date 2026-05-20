@@ -497,7 +497,11 @@ describe("renderTranscriptBlocks", () => {
     }
   });
 
-  it("collapses a completed tool run into one block keyed by `run:`", () => {
+  it("emits each tool/tool_result as its own row (no grouping widget)", () => {
+    // v0.12.6: pi-cli does not group consecutive tool calls. We
+    // dropped the `run:<i>:<j>` collapsible-widget block and now
+    // always emit per-message rows, whether the run is completed
+    // (followed by an assistant message) or still in flight.
     const state = {
       messages: [
         { role: "tool", toolName: "read", args: {}, toolCallId: "c1", ts: 1 },
@@ -508,8 +512,11 @@ describe("renderTranscriptBlocks", () => {
       streamingThinking: "",
     };
     const blocks = renderTranscriptBlocks(state);
-    // Tool run is followed by a non-tool message -> collapsed run + assistant.
-    expect(blocks.map((b) => b.key)).toEqual(["run:0:1", "msg:2"]);
+    expect(blocks.map((b) => b.key)).toEqual([
+      "tc:c1:tool",
+      "tc:c1:tool_result",
+      "msg:2",
+    ]);
   });
 
   it("emits live tool rows individually when there's no follow-up", () => {
