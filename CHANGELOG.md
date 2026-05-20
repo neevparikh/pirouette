@@ -5,6 +5,32 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.13.5 — drop ▶ / ✓ / ✗ glyphs; bigger gaps between turns
+
+### Changed
+
+Further pi-cli aesthetic cleanup per user direction:
+
+- **Tool call rows**: dropped the leading `▶` triangle. The cyan-
+  accented tool name is sufficient signal; the glyph was extra
+  visual noise.
+- **Tool result rows**: dropped the success `✓` / error `✗` icon.
+  Error signal moved from the icon to the tool-name color
+  (red for errors, cyan for success) so the failure cue isn't
+  lost.
+- **`.pi-row` margin-top**: 0.375 rem (6 px) -> 0.875 rem (14 px).
+  Bigger gap so two same-class blocks (e.g. two consecutive
+  tool_result → tool_call pairs, or two user messages) read as
+  clearly-separated operations instead of touching. The
+  `.pi-row-tool-call + .pi-row-tool-result` fusion rule still
+  collapses the gap inside a single call/result pair.
+
+Tests updated: `tool result uses summary label` and `tool result
+error renders tool name in red instead of cyan` now assert the
+no-glyph + colored-name shape.
+
+---
+
 ## 0.13.4 — tone down block tint to 3 %
 
 ### Changed

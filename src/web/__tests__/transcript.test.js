@@ -394,11 +394,9 @@ describe("renderMessage", () => {
   });
 
   it("tool result uses summary label", () => {
-    // v0.12.5: the success icon, tool name, and summary are now
-    // rendered in three separate <span>s so they can carry different
-    // colors (icon = success/error color, name = cyan accent,
-    // summary = muted). The icon + name no longer share one <span>,
-    // so we assert on the pieces.
+    // v0.13.5: success icon (✓/✗) dropped per user request. Tool
+    // name still in cyan for success; red for errors. Summary in
+    // muted text.
     const html = renderMessage(
       {
         role: "tool_result",
@@ -409,12 +407,12 @@ describe("renderMessage", () => {
       },
       0,
     );
-    expect(html).toContain("✓");
+    expect(html).not.toContain("✓");
     expect(html).toMatch(/<span[^>]*class="text-base16-cyan[^"]*"[^>]*>read<\/span>/);
     expect(html).toContain("3 lines");
   });
 
-  it("tool result error shows ✗", () => {
+  it("tool result error renders tool name in red instead of cyan", () => {
     const html = renderMessage(
       {
         role: "tool_result",
@@ -425,11 +423,12 @@ describe("renderMessage", () => {
       },
       0,
     );
-    expect(html).toContain("✗");
-    // Error icon carries the red text class
-    expect(html).toMatch(/<span[^>]*class="text-base16-red[^"]*"[^>]*>✗<\/span>/);
-    // Tool name still cyan (so user can scan-spot it even on error)
-    expect(html).toMatch(/<span[^>]*class="text-base16-cyan[^"]*"[^>]*>bash<\/span>/);
+    // No icon glyph
+    expect(html).not.toContain("✗");
+    expect(html).not.toContain("✓");
+    // Tool name renders in red (error signal moved from icon to name)
+    expect(html).toMatch(/<span[^>]*class="text-base16-red[^"]*"[^>]*>bash<\/span>/);
+    expect(html).not.toMatch(/<span[^>]*class="text-base16-cyan[^"]*"[^>]*>bash<\/span>/);
   });
 
   it("thinking renders collapsed by default", () => {

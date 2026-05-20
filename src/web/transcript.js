@@ -413,7 +413,6 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     return `
       <div class="message-enter pi-row pi-row-tool pi-row-tool-call px-4 py-1" data-msg-key="${key}">
         <div class="flex items-baseline gap-2 px-1">
-          <span class="text-base16-cyan">▶</span>
           <span class="text-base16-cyan font-semibold">${escHtml(desc.header)}</span>
           ${desc.subtitle ? `<span class="text-base16-500 truncate">${escHtml(desc.subtitle)}</span>` : ""}
         </div>
@@ -442,15 +441,15 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     const imageLabelSuffix = hasImages
       ? ` <span class="text-base16-500">· ${msg.images.length} image${msg.images.length === 1 ? "" : "s"}</span>`
       : "";
-    // Three independent spans: success icon (green/red), tool name
-    // (cyan accent), summary (muted). Each carries its own theme
-    // color so the icon's success/error tone doesn't bleed into the
-    // tool name.
+    // No icon glyph -- per user request, the green ✓ / red ✗ marker
+    // is dropped. Tool name still uses the cyan accent for success;
+    // errors switch the name to red so the failure signal isn't
+    // lost. Summary stays muted.
+    const nameClass = isError ? "text-base16-red font-semibold" : "text-base16-cyan font-semibold";
     return `
       <div class="message-enter pi-row pi-row-tool pi-row-tool-result px-4 py-1" data-msg-key="${key}">
         <div class="flex items-baseline gap-2 px-1">
-          <span class="${color} font-semibold">${icon}</span>
-          <span class="text-base16-cyan font-semibold">${escHtml(toolName)}</span>
+          <span class="${nameClass}">${escHtml(toolName)}</span>
           ${summary ? `<span class="text-base16-500">— ${escHtml(summary)}</span>` : ""}
           ${imageLabelSuffix}
         </div>
