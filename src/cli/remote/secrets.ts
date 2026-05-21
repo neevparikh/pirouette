@@ -56,8 +56,17 @@
  *  you've never `aws sso login`'d, the SSO cache dir won't exist and
  *  we'll just skip it. */
 
-import { existsSync, readdirSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { randomUUID } from "node:crypto";
+import os from "node:os";
 import path from "node:path";
 
 import type { PirouetteConfig } from "../../config.js";
@@ -83,6 +92,15 @@ export interface SecretFileSpec {
   containerHomeRelative: string;
   /** Human-readable label for log lines. */
   label: string;
+  /** Optional transform applied to file content before pushing. Useful for
+   *  stripping host-specific state from a config file before shipping it
+   *  (e.g. SDK session UUIDs in `~/.pi/agent/pi-cas.json` are keyed by
+   *  laptop-side pi-session ids and would dangle in the container).
+   *
+   *  Receives the raw file contents as a UTF-8 string, returns the
+   *  contents to actually ship. If the transform throws, the file is
+   *  skipped with a log line rather than aborting the whole push. */
+  transform?: (raw: string) => string;
 }
 
 export interface SecretDirSpec {
@@ -117,6 +135,25 @@ const DEFAULT_SECRETS: SecretSpec[] = [
     localPath: "~/.cache/pi-agent/hawk-access-token",
     containerHomeRelative: ".cache/pi-agent/hawk-access-token",
     label: "hawk access-token cache",
+  },
+
+  // ---- pi-cas-provider prefs ----
+  // Persists `fastMode` + `okta` settings so a fresh container starts in the
+  // okta-relay mode the laptop is already configured for (rather than
+  // defaulting to local Claude Code auth, which the container doesn't have).
+  // We strip the `sessions` map before shipping -- those UUIDs are
+  // laptop-side pi-session ids that resume against SDK transcripts on the
+  // laptop's disk, and would be dangling references on the container. The
+  // container builds its own session map on first SDK spawn.
+  {
+    localPath: "~/.pi/agent/pi-cas.json",
+    containerHomeRelative: ".pi/agent/pi-cas.json",
+    label: "pi-cas prefs (okta+fast)",
+    transform: (raw) => {
+      const data = JSON.parse(raw);
+      if (data && typeof data === "object") delete data.sessions;
+      return JSON.stringify(data, null, 2);
+    },
   },
 
   // ---- AWS profile + SSO session ----
@@ -267,6 +304,43 @@ export async function pushSecrets(
   return { pushed, skipped, missing };
 }
 
+/** Resolve the actual source path for an scp call. When the spec defines a
+ *  `transform`, we read the local file, apply the transform, and stage the
+ *  result in a private tmpdir; scp ships the staged copy. When there's no
+ *  transform we hand the original path straight back.
+ *
+ *  Returns `{ src, cleanup }`. Callers MUST invoke `cleanup()` in a finally
+ *  block to remove the staged tmpdir (no-op when no transform was applied).
+ *  Returns `null` if the transform threw -- caller treats that as a skip. */
+function materializeSource(
+  spec: SecretFileSpec,
+  localPath: string,
+  log: (m: string) => void,
+): { src: string; cleanup: () => void } | null {
+  if (!spec.transform) return { src: localPath, cleanup: () => {} };
+  let transformed: string;
+  try {
+    transformed = spec.transform(readFileSync(localPath, "utf8"));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`  skip  ${spec.label.padEnd(28)} (transform failed: ${msg})`);
+    return null;
+  }
+  const dir = mkdtempSync(path.join(os.tmpdir(), "pirouette-secret-"));
+  const src = path.join(dir, path.basename(spec.containerHomeRelative));
+  writeFileSync(src, transformed, { mode: 0o600 });
+  return {
+    src,
+    cleanup: () => {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // best-effort; tmpdir GC will eventually reap it
+      }
+    },
+  };
+}
+
 // ---- ec2-bindmount mode -----------------------------------------------------
 
 /** Single file -> host bind-mount path, chown to uid 1000. */
@@ -292,22 +366,29 @@ async function pushFileToBindMount(
   const remoteDir = path.posix.dirname(remoteHostPath);
   const topAncestor = topAncestorPath(hostHome, spec.containerHomeRelative);
 
-  // First path segment under $HOME -- e.g. ".pi" for ".pi/agent/auth.json".
-  // sudo mkdir -p creates ALL intermediate dirs as root, so chowning just
-  // the leaf leaves ".pi" itself root-owned (mode 755). The container user
-  // can read+traverse but can't create siblings under ".pi" -- pi-agent
-  // breaks. We chown -R the top-level segment to fix every level at once.
-  await ssh(
-    `sudo mkdir -p ${remoteDir} && sudo chown -R 1000:1000 ${topAncestor} && sudo chmod 700 ${remoteDir}`,
-    { target },
-  );
-  await scp(local, remoteHostPath, { target });
-  // scp lands as ubuntu:ubuntu on host -- fix to uid 1000 + 0600 so
-  // the container user can read but nobody else.
-  await ssh(
-    `sudo chown 1000:1000 ${remoteHostPath} && sudo chmod 600 ${remoteHostPath}`,
-    { target },
-  );
+  const staged = materializeSource(spec, local, log);
+  if (!staged) return "skipped";
+
+  try {
+    // First path segment under $HOME -- e.g. ".pi" for ".pi/agent/auth.json".
+    // sudo mkdir -p creates ALL intermediate dirs as root, so chowning just
+    // the leaf leaves ".pi" itself root-owned (mode 755). The container user
+    // can read+traverse but can't create siblings under ".pi" -- pi-agent
+    // breaks. We chown -R the top-level segment to fix every level at once.
+    await ssh(
+      `sudo mkdir -p ${remoteDir} && sudo chown -R 1000:1000 ${topAncestor} && sudo chmod 700 ${remoteDir}`,
+      { target },
+    );
+    await scp(staged.src, remoteHostPath, { target });
+    // scp lands as ubuntu:ubuntu on host -- fix to uid 1000 + 0600 so
+    // the container user can read but nobody else.
+    await ssh(
+      `sudo chown 1000:1000 ${remoteHostPath} && sudo chmod 600 ${remoteHostPath}`,
+      { target },
+    );
+  } finally {
+    staged.cleanup();
+  }
 
   log(`  push  ${spec.label.padEnd(28)} -> ${spec.containerHomeRelative}`);
   return "pushed";
@@ -403,11 +484,18 @@ async function pushFileViaPlainSsh(
   const remotePath = `~/${spec.containerHomeRelative}`;
   const remoteDir = path.posix.dirname(spec.containerHomeRelative);
 
-  // Ensure parent dir exists with 700 perms. Quoted so `~` expands but the
-  // path itself doesn't word-split.
-  await ssh(`mkdir -p "$HOME/${remoteDir}" && chmod 700 "$HOME/${remoteDir}"`, { target });
-  await scp(local, remotePath, { target });
-  await ssh(`chmod 600 "$HOME/${spec.containerHomeRelative}"`, { target });
+  const staged = materializeSource(spec, local, log);
+  if (!staged) return "skipped";
+
+  try {
+    // Ensure parent dir exists with 700 perms. Quoted so `~` expands but the
+    // path itself doesn't word-split.
+    await ssh(`mkdir -p "$HOME/${remoteDir}" && chmod 700 "$HOME/${remoteDir}"`, { target });
+    await scp(staged.src, remotePath, { target });
+    await ssh(`chmod 600 "$HOME/${spec.containerHomeRelative}"`, { target });
+  } finally {
+    staged.cleanup();
+  }
 
   log(`  push  ${spec.label.padEnd(28)} -> ${spec.containerHomeRelative}`);
   return "pushed";
