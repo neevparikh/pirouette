@@ -830,6 +830,12 @@ function handleWsMessage(envelope) {
           fetchHistory(envelope.agentId);
           fetchStats(envelope.agentId);
         }
+        // First agent to come up: extension commands are now readable on
+        // the server side. Refresh the manifest so the slash popup picks
+        // up `/cas-fast`, `/cas-okta`, etc. Only when empty -- once we
+        // have any commands, every running agent's runner has the same
+        // set, so further state changes don't move the needle.
+        if (commandsManifest.length === 0) void loadCommandsManifest();
       }
       // Browser notification: agent just transitioned from "running" (or
       // similar in-progress state) to "waiting_input" (turn complete).
@@ -2094,6 +2100,25 @@ async function loadSkillsManifest() {
   }
 }
 
+// Extension-registered slash commands (e.g. /cas-fast, /cas-okta from
+// pi-cas-provider). Empty when no agent is currently running on the
+// server (commands are runner-scoped server-side; see
+// AgentManager.getExtensionCommands). Refreshed on agent-list changes
+// so newly-started extensions show up without a reload.
+let commandsManifest = []; // {name, description}[] populated by /api/commands
+
+async function loadCommandsManifest() {
+  try {
+    const res = await fetch("/api/commands");
+    if (!res.ok) throw new Error(`/api/commands: ${res.status}`);
+    const data = await res.json();
+    commandsManifest = Array.isArray(data.commands) ? data.commands : [];
+  } catch (err) {
+    console.error("failed to load commands manifest:", err);
+    commandsManifest = [];
+  }
+}
+
 // Static command catalogue. `argLabel` shows in the popup as a hint about
 // what comes after the command name (purely cosmetic; the dispatcher just
 // passes everything after the first space through as `args`).
@@ -2127,10 +2152,27 @@ function slashContextFromInput() {
   return { partial: m[1] };
 }
 
-/** Build the full list of slash entries (static + skills) annotated with
- *  which kind they are; the popup renders this list directly. */
+/** Build the full list of slash entries (static + extension + skills)
+ *  annotated with which kind they are; the popup renders this list
+ *  directly.
+ *
+ *  Extension commands (`/cas-fast`, `/cas-okta`, etc.) are surfaced for
+ *  autocomplete only — there's no client-side dispatch for them, the
+ *  literal text falls through to sendMessage() and pi's command handler
+ *  resolves it server-side. `takesArgs: true` is conservative (we don't
+ *  know the arg shape of arbitrary extension commands), so the popup
+ *  keeps showing while the user types past the command name. */
 function allSlashEntries() {
   const entries = SLASH_COMMANDS.map((c) => ({ ...c }));
+  for (const c of commandsManifest) {
+    entries.push({
+      name: c.name,
+      description: c.description || "(extension command)",
+      argLabel: "[args]",
+      kind: "extension",
+      takesArgs: true,
+    });
+  }
   for (const s of skillsManifest) {
     entries.push({
       name: `skill:${s.name}`,
@@ -2184,10 +2226,24 @@ function renderSlashPopup() {
     .map((e, i) => {
       const active = i === slashIndex ? "bg-base16-300/60" : "";
       // Color-code the kind glyph so you can scan: skill=cyan,
-      // api=orange (server-side action), client=green (UI).
-      const glyph = e.kind === "skill" ? "◆" : e.kind === "api" ? "▸" : "•";
+      // api=orange (server-side action), extension=magenta (registered
+      // by a pi extension, dispatched server-side), client=green (UI).
+      const glyph =
+        e.kind === "skill"
+          ? "◆"
+          : e.kind === "api"
+            ? "▸"
+            : e.kind === "extension"
+              ? "▪"
+              : "•";
       const glyphColor =
-        e.kind === "skill" ? "text-base16-cyan" : e.kind === "api" ? "text-base16-orange" : "text-base16-green";
+        e.kind === "skill"
+          ? "text-base16-cyan"
+          : e.kind === "api"
+            ? "text-base16-orange"
+            : e.kind === "extension"
+              ? "text-base16-magenta"
+              : "text-base16-green";
       const argHint = e.argLabel ? ` <span class="text-base16-500">${escHtml(e.argLabel)}</span>` : "";
       return `<button class="w-full text-left px-3 py-2 flex items-baseline gap-2 hover:bg-base16-300/40 cursor-pointer ${active}" data-idx="${i}">
         <span class="text-xs ${glyphColor} flex-none">${glyph}</span>
@@ -2242,9 +2298,13 @@ function applySlashSelection(mode = "dispatch") {
   closeSlashPopup();
   $input.value = "";
   autoResize();
-  if (pick.kind === "skill") {
-    // Re-serialise as `/skill:<name> <args>` and send through the normal
-    // message path; pi's _expandSkillCommand will resolve it server-side.
+  if (pick.kind === "skill" || pick.kind === "extension") {
+    // Both skills and extension-registered commands resolve server-side:
+    // skills via pi's _expandSkillCommand, extension commands via pi's
+    // command-dispatch path (pi.registerCommand). Either way the client
+    // just sends the literal `/name args` text and lets the server
+    // route it. We share the codepath because the wire shape is
+    // identical -- only the server-side handler differs.
     const body = args ? `/${pick.name} ${args}` : `/${pick.name}`;
     void (async () => {
       try {
@@ -2754,6 +2814,12 @@ loadThemeManifest();
 // Same for the skills manifest, which feeds the slash-command popup's
 // `/skill:<name>` entries. Cheap; one tiny GET on connect.
 void loadSkillsManifest();
+
+// Extension-registered slash commands (e.g. /cas-fast). Cheap; one tiny
+// GET on connect. The server may return an empty list if no agent is
+// running at this moment -- the agent_state_change handler re-fetches
+// when one comes up, so the popup self-heals.
+void loadCommandsManifest();
 
 // --- init ---
 

@@ -303,6 +303,44 @@ export class AgentManager {
     }));
   }
 
+  /** Slash commands registered by pi extensions (via `pi.registerCommand`).
+   *
+   *  Pulled from any currently-running agent's internal `_extensionRunner`.
+   *  Pi's extension model registers commands per-runner, but every running
+   *  agent's runner loads from the same shared ResourceLoader, so they all
+   *  hold identical command sets — any one is canonical.
+   *
+   *  Returns an empty list when no agent is running (or no extension has
+   *  registered a command yet). In that case the dashboard simply won't
+   *  autocomplete extension commands; users can still type them and pi's
+   *  command handler dispatches them server-side via `session.prompt()`.
+   *  We reach into the private `_extensionRunner` field deliberately — pi
+   *  doesn't expose this on its public AgentSession surface, but pirouette
+   *  already reaches into private fields elsewhere (e.g. `setModel`,
+   *  `getSessionStats`) for the same dashboard wiring. */
+  getExtensionCommands(): Array<{ name: string; description: string }> {
+    for (const handle of this.handles.values()) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const runner = (handle.session as any)._extensionRunner;
+      if (!runner || typeof runner.getRegisteredCommands !== "function") continue;
+      try {
+        const commands = runner.getRegisteredCommands() as Array<{
+          invocationName: string;
+          description?: string;
+        }>;
+        return commands.map((c) => ({
+          name: c.invocationName,
+          description: c.description ?? "",
+        }));
+      } catch {
+        // try the next handle; one runner's bad shouldn't poison the
+        // whole list (also belt-and-suspenders against pi internals
+        // changing under us).
+      }
+    }
+    return [];
+  }
+
   /** Live stats pulled from the pi session, matching the data pi's TUI
    *  footer shows: cumulative tokens, cost, context usage (% of window),
    *  model, thinking level, and compaction-aware status. Returns null if

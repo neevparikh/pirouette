@@ -303,6 +303,18 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
       return;
     }
 
+    // List slash commands registered by pi extensions (via
+    // `pi.registerCommand`). Powers the dashboard's slash-command
+    // autocomplete for things like `/cas-fast`, `/cas-okta` etc.
+    // Returns an empty list when no agent is running -- see
+    // `AgentManager.getExtensionCommands()` for why. Unknown slash
+    // commands still dispatch correctly when typed; this endpoint only
+    // affects autocomplete.
+    if (method === "GET" && pathname === "/api/commands") {
+      json(res, 200, { commands: agentManager.getExtensionCommands() });
+      return;
+    }
+
     if (method === "GET" && pathname === "/api/agents") {
       const agents = agentManager.getAllAgents().map((a) => ({
         ...a,
