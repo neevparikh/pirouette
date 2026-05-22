@@ -1,4 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 import {
   describeToolCall,
   describeToolResult,
@@ -177,6 +180,25 @@ describe("renderDiff", () => {
   it("handles empty lines with nbsp", () => {
     const html = renderDiff("", "");
     expect(html).toContain("&nbsp;");
+  });
+  it("preserves leading indentation in emitted HTML", () => {
+    // Regression test: the diff renderer must emit leading whitespace
+    // verbatim so the `white-space: pre-wrap` rule on .diff-line can
+    // render indentation in the browser. If escHtml or the template
+    // ever starts trimming, this catches it.
+    const html = renderDiff("    indented_old()", "\tindented_new()");
+    expect(html).toContain("-     indented_old()");
+    expect(html).toContain("+ \tindented_new()");
+  });
+  it("has matching CSS that preserves whitespace on .diff-line", () => {
+    // The HTML output above only renders indentation in the browser if
+    // index.html declares a whitespace-preserving rule on .diff-line.
+    // Pin that here so a stylesheet edit that drops it fails loudly.
+    const here = dirname(fileURLToPath(import.meta.url));
+    const indexHtml = readFileSync(resolve(here, "../index.html"), "utf8");
+    expect(indexHtml).toMatch(
+      /\.diff-line\s*\{[^}]*white-space:\s*pre(?:-wrap)?\b/,
+    );
   });
 });
 

@@ -5,6 +5,27 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.13.16 — preserve indentation in tool-call edit diffs
+
+### Fixed
+
+- Diff view for Edit tool calls in the web dashboard collapsed
+  leading whitespace and tabs, so indentation in the `-`/`+`
+  lines was invisible. The diff renderer emits each line inside
+  a `<span class="diff-line">`, but the stylesheet did not set a
+  whitespace-preserving rule, so the browser collapsed runs of
+  spaces and dropped tabs. Added `white-space: pre-wrap` to
+  `.diff-line` so indentation renders verbatim while long lines
+  still wrap inside the message bubble.
+- Added regression tests: one pins the HTML side (renderDiff must
+  emit leading spaces/tabs verbatim), one pins the CSS side (the
+  `.diff-line` rule must keep `white-space: pre` or `pre-wrap`),
+  so a future edit that drops either half fails loudly.
+
+239 tests pass.
+
+---
+
 ## 0.13.15 — vim label centered on the input border; drop drawer hairlines
 
 ### Changed
