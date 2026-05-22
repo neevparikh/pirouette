@@ -501,22 +501,40 @@ export class AgentManager {
       const config = this.getAgent(id);
       if (!config) throw new Error(`Agent ${id} not found`);
 
-      // Update persisted state first so resumes use the new level. Then
-      // mutate the live session if any -- pi's setThinkingLevel is
-      // synchronous and doesn't validate against the model (high-level
-      // semantics live in the provider; an unsupported level is a
-      // no-op there).
-      this.stateManager.updateAgentState(id, { thinkingLevel: level });
-      config.thinkingLevel = level;
-
+      // Apply to the live session first (if any). Pi's `setThinkingLevel`
+      // consults `getAvailableThinkingLevels()` for the current model and
+      // CLAMPS the request to the nearest supported level (e.g. "xhigh"
+      // becomes "high" on a model whose provider didn't declare a
+      // `thinkingLevelMap` entry for "xhigh"). The clamp is silent.
+      //
+      // Persist whatever pi actually accepted, not what the user asked
+      // for. Otherwise the footer's left column shows the requested
+      // level (read from our persisted state) while the right column
+      // shows the live session level (clamped) -- and they disagree.
+      // See provider-side fix: pi-cas-provider commit propagating
+      // `thinkingLevelMap`; the same fix landed in pi-hawk-provider
+      // earlier. This branch defends in depth against any future
+      // provider that legitimately doesn't support the requested level.
       const handle = this.handles.get(id);
+      let effectiveLevel = level;
       if (handle) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (handle.session as any).setThinkingLevel(level);
-        console.log(`[agent-manager] live setThinkingLevel ${id} -> ${level}`);
+        const session = handle.session as any;
+        session.setThinkingLevel(level);
+        const readback = session.thinkingLevel ?? session.agent?.state?.thinkingLevel;
+        if (typeof readback === "string" && readback !== level) {
+          console.log(
+            `[agent-manager] live setThinkingLevel ${id}: requested ${level}, model accepted ${readback} (clamped)`,
+          );
+          effectiveLevel = readback as typeof level;
+        } else {
+          console.log(`[agent-manager] live setThinkingLevel ${id} -> ${level}`);
+        }
       } else {
         console.log(`[agent-manager] config-only setThinkingLevel ${id} -> ${level} (no live session)`);
       }
+      this.stateManager.updateAgentState(id, { thinkingLevel: effectiveLevel });
+      config.thinkingLevel = effectiveLevel;
 
       // Same lightweight rerender broadcast as setAgentModel.
       this.emitStateChange(id, config.state);
