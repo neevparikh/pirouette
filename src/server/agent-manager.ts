@@ -25,6 +25,11 @@ import { ProjectManager } from "./project-manager.js";
 import { StateManager } from "./state.js";
 import { normalizeEvent } from "./normalize.js";
 import {
+  createPirouetteUIContext,
+  type PendingUIRequest,
+  type UIContextHost,
+} from "./pirouette-ui-context.js";
+import {
   DEFAULT_PROJECT_NAME,
   emptyUsage,
   type AgentConfig,
@@ -32,7 +37,9 @@ import {
   type ChatImage,
   type ChatMessage,
   type DeleteAgentOptions,
+  type ExtensionUIRequest,
   type NormalizedEvent,
+  type WsEnvelope,
 } from "./types.js";
 
 /** Pull image content blocks out of a pi message's content array, formatted
@@ -68,16 +75,28 @@ export interface AgentHandle {
 
 export type AgentEventCallback = (agentId: string, event: NormalizedEvent) => void;
 export type AgentStateCallback = (agentId: string, state: AgentState) => void;
+/** Sink for envelopes the AgentManager wants broadcast to all WS clients.
+ *  Wired by the server (`runServer()` passes its `broadcast(envelope)`).
+ *  Keeps AgentManager free of any direct WebSocket import. */
+export type WsBroadcastCallback = (envelope: WsEnvelope) => void;
 
 export class AgentManager {
   private handles = new Map<string, AgentHandle>();
   private eventListeners: AgentEventCallback[] = [];
   private stateListeners: AgentStateCallback[] = [];
+  private wsBroadcastCallbacks: WsBroadcastCallback[] = [];
 
   /** Per-agent operation queue. Every create/resume/stop/send/remove for a
    *  given agent runs through `withAgentLock(id, ...)` to prevent races
    *  (e.g. sendMessage arriving mid-resume, double-stop, etc). */
   private agentLocks = new Map<string, Promise<unknown>>();
+
+  /** Pending ExtensionUIContext requests waiting on a browser response.
+   *  Keyed by requestId (unique across all agents). Entries are added by
+   *  createPirouetteUIContext's host hook and removed when the user
+   *  answers, the request is cancelled (by AbortSignal / agent stop /
+   *  server shutdown), or another client wins the race. */
+  private pendingUIRequests = new Map<string, PendingUIRequest>();
 
   private authStorage: ReturnType<typeof AuthStorage.create>;
   private modelRegistry: ReturnType<typeof ModelRegistry.create>;
@@ -219,12 +238,137 @@ export class AgentManager {
     this.stateListeners.push(cb);
   }
 
+  /** Register a sink for WS envelopes the AgentManager wants broadcast to
+   *  all clients (today: extension UI request/cancel/notify/status from
+   *  bound extensions). The server wires its `broadcast(envelope)` here so
+   *  pirouette-ui-context.ts can dispatch without importing `ws`. */
+  onWsBroadcast(cb: WsBroadcastCallback): void {
+    this.wsBroadcastCallbacks.push(cb);
+  }
+
   private emitEvent(agentId: string, event: NormalizedEvent): void {
     for (const cb of this.eventListeners) cb(agentId, event);
   }
 
   private emitStateChange(agentId: string, state: AgentState): void {
     for (const cb of this.stateListeners) cb(agentId, state);
+  }
+
+  private broadcastWs(envelope: WsEnvelope): void {
+    for (const cb of this.wsBroadcastCallbacks) cb(envelope);
+  }
+
+  // --- ExtensionUIContext bridge ------------------------------------------
+  //
+  // See pirouette-ui-context.ts for the flow. AgentManager owns the
+  // pendingUIRequests map and provides:
+  //   - a UIContextHost interface to the per-agent UI context (closes
+  //     over `agentId`, calls `registerRequest` / `broadcast`)
+  //   - inbound resolve/cancel methods called by the server's WS message
+  //     handler when a browser posts back
+  //   - snapshot for replay-on-reconnect so new WS clients see any
+  //     in-flight request immediately
+  //   - bulk-cancel hooks called from agent stop / server shutdown so a
+  //     dying agent doesn't leave a Promise hanging forever inside the
+  //     SDK's canUseTool callback.
+
+  private uiContextHostFor(agentId: string): UIContextHost {
+    return {
+      registerRequest: (entry) => {
+        this.pendingUIRequests.set(entry.request.requestId, entry);
+        this.broadcastWs({
+          kind: "extension_ui_request",
+          agentId: entry.agentId,
+          request: entry.request,
+        });
+      },
+      broadcast: (envelope) => this.broadcastWs(envelope),
+      newRequestId: () => randomUUID(),
+    };
+  }
+
+  /** Browser posted back an answer. Resolves the awaiting Promise and
+   *  broadcasts a cancel so any other open client tab closes its modal.
+   *  Idempotent — no-op if the entry's already been settled (race with
+   *  AbortSignal or another tab winning). */
+  resolveUIResponse(
+    agentId: string,
+    requestId: string,
+    value: string | string[] | boolean,
+  ): void {
+    const entry = this.pendingUIRequests.get(requestId);
+    if (!entry) return;
+    if (entry.agentId !== agentId) {
+      // Defensive: requestIds are server-minted so this shouldn't happen
+      // unless a client posts back a forged envelope. Drop it.
+      console.warn(
+        `[agent-manager] extension_ui_response agentId mismatch: ` +
+          `pending=${entry.agentId} got=${agentId}`,
+      );
+      return;
+    }
+    this.pendingUIRequests.delete(requestId);
+    this.broadcastWs({ kind: "extension_ui_cancel", agentId, requestId });
+    entry.resolve(value);
+  }
+
+  /** Browser explicitly cancelled (escape / close button). Same shape as
+   *  the AbortSignal path: degrade to undefined/false per dialog flavor
+   *  (the UI context wrapper does the translation). */
+  cancelUIRequest(agentId: string, requestId: string, reason = "client cancelled"): void {
+    const entry = this.pendingUIRequests.get(requestId);
+    if (!entry) return;
+    if (entry.agentId !== agentId) {
+      console.warn(
+        `[agent-manager] extension_ui_cancel agentId mismatch: ` +
+          `pending=${entry.agentId} got=${agentId}`,
+      );
+      return;
+    }
+    this.pendingUIRequests.delete(requestId);
+    this.broadcastWs({ kind: "extension_ui_cancel", agentId, requestId });
+    entry.resolve(undefined);
+    void reason; // captured for future logging
+  }
+
+  /** Snapshot the still-open requests for an agent. Used by the server on
+   *  new WS connections to replay in-flight prompts to a (re)joining
+   *  client so a refresh / zero-clients-at-fire doesn't strand the
+   *  agent. */
+  snapshotPendingForAgent(agentId: string): ExtensionUIRequest[] {
+    const out: ExtensionUIRequest[] = [];
+    for (const entry of this.pendingUIRequests.values()) {
+      if (entry.agentId === agentId) out.push(entry.request);
+    }
+    return out;
+  }
+
+  /** All in-flight requests across all agents — used for the initial
+   *  snapshot on a brand-new WS connection. */
+  snapshotAllPending(): Array<{ agentId: string; request: ExtensionUIRequest }> {
+    return [...this.pendingUIRequests.values()].map((entry) => ({
+      agentId: entry.agentId,
+      request: entry.request,
+    }));
+  }
+
+  /** Reject every pending request for an agent. Called from stopAgent /
+   *  removeAgent so the SDK's canUseTool Promise unblocks (with the
+   *  cancel sentinel) instead of hanging forever. */
+  private cancelAllUIRequestsForAgent(agentId: string, reason: string): void {
+    const matching = [...this.pendingUIRequests.entries()].filter(
+      ([, e]) => e.agentId === agentId,
+    );
+    for (const [requestId, entry] of matching) {
+      this.pendingUIRequests.delete(requestId);
+      this.broadcastWs({ kind: "extension_ui_cancel", agentId, requestId });
+      entry.resolve(undefined);
+    }
+    if (matching.length > 0) {
+      console.log(
+        `[agent-manager] cancelled ${matching.length} pending UI request(s) for ${agentId} (${reason})`,
+      );
+    }
   }
 
   private sessionsDir(): string {
@@ -1114,6 +1258,10 @@ export class AgentManager {
         handle.session.dispose();
         this.handles.delete(id);
       }
+      // Cancel any pending extension UI requests for this agent so the
+      // SDK's canUseTool Promise unblocks (degrading to the cancel
+      // sentinel) instead of hanging on a session that's gone.
+      this.cancelAllUIRequestsForAgent(id, "agent stopped");
       this.setAgentState(id, "stopped");
     });
   }
@@ -1389,6 +1537,25 @@ export class AgentManager {
       model,
       thinkingLevel,
     });
+
+    // Plug in pirouette's ExtensionUIContext so extensions that call
+    // ctx.ui.select / .confirm / .input (notably pi-cas-provider's
+    // AskUserQuestion bridge) reach the browser via WS instead of
+    // hitting the SDK's noOpUIContext and bailing as "no-ui-available".
+    // bindExtensions is safe to call after createAgentSession — it
+    // (re)assigns the runner's UI slot and re-emits session_start to
+    // extensions. See dist/core/agent-session.js:1610 bindExtensions.
+    try {
+      await session.bindExtensions({
+        uiContext: createPirouetteUIContext(config.id, this.uiContextHostFor(config.id)),
+      });
+    } catch (err) {
+      // Non-fatal: bindExtensions failing means UI primitives stay no-op,
+      // which matches the pre-fix behavior. Log so we can debug.
+      console.error(
+        `[agent-manager] bindExtensions failed for ${config.name}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
 
     console.log(`[agent-manager] session created for ${config.name}: file=${session.sessionFile ?? "(none)"} model=${session.model?.id ?? "unknown"}`);
     if (modelFallbackMessage) {

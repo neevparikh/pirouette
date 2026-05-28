@@ -108,6 +108,19 @@ const $thinkingBtn = document.getElementById("agent-thinking-btn");
 const $thinkingPicker = document.getElementById("thinking-picker");
 const $thinkingList = document.getElementById("thinking-list");
 
+// --- extension UI modal (AskUserQuestion etc.) ---
+//
+// Routed from server-side ExtensionUIContext primitives over WS. See
+// src/server/pirouette-ui-context.ts and the extension_ui_request case
+// in handleWsMessage(). One modal at a time, per-agent queue.
+const $extUiModal = document.getElementById("extension-ui-modal");
+const $extUiTitle = document.getElementById("ext-ui-title");
+const $extUiAgentLabel = document.getElementById("ext-ui-agent-label");
+const $extUiMessage = document.getElementById("ext-ui-message");
+const $extUiBody = document.getElementById("ext-ui-body");
+const $extUiCancel = document.getElementById("ext-ui-cancel");
+const $extUiSubmit = document.getElementById("ext-ui-submit");
+
 // --- vim mode ---
 //
 // VimMode is a small modal-editing layer that wraps the textarea. When
@@ -306,6 +319,266 @@ function shouldFireNotification() {
   if (document.visibilityState === "visible" && document.hasFocus()) return false;
   return true;
 }
+
+// --- extension UI requests (AskUserQuestion bridge) ---
+//
+// Server pushes `extension_ui_request` envelopes when a pi extension
+// (today: pi-cas-provider's AskUserQuestion handler) calls
+// ctx.ui.select / .confirm / .input. We maintain a FIFO queue per
+// agent, render the head of the queue for the currently-focused agent
+// in a modal, and post back `extension_ui_response` (submit) or
+// `extension_ui_cancel` (esc/close) over the same WS.
+//
+// Replay-on-reconnect: server re-broadcasts every still-open request
+// when a WS connection joins, so a refresh recovers the modal.
+// Multi-client / first-response-wins: server broadcasts
+// `extension_ui_cancel { requestId }` once any tab answers, so the
+// modal closes elsewhere via dropExtensionUIRequest().
+const extUiQueueByAgent = Object.create(null);
+let extUiActive = null; // { agentId, request } currently rendered, or null
+
+function enqueueExtensionUIRequest(agentId, request) {
+  const queue = (extUiQueueByAgent[agentId] ||= []);
+  // De-dupe: replay-on-reconnect can deliver the same requestId twice
+  // (once on initial connect, once if the server emits another broadcast
+  // mid-session). Drop the dup.
+  if (queue.some((r) => r.requestId === request.requestId)) return;
+  if (extUiActive && extUiActive.request.requestId === request.requestId) return;
+  queue.push(request);
+  // Reflect "needs your attention" in the agent list. Cheap to call
+  // here since renderAgentList re-reads state.
+  renderAgentList();
+  maybeShowNextExtensionUIRequest();
+}
+
+function dropExtensionUIRequest(agentId, requestId) {
+  const queue = extUiQueueByAgent[agentId];
+  if (queue) {
+    extUiQueueByAgent[agentId] = queue.filter((r) => r.requestId !== requestId);
+    if (extUiQueueByAgent[agentId].length === 0) delete extUiQueueByAgent[agentId];
+  }
+  if (extUiActive && extUiActive.request.requestId === requestId) {
+    closeExtensionUIModal();
+    maybeShowNextExtensionUIRequest();
+  }
+  renderAgentList();
+}
+
+function agentHasPendingExtensionUI(agentId) {
+  if (extUiActive && extUiActive.agentId === agentId) return true;
+  const queue = extUiQueueByAgent[agentId];
+  return !!(queue && queue.length > 0);
+}
+
+function maybeShowNextExtensionUIRequest() {
+  if (extUiActive) return;
+  // Prefer the focused agent's queue; if it has nothing, take the head
+  // of any agent's queue (avoids stranding requests forever when the
+  // user is focused on a different agent).
+  let pickAgent = null;
+  let request = null;
+  if (selectedAgentId && extUiQueueByAgent[selectedAgentId]?.length) {
+    pickAgent = selectedAgentId;
+    request = extUiQueueByAgent[selectedAgentId][0];
+  } else {
+    for (const [agentId, queue] of Object.entries(extUiQueueByAgent)) {
+      if (queue.length > 0) {
+        pickAgent = agentId;
+        request = queue[0];
+        break;
+      }
+    }
+  }
+  if (!pickAgent || !request) return;
+  // Pop the head — it's now "active". Cancel/submit handlers move on
+  // to the next via the same maybeShowNext call.
+  extUiQueueByAgent[pickAgent].shift();
+  if (extUiQueueByAgent[pickAgent].length === 0) delete extUiQueueByAgent[pickAgent];
+  // Pull focus to the asking agent so the user has context for the
+  // question. selectAgent is async (fetches history); we fire and
+  // forget — the modal renders independently.
+  if (pickAgent !== selectedAgentId) void selectAgent(pickAgent);
+  extUiActive = { agentId: pickAgent, request };
+  renderExtensionUIModal();
+}
+
+function renderExtensionUIModal() {
+  if (!extUiActive) return;
+  const { agentId, request } = extUiActive;
+  const agent = agents.find((a) => a.id === agentId);
+  $extUiTitle.textContent = request.title || "question";
+  $extUiAgentLabel.textContent = agent ? `agent: ${agent.name}` : `agent: ${agentId}`;
+  $extUiBody.innerHTML = "";
+  $extUiMessage.classList.add("hidden");
+
+  let getValue;
+  if (request.method === "select") {
+    const multi = !!request.multi;
+    const inputType = multi ? "checkbox" : "radio";
+    const groupName = `ext-ui-opt-${request.requestId}`;
+    (request.options ?? []).forEach((opt, i) => {
+      const id = `${groupName}-${i}`;
+      const wrap = document.createElement("label");
+      wrap.className =
+        "flex items-start gap-2 px-2 py-2 rounded-lg hover:bg-base16-100 cursor-pointer";
+      wrap.htmlFor = id;
+      const input = document.createElement("input");
+      input.type = inputType;
+      input.name = groupName;
+      input.value = opt.label;
+      input.id = id;
+      input.className = "mt-1";
+      if (!multi && i === 0) input.checked = true;
+      const text = document.createElement("div");
+      text.className = "text-sm text-base16-700 flex-1 min-w-0";
+      const label = document.createElement("div");
+      label.textContent = opt.label;
+      text.appendChild(label);
+      if (opt.description) {
+        const desc = document.createElement("div");
+        desc.className = "text-[10px] text-base16-500 mt-0.5";
+        desc.textContent = opt.description;
+        text.appendChild(desc);
+      }
+      wrap.appendChild(input);
+      wrap.appendChild(text);
+      $extUiBody.appendChild(wrap);
+    });
+    getValue = () => {
+      const inputs = $extUiBody.querySelectorAll(`input[name="${groupName}"]:checked`);
+      if (multi) return [...inputs].map((el) => el.value);
+      return inputs[0]?.value ?? null;
+    };
+  } else if (request.method === "confirm") {
+    if (request.message) {
+      $extUiMessage.textContent = request.message;
+      $extUiMessage.classList.remove("hidden");
+    }
+    const groupName = `ext-ui-confirm-${request.requestId}`;
+    for (const [label, val, defaultChecked] of [
+      ["yes", true, true],
+      ["no", false, false],
+    ]) {
+      const id = `${groupName}-${label}`;
+      const wrap = document.createElement("label");
+      wrap.className =
+        "flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-base16-100 cursor-pointer";
+      wrap.htmlFor = id;
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = groupName;
+      input.id = id;
+      input.dataset.value = String(val);
+      if (defaultChecked) input.checked = true;
+      const text = document.createElement("span");
+      text.className = "text-sm text-base16-700";
+      text.textContent = label;
+      wrap.appendChild(input);
+      wrap.appendChild(text);
+      $extUiBody.appendChild(wrap);
+    }
+    getValue = () => {
+      const checked = $extUiBody.querySelector(`input[name="${groupName}"]:checked`);
+      return checked ? checked.dataset.value === "true" : false;
+    };
+  } else if (request.method === "input") {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = request.placeholder ?? "";
+    input.className =
+      "w-full bg-base16-100 text-base16-700 border border-base16-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-base16-blue";
+    $extUiBody.appendChild(input);
+    getValue = () => input.value;
+    // Focus the field once the modal is on screen.
+    queueMicrotask(() => input.focus());
+  } else {
+    // Unknown method — close & cancel rather than risk a permanently
+    // stuck modal.
+    console.warn(`[ws] unknown extension UI method: ${request.method}`);
+    sendExtensionUIDecision(false, null);
+    return;
+  }
+  $extUiModal.classList.remove("hidden");
+  if (request.method === "select" || request.method === "confirm") {
+    // For pickers, focus the modal container so Enter / Esc keys work
+    // even before the user clicks an option.
+    queueMicrotask(() => $extUiSubmit.focus());
+  }
+
+  // Wire single-shot handlers; replace on every render so stale state
+  // from a previous request can't fire.
+  $extUiSubmit.onclick = () => sendExtensionUIDecision(true, getValue());
+  $extUiCancel.onclick = () => sendExtensionUIDecision(false, null);
+}
+
+function sendExtensionUIDecision(submit, value) {
+  if (!extUiActive) return;
+  const { agentId, request } = extUiActive;
+  if (submit) {
+    // Reject obvious "no choice" cases (e.g. select with nothing
+    // checked) by routing them through cancel — keeps the server's
+    // contract clean.
+    const empty =
+      value === null ||
+      value === undefined ||
+      (Array.isArray(value) && value.length === 0);
+    if (empty && request.method === "select") {
+      submit = false;
+    }
+  }
+  const envelope = submit
+    ? {
+        kind: "extension_ui_response",
+        agentId,
+        requestId: request.requestId,
+        value,
+      }
+    : { kind: "extension_ui_cancel", agentId, requestId: request.requestId };
+  try {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(envelope));
+    } else {
+      console.warn("[ws] cannot send extension UI decision: socket closed");
+    }
+  } catch (err) {
+    console.error("[ws] failed to send extension UI decision", err);
+  }
+  closeExtensionUIModal();
+  // The server will broadcast its own extension_ui_cancel in response,
+  // which is a no-op when the modal's already closed. Move on to the
+  // next queued request, if any.
+  maybeShowNextExtensionUIRequest();
+}
+
+function closeExtensionUIModal() {
+  extUiActive = null;
+  $extUiModal.classList.add("hidden");
+  $extUiSubmit.onclick = null;
+  $extUiCancel.onclick = null;
+  $extUiBody.innerHTML = "";
+  $extUiMessage.classList.add("hidden");
+}
+
+// Esc / Enter inside the modal. Capture-phase so it beats the editor's
+// own keydown wiring.
+document.addEventListener(
+  "keydown",
+  (e) => {
+    if ($extUiModal.classList.contains("hidden")) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      sendExtensionUIDecision(false, null);
+    } else if (e.key === "Enter" && !e.shiftKey) {
+      // Enter submits unless the focus is inside a text input that
+      // wants a real newline — but our input flavor uses a single-line
+      // <input>, where Enter naturally submits the form. Safe to
+      // intercept.
+      e.preventDefault();
+      $extUiSubmit.click();
+    }
+  },
+  true,
+);
 
 function maybeNotifyStateChange(agent, prevState, newState) {
   // Only the meaningful transitions. Filter out boot/startup runs of
@@ -849,6 +1122,34 @@ function handleWsMessage(envelope) {
       handleAgentEvent(envelope.agentId, envelope.event);
       break;
 
+    case "extension_ui_request":
+      enqueueExtensionUIRequest(envelope.agentId, envelope.request);
+      break;
+
+    case "extension_ui_cancel":
+      // Server told us this request is no longer active (another tab
+      // answered, AbortSignal fired, or the agent was stopped). Drop it
+      // from the queue and close the modal if it's the one on screen.
+      dropExtensionUIRequest(envelope.agentId, envelope.requestId);
+      break;
+
+    case "extension_ui_notify":
+      // Fire-and-forget toast from an extension. We don't have a toast
+      // system yet — log to console for now so we don't drop the signal.
+      console.log(
+        `[extension:${envelope.agentId}] ${envelope.notifyType ?? "info"}: ${envelope.message}`,
+      );
+      break;
+
+    case "extension_ui_status":
+      // Per-agent persistent status (footer/header badge). Not yet
+      // wired into a UI slot; logged so the data isn't lost during
+      // development. TODO: surface in agent header.
+      console.log(
+        `[extension:${envelope.agentId}] status[${envelope.statusKey}]=${envelope.statusText ?? "(cleared)"}`,
+      );
+      break;
+
     case "error":
       console.error("[server]", envelope.message);
       break;
@@ -1061,15 +1362,19 @@ function renderAgentRow(a, _depth = 0) {
   const activeClass = isActive
     ? "bg-base16-cyan/10 text-base16-cyan font-semibold"
     : "text-base16-600 hover:bg-base16-300/40";
+  // "?" glyph: an extension fired AskUserQuestion (or similar) for this
+  // agent and is waiting for the user to answer. Pulses to draw the eye.
+  const needsAnswer = agentHasPendingExtensionUI(a.id);
   return `
     <button
       class="flex items-center gap-1.5 px-2 py-1 rounded ${activeClass} cursor-pointer text-sm whitespace-nowrap font-mono"
       data-agent-id="${a.id}"
-      title="${escHtml(titleParts.join(" — "))}"
+      title="${escHtml(titleParts.join(" — ") + (needsAnswer ? " — waiting on you" : ""))}"
     >
       <span class="w-2 h-2 rounded-full flex-none ${dot}"></span>
       ${a.parentAgentId ? '<span class="text-base16-500 text-xs">↳</span>' : ""}
       <span class="truncate">${escHtml(a.name)}</span>
+      ${needsAnswer ? '<span class="text-base16-yellow text-xs pulse-dot">?</span>' : ""}
     </button>
   `;
 }

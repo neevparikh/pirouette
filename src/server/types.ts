@@ -99,7 +99,7 @@ export interface ProjectConfig {
 /** Name of the auto-created project used when the user doesn't specify one. */
 export const DEFAULT_PROJECT_NAME = "scratchpad";
 
-/** Envelope sent over WebSocket to clients. */
+/** Envelope sent over WebSocket to clients (server → client). */
 export type WsEnvelope =
   | { kind: "agent_event"; agentId: string; event: NormalizedEvent }
   | { kind: "agent_state_change"; agentId: string; state: AgentState }
@@ -110,7 +110,76 @@ export type WsEnvelope =
   | { kind: "projects_list"; projects: ProjectConfig[] }
   | { kind: "project_created"; project: ProjectConfig }
   | { kind: "project_removed"; projectName: string }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string }
+  /** A pi extension (most notably pi-cas-provider's AskUserQuestion bridge)
+   *  asked the host UI to prompt the user. The client renders a modal and
+   *  posts back an extension_ui_response (or extension_ui_cancel). Servers
+   *  re-broadcast all pending requests to newly-connected clients so a
+   *  refresh or zero-clients-at-fire-time doesn't strand the agent. */
+  | { kind: "extension_ui_request"; agentId: string; request: ExtensionUIRequest }
+  /** Server tells clients to close a previously-broadcast request modal —
+   *  either because another client already answered (first-response-wins)
+   *  or because the underlying tool was cancelled (AbortSignal). */
+  | { kind: "extension_ui_cancel"; agentId: string; requestId: string }
+  /** Fire-and-forget notification surfaced from an extension. Maps to
+   *  ExtensionUIContext.notify(). */
+  | {
+      kind: "extension_ui_notify";
+      agentId: string;
+      message: string;
+      notifyType?: "info" | "warning" | "error";
+    }
+  /** Persistent status line set by an extension (e.g. badge in the agent
+   *  header). `text === null` clears the slot. Maps to setStatus(). */
+  | {
+      kind: "extension_ui_status";
+      agentId: string;
+      statusKey: string;
+      statusText: string | null;
+    };
+
+/** Envelope sent over WebSocket from a client to the server. Kept separate
+ *  from WsEnvelope so the server can validate the smaller, narrower union
+ *  on the inbound path. */
+export type ClientWsEnvelope =
+  | {
+      kind: "extension_ui_response";
+      agentId: string;
+      requestId: string;
+      /** The user's answer. Shape depends on the originating request method:
+       *    - select (single):   string  (chosen label)
+       *    - select (multi):    string[] (chosen labels)
+       *    - confirm:           boolean
+       *    - input:             string
+       *  Server is responsible for matching shape against the pending
+       *  request's method. */
+      value: string | string[] | boolean;
+    }
+  | { kind: "extension_ui_cancel"; agentId: string; requestId: string };
+
+/** Payload describing an extension's prompt-the-user request. The
+ *  discriminant is `method`. Pi's ExtensionUIContext has more methods
+ *  (`custom`, `editor`, etc.) but those are TUI-only and not surfaced here. */
+export type ExtensionUIRequest =
+  | {
+      requestId: string;
+      method: "select";
+      title: string;
+      options: Array<{ label: string; description?: string }>;
+      multi?: boolean;
+    }
+  | {
+      requestId: string;
+      method: "confirm";
+      title: string;
+      message?: string;
+    }
+  | {
+      requestId: string;
+      method: "input";
+      title: string;
+      placeholder?: string;
+    };
 
 export interface NormalizedEvent {
   type: string;

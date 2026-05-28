@@ -1027,6 +1027,36 @@
       </footer>
     </main>
 
+    <!-- Extension UI modal (AskUserQuestion etc. routed from pi-cas-provider) -->
+    <div
+      id="extension-ui-modal"
+      class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+    >
+      <div class="bg-base16-200 border border-base16-300 rounded-xl p-6 w-full max-w-md shadow-xl">
+        <div class="flex items-center justify-between mb-2">
+          <h2 id="ext-ui-title" class="text-base16-600 font-bold truncate">question</h2>
+          <span id="ext-ui-agent-label" class="text-[10px] text-base16-500 ml-2 truncate"></span>
+        </div>
+        <p id="ext-ui-message" class="text-xs text-base16-500 mb-3 hidden"></p>
+        <div id="ext-ui-body" class="mb-4 max-h-72 overflow-y-auto"></div>
+        <div class="flex gap-2 justify-end">
+          <button
+            id="ext-ui-cancel"
+            class="px-4 py-2 rounded-lg text-base16-500 hover:text-base16-600 cursor-pointer text-sm"
+          >
+            cancel
+          </button>
+          <button
+            id="ext-ui-submit"
+            class="px-4 py-2 rounded-lg bg-base16-blue/20 text-base16-blue hover:bg-base16-blue/30 cursor-pointer text-sm"
+          >
+            submit
+          </button>
+        </div>
+        <p class="mt-2 text-[10px] text-base16-500">enter to submit · esc to cancel</p>
+      </div>
+    </div>
+
     <!-- New-project modal -->
     <div id="new-project-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div class="bg-base16-200 border border-base16-300 rounded-xl p-6 w-full max-w-sm md:w-96 shadow-xl">

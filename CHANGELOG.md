@@ -5,6 +5,72 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.14.0 — bridge `AskUserQuestion` (and other extension UI prompts) to the web dashboard
+
+### Added
+
+- Pirouette now hosts a real `ExtensionUIContext` for every agent
+  session, so pi extensions that prompt the user (most prominently
+  `pi-cas-provider`'s `AskUserQuestion` handler) reach the browser
+  instead of silently being denied. Before this release, the SDK
+  fell back to `noOpUIContext`, `ctx.hasUI` was `false`, and
+  extensions short-circuited with a `"no-ui-available"` deny — the
+  model just saw `"User declined to answer questions"` and no
+  picker ever appeared.
+- New `createPirouetteUIContext(agentId, host)` in
+  `src/server/pirouette-ui-context.ts` implements `select`,
+  `confirm`, `input`, `notify`, and `setStatus` on top of a small
+  `UIContextHost` surface. `AgentManager` wires it via
+  `session.bindExtensions(...)` and owns the pending-request map.
+  TUI-only primitives (`custom`, `editor`, `setFooter`, etc.) stub
+  out — `custom` returns `undefined` synchronously, which is the
+  signal pi-cas uses to fall back to `ctx.ui.select`.
+- New web-side modal in `src/web/index.html` + `src/web/app.js`
+  renders inbound `extension_ui_request` envelopes: radios for
+  single-select, checkboxes for multi-select, yes/no for confirm,
+  and a text input for `input`. Enter submits, Esc cancels. A
+  pulsing `?` badge appears on the asking agent's chip in the
+  footer when a question is on screen for a non-focused agent.
+- Replay-on-reconnect: the server snapshots all in-flight requests
+  on every new WS connection and re-broadcasts them, so a refresh
+  — or the case where the user has zero browsers open at the
+  instant an extension fires `AskUserQuestion` — recovers the
+  modal automatically. No server-side timeout (users genuinely
+  walk away for hours).
+- Multi-client = broadcast + first-response-wins: when one tab
+  answers, the server broadcasts an `extension_ui_cancel
+  { requestId }` so any other open tab closes its modal.
+
+### Changed
+
+- `WsEnvelope` (in `src/server/types.ts`) gained four server→client
+  variants (`extension_ui_request`, `extension_ui_cancel`,
+  `extension_ui_notify`, `extension_ui_status`). New
+  `ClientWsEnvelope` union covers client→server messages
+  (`extension_ui_response`, `extension_ui_cancel`), validated and
+  size-capped on the server's new `ws.on("message")` handler.
+- `AgentManager` cancels every pending extension UI request for an
+  agent on `stopAgent` / `removeAgent`, so the SDK's `canUseTool`
+  Promise unblocks with the cancel sentinel instead of hanging
+  forever on a session that's gone. `AbortSignal` from the per-
+  tool callback wires to the same path.
+
+### Coordinated change in pi-cas-provider
+
+This release works in concert with `pi-cas-provider` v0.2.0, which
+adds a portable `ctx.ui.select`-based fallback path to
+`askUserQuestionDialog` so it degrades cleanly from `ui.custom`
+(pi-tui) to `ui.select` on hosts that don't render a TUI overlay.
+Pirouette v0.14.0 with an older pi-cas still won't surface the
+modal; pi-cas v0.2.0+ with an older pirouette is unaffected (the
+TUI path is preserved exactly — see `pi-cas-provider`'s release
+notes for details). Recommend upgrading both together.
+
+258 tests pass (added 19: 11 for `pirouette-ui-context`, 8 for
+`AgentManager`'s pending-request lifecycle).
+
+---
+
 ## 0.13.16 — preserve indentation in tool-call edit diffs
 
 ### Fixed

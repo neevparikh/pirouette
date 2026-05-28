@@ -111,6 +111,15 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
     broadcast({ kind: "agent_state_change", agentId, state });
   });
 
+  // Bridge AgentManager → WS for envelopes that don't originate as
+  // agent events: extension UI requests/cancels/notifies/statuses from
+  // bound extensions (pirouette-ui-context.ts). Keeping the broadcast
+  // sink one-way (AgentManager owns the pending-request map; the server
+  // owns the socket set) keeps the dependency graph clean.
+  agentManager.onWsBroadcast((envelope) => {
+    broadcast(envelope);
+  });
+
   function broadcast(envelope: WsEnvelope): void {
     const payload = JSON.stringify(envelope);
     for (const ws of wsClients) {
@@ -924,6 +933,92 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
         projects: projectManager.getAllProjects(),
       } satisfies WsEnvelope),
     );
+
+    // Replay any pending extension UI requests to the joining client so
+    // a refresh — or the case where the user has 0 browsers open at the
+    // instant an extension fires AskUserQuestion — recovers cleanly. The
+    // model stays blocked inside canUseTool until *somebody* answers
+    // (intentional; users do walk away for hours), so replaying on
+    // reconnect is the right recovery story. First-response-wins still
+    // applies across multiple tabs.
+    for (const pending of agentManager.snapshotAllPending()) {
+      ws.send(
+        JSON.stringify({
+          kind: "extension_ui_request",
+          agentId: pending.agentId,
+          request: pending.request,
+        } satisfies WsEnvelope),
+      );
+    }
+
+    ws.on("message", (raw) => {
+      // We accept very small JSON payloads — the only inbound kinds are
+      // user dialog answers. Cap the body size defensively so a hostile
+      // client can't memory-bomb us, and ignore anything that isn't a
+      // well-formed envelope. (The WS upgrade itself is already
+      // origin-gated; this is defense in depth.)
+      let text: string;
+      if (typeof raw === "string") {
+        text = raw;
+      } else if (Buffer.isBuffer(raw)) {
+        text = raw.toString("utf8");
+      } else if (Array.isArray(raw)) {
+        text = Buffer.concat(raw as Buffer[]).toString("utf8");
+      } else {
+        text = String(raw);
+      }
+      if (text.length > 64 * 1024) {
+        console.warn(`[ws] dropping oversize client message (${text.length} bytes)`);
+        return;
+      }
+      let env: unknown;
+      try {
+        env = JSON.parse(text);
+      } catch {
+        console.warn(`[ws] dropping non-JSON client message`);
+        return;
+      }
+      if (!env || typeof env !== "object" || !("kind" in env)) {
+        console.warn(`[ws] dropping client message with no 'kind'`);
+        return;
+      }
+      const kind = (env as { kind?: unknown }).kind;
+      if (kind === "extension_ui_response") {
+        const e = env as { agentId?: unknown; requestId?: unknown; value?: unknown };
+        if (typeof e.agentId !== "string" || typeof e.requestId !== "string") {
+          console.warn(`[ws] dropping extension_ui_response: bad agentId/requestId`);
+          return;
+        }
+        // Coerce value into the documented shape per dialog method.
+        // The AgentManager re-validates against the pending entry; here
+        // we just reject obvious garbage (objects with nested fields).
+        const v = e.value;
+        const valueOk =
+          typeof v === "string" ||
+          typeof v === "boolean" ||
+          (Array.isArray(v) && v.every((x) => typeof x === "string"));
+        if (!valueOk) {
+          console.warn(`[ws] dropping extension_ui_response: value type unexpected`);
+          return;
+        }
+        agentManager.resolveUIResponse(
+          e.agentId,
+          e.requestId,
+          v as string | string[] | boolean,
+        );
+        return;
+      }
+      if (kind === "extension_ui_cancel") {
+        const e = env as { agentId?: unknown; requestId?: unknown };
+        if (typeof e.agentId !== "string" || typeof e.requestId !== "string") {
+          console.warn(`[ws] dropping extension_ui_cancel: bad agentId/requestId`);
+          return;
+        }
+        agentManager.cancelUIRequest(e.agentId, e.requestId, "client cancelled via WS");
+        return;
+      }
+      console.warn(`[ws] dropping client message with unknown kind: ${String(kind)}`);
+    });
 
     ws.on("close", () => {
       wsClients.delete(ws);
