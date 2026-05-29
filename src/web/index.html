@@ -1008,9 +1008,20 @@
            Mirrors pi-cli's bottom strip; v0.13.6 had a separate stats
            row that the user wanted folded into the identity row. -->
       <footer id="agent-footer" class="flex-none bg-base16-200/40 px-3 md:px-6 py-1.5 flex flex-col gap-1">
-        <!-- Row 1: agent chips + new-project button -->
-        <div class="flex items-stretch gap-3 min-w-0 overflow-x-auto">
-          <div id="agent-list" class="flex items-stretch gap-3 flex-1 min-w-0">
+        <!-- Row 1: agent chips (left, scrolls horizontally when full) +
+             new-project button (right, always pinned visible).
+
+             The horizontal scroll lives on `#agent-list` itself, NOT
+             the outer wrapper. Earlier, `overflow-x-auto` was on the
+             outer wrapper so the button was inside the scroll area;
+             `#agent-list`'s `flex-none` project sections then visually
+             overflowed past the agent-list box (it has `min-w-0` and
+             no overflow of its own) and overlapped the button sitting
+             to its right in the same flex row. Confining the scroll
+             to `#agent-list` keeps the button as an outside sibling
+             that always renders at its natural width on the right. -->
+        <div class="flex items-stretch gap-3 min-w-0">
+          <div id="agent-list" class="flex items-stretch gap-3 flex-1 min-w-0 overflow-x-auto">
             <div class="text-base16-500 text-sm italic">loading…</div>
           </div>
           <button

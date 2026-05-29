@@ -5,6 +5,29 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.14.2 — keep the "+ new project" button visible when the agent list overflows
+
+### Fixed
+
+- With many agents/projects, the chips in the footer's agent list
+  visually overlapped the "+ new project" button on the right. The
+  outer flex row had `overflow-x-auto` but the button sat *inside*
+  that scrolling container, and `#agent-list` (`flex-1 min-w-0`,
+  no overflow setting of its own) let its `flex-none` project
+  sections spill past its right edge — straight onto the button.
+  Moved `overflow-x-auto` from the outer wrapper down to
+  `#agent-list` itself so the button is now a sibling of the scroll
+  area, not inside it. The chips scroll horizontally within the
+  agent list when they exceed available width; the button stays
+  pinned at the right of the footer and is always reachable. Mobile
+  drawer mode is unaffected (its CSS forces column layout, so there
+  is no horizontal overflow to scroll).
+
+258 tests pass (no behaviour change in logic; the fix is one HTML
+markup change in `src/web/index.html`).
+
+---
+
 ## 0.14.1 — don't crash the server when a WebSocket client disconnects mid-stream
 
 ### Fixed
