@@ -123,7 +123,20 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
   function broadcast(envelope: WsEnvelope): void {
     const payload = JSON.stringify(envelope);
     for (const ws of wsClients) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(payload);
+      // readyState is a TOCTOU — the socket can die between this check
+      // and the actual TCP write, and `ws.send` without a callback
+      // re-throws send errors as an 'error' event. Always pass a
+      // callback so failures become a logged warning instead of an
+      // unhandled emit (which the connection-level 'error' listener
+      // would also catch, but logging the send context is more useful).
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      ws.send(payload, (err) => {
+        if (err) {
+          console.warn(
+            `[ws] send failed for ${envelope.kind} (${(err as NodeJS.ErrnoException).code ?? "unknown"}): ${err.message}`,
+          );
+        }
+      });
     }
   }
 
@@ -920,19 +933,33 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
     wsClients.add(ws);
     console.log(`[ws] client connected (${wsClients.size} total)`);
 
+    // Local helper: ws.send with a callback so a transient EPIPE during
+    // the initial state prime (client closed the tab between accept and
+    // the first frames) becomes a logged warning instead of an
+    // unhandled 'error' event. The connection-level 'error' listener
+    // below also catches it, but this localizes the diagnosis.
+    const safeSend = (envelope: WsEnvelope) => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify(envelope), (err) => {
+        if (err) {
+          console.warn(
+            `[ws] prime send failed for ${envelope.kind} (${(err as NodeJS.ErrnoException).code ?? "unknown"}): ${err.message}`,
+          );
+        }
+      });
+    };
+
     // Prime the client with the full state so it doesn't have to make
     // follow-up REST calls on first load.
     const agents = agentManager.getAllAgents().map((a) => ({
       ...a,
       running: agentManager.isRunning(a.id),
     }));
-    ws.send(JSON.stringify({ kind: "agents_list", agents } satisfies WsEnvelope));
-    ws.send(
-      JSON.stringify({
-        kind: "projects_list",
-        projects: projectManager.getAllProjects(),
-      } satisfies WsEnvelope),
-    );
+    safeSend({ kind: "agents_list", agents } satisfies WsEnvelope);
+    safeSend({
+      kind: "projects_list",
+      projects: projectManager.getAllProjects(),
+    } satisfies WsEnvelope);
 
     // Replay any pending extension UI requests to the joining client so
     // a refresh — or the case where the user has 0 browsers open at the
@@ -942,13 +969,11 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
     // reconnect is the right recovery story. First-response-wins still
     // applies across multiple tabs.
     for (const pending of agentManager.snapshotAllPending()) {
-      ws.send(
-        JSON.stringify({
-          kind: "extension_ui_request",
-          agentId: pending.agentId,
-          request: pending.request,
-        } satisfies WsEnvelope),
-      );
+      safeSend({
+        kind: "extension_ui_request",
+        agentId: pending.agentId,
+        request: pending.request,
+      } satisfies WsEnvelope);
     }
 
     ws.on("message", (raw) => {
@@ -1024,12 +1049,50 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
       wsClients.delete(ws);
       console.log(`[ws] client disconnected (${wsClients.size} total)`);
     });
+
+    // Without this listener, EPIPE/ECONNRESET on the underlying socket
+    // (peer disappears mid-send: tab closed, laptop sleeps, Tailscale
+    // hiccup) bubbles up as an unhandled 'error' event on the WebSocket
+    // and crashes the whole Node process — Node's EventEmitter rule
+    // throws when 'error' has no listeners. We log + drop the client
+    // and let the existing 'close' path (which `ws` always fires after
+    // an error) finish the cleanup if it hasn't already.
+    ws.on("error", (err) => {
+      console.warn(
+        `[ws] client error (${(err as NodeJS.ErrnoException).code ?? "unknown"}): ${(err as Error).message}`,
+      );
+      wsClients.delete(ws);
+      try {
+        ws.terminate();
+      } catch {
+        // already dead
+      }
+    });
   });
 
   // ---- startup ----
   console.log("[pirouette] starting...");
   console.log(`[pirouette] data dir: ${dataDir}`);
   console.log(`[pirouette] web dir: ${webDir}`);
+
+  // Belt-and-suspenders: even with per-socket 'error' handlers, future
+  // code may attach a callback-less write to some other Socket/Stream
+  // (an agent subprocess pipe, an HTTP response, a child WS) and that
+  // unhandled EPIPE would still kill the whole process — taking every
+  // long-running agent session with it. Log and keep going. We attach
+  // these once at server boot; idempotent under hot-reload because
+  // installServer is only called from main().
+  process.on("uncaughtException", (err) => {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "EPIPE" || code === "ECONNRESET") {
+      console.warn(`[pirouette] swallowed transient ${code}: ${err.message}`);
+      return;
+    }
+    console.error(`[pirouette] uncaughtException:`, err);
+  });
+  process.on("unhandledRejection", (reason) => {
+    console.error(`[pirouette] unhandledRejection:`, reason);
+  });
 
   await stateManager.load();
   console.log(

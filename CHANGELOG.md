@@ -5,6 +5,34 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.14.1 — don't crash the server when a WebSocket client disconnects mid-stream
+
+### Fixed
+
+- The server process would die with an unhandled `Error: write EPIPE`
+  on the WebSocket socket whenever a browser tab closed, a laptop
+  slept, or the tailnet hiccupped while an agent was streaming. The
+  cause was three-layered:
+  1. The per-connection `WebSocket` in `wss.on("connection", …)` had
+     no `'error'` listener. `ws` re-emits underlying-socket errors as
+     `'error'` on the `WebSocket` instance, and Node's EventEmitter
+     throws when `'error'` is unhandled — killing the whole process
+     and every long-running agent session with it.
+  2. `broadcast()` called `ws.send(payload)` with no callback, so any
+     send-time failure (the `readyState === OPEN` check is a TOCTOU
+     against the actual write) also surfaced as an unhandled `'error'`.
+  3. The initial state-prime sends in `wss.on("connection", …)`
+     (`agents_list`, `projects_list`, replayed `extension_ui_request`s)
+     had the same problem.
+- Fix attaches a `ws.on("error", …)` handler that logs + drops the
+  client, switches `broadcast()` and the prime path to callback-form
+  `ws.send`, and adds a process-level `uncaughtException` /
+  `unhandledRejection` safety net that swallows transient
+  `EPIPE` / `ECONNRESET` with a warning instead of crashing — covering
+  any other unguarded socket/pipe writes anywhere in the stack.
+
+---
+
 ## 0.14.0 — bridge `AskUserQuestion` (and other extension UI prompts) to the web dashboard
 
 ### Added
