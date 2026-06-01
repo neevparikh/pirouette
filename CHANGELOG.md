@@ -5,6 +5,45 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.15.0 — fast-mode badge in the dashboard; `/fast` works mid-stream
+
+### Added
+
+- **Fast-mode badge (↯).** The dashboard now mirrors pi-vim's fast-mode
+  glyph. When pi-cas-provider reports fast-mode state on its public
+  `pi:fast-mode` event-bus channel, a `↯` appears on the right of the
+  input bar's top border line, colored by the API's ground-truth state:
+    - engaged (`actual: on`) → yellow (premium pricing active)
+    - requested but standard (`actual: off`) → dim (no premium charge)
+    - on cooldown (`actual: cooldown`) → red (extra-usage pool depleted)
+    - requested, no turn yet (`actual` unknown) → muted
+  Intent off draws nothing. A hover tooltip explains the state and names
+  the model. Fast mode is provider-wide in pirouette (one shared
+  `ResourceLoader` → one provider instance across all agents), so the
+  badge is a single global indicator rather than per-agent. The server
+  now owns the shared extension event bus, relays `pi:fast-mode` to
+  clients over a new `fast_mode` WS envelope, and primes the state on
+  connect so a reload or reconnect shows the badge immediately.
+
+### Fixed
+
+- **Extension slash commands (e.g. `/fast`) silently failed when sent
+  while the agent was mid-turn.** Commands registered via
+  `pi.registerCommand` cannot be queued — pi's `steer()` / `followUp()`
+  throw `Extension command "…" cannot be queued`. The dashboard routed
+  every mid-stream message through steer/follow-up, so `/fast` only
+  worked while the agent was idle (which uses `prompt()`).
+  `AgentManager.sendMessage` now detects extension commands and
+  dispatches them through `session.prompt()` — which handles them
+  immediately, even during streaming — regardless of the agent's state.
+  Ordinary messages keep the steer/follow-up split unchanged.
+
+266 tests pass (added `agent-manager-fast-mode.test.ts` for the badge
+bridge, plus two regression tests in `agent-manager-steer.test.ts` for
+the mid-stream extension-command path).
+
+---
+
 ## 0.14.2 — keep the "+ new project" button visible when the agent list overflows
 
 ### Fixed

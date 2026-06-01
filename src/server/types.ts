@@ -99,6 +99,22 @@ export interface ProjectConfig {
 /** Name of the auto-created project used when the user doesn't specify one. */
 export const DEFAULT_PROJECT_NAME = "scratchpad";
 
+/** Global fast-mode badge state, mirrored from pi-cas-provider's
+ *  `pi:fast-mode` event bus channel (see pi-cas-provider/src/badge.ts).
+ *  Fast mode is a provider-wide setting in pirouette (one shared
+ *  ResourceLoader / provider instance across all agents), so this is a
+ *  single global state rather than per-agent.
+ *
+ *    - `intent`  : what the provider will request on the next turn.
+ *    - `actual`  : what the API actually engaged on the most recent turn.
+ *    - `model`   : model id from the most recent completed turn.
+ */
+export interface FastModeState {
+  intent: boolean;
+  actual?: "on" | "off" | "cooldown";
+  model?: string;
+}
+
 /** Envelope sent over WebSocket to clients (server → client). */
 export type WsEnvelope =
   | { kind: "agent_event"; agentId: string; event: NormalizedEvent }
@@ -136,7 +152,12 @@ export type WsEnvelope =
       agentId: string;
       statusKey: string;
       statusText: string | null;
-    };
+    }
+  /** Global fast-mode badge state (pi-cas-provider's `pi:fast-mode`
+   *  channel). Broadcast whenever it changes, and primed on connect.
+   *  `state === null` means no fast-mode-capable provider has reported in
+   *  yet (badge stays hidden). */
+  | { kind: "fast_mode"; state: FastModeState | null };
 
 /** Envelope sent over WebSocket from a client to the server. Kept separate
  *  from WsEnvelope so the server can validate the smaller, narrower union

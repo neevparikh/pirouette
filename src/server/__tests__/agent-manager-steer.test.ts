@@ -28,7 +28,7 @@ import { ProjectManager } from "../project-manager.js";
 import { StateManager } from "../state.js";
 import type { AgentConfig } from "../types.js";
 
-function makeFakeSession() {
+function makeFakeSession(extensionCommands: string[] = []) {
   let isStreaming = false;
   const promptCalls: Array<{ text: string; opts?: unknown }> = [];
   const steerCalls: Array<{ text: string; images?: unknown }> = [];
@@ -38,6 +38,14 @@ function makeFakeSession() {
    *  pi finishing the agent loop. */
   let resolvePrompt: (() => void) | null = null;
 
+  const registered = new Set(extensionCommands);
+  const isExtCmd = (text: string): boolean => {
+    if (!text.startsWith("/")) return false;
+    const sp = text.indexOf(" ");
+    const name = sp === -1 ? text.slice(1) : text.slice(1, sp);
+    return registered.has(name);
+  };
+
   return {
     get isStreaming() {
       return isStreaming;
@@ -45,6 +53,13 @@ function makeFakeSession() {
     promptCalls,
     steerCalls,
     followUpCalls,
+    // Mirrors pi's private `_extensionRunner`, which AgentManager reaches
+    // into to detect extension commands. Only getCommand() is consulted.
+    _extensionRunner: {
+      getCommand(name: string): unknown {
+        return registered.has(name) ? { handler: () => {} } : undefined;
+      },
+    },
     finishPrompt(): void {
       const r = resolvePrompt;
       resolvePrompt = null;
@@ -54,22 +69,36 @@ function makeFakeSession() {
     // Methods sendMessage uses:
     prompt(text: string, opts?: unknown): Promise<void> {
       promptCalls.push({ text, opts });
+      // Pi dispatches extension commands immediately (even mid-stream)
+      // without starting a new turn, so the promise resolves right away
+      // and isStreaming is untouched.
+      if (isExtCmd(text)) return Promise.resolve();
       isStreaming = true;
       return new Promise<void>((resolve) => {
         resolvePrompt = resolve;
       });
     },
     async steer(text: string, images?: unknown): Promise<void> {
+      // Real pi steer() throws on extension commands (they can't be queued).
+      if (isExtCmd(text)) {
+        throw new Error(`Extension command "${text}" cannot be queued.`);
+      }
       steerCalls.push({ text, images });
       // Real pi steer() returns quickly after enqueueing.
     },
     async followUp(text: string, images?: unknown): Promise<void> {
+      if (isExtCmd(text)) {
+        throw new Error(`Extension command "${text}" cannot be queued.`);
+      }
       followUpCalls.push({ text, images });
     },
   };
 }
 
-async function makeManagerWithFakeAgent(agentId: string) {
+async function makeManagerWithFakeAgent(
+  agentId: string,
+  extensionCommands: string[] = [],
+) {
   const dir = await mkdtemp(path.join(tmpdir(), "pirouette-test-"));
   const stateManager = new StateManager(dir);
   const projectManager = new ProjectManager(stateManager, dir);
@@ -86,7 +115,7 @@ async function makeManagerWithFakeAgent(agentId: string) {
   } as unknown as AgentConfig;
   stateManager.putAgent(config);
 
-  const session = makeFakeSession();
+  const session = makeFakeSession(extensionCommands);
   const handle = {
     config,
     session: session as unknown as import("@earendil-works/pi-coding-agent").AgentSession,
@@ -163,6 +192,53 @@ describe("AgentManager.sendMessage steer-during-prompt race", () => {
     expect(session.followUpCalls).toHaveLength(1);
     expect(session.followUpCalls[0].text).toBe("msg2-followup");
     expect(session.steerCalls).toHaveLength(0);
+
+    session.finishPrompt();
+    await firstSend;
+  });
+
+  it("a mid-turn extension command (e.g. /fast) dispatches via prompt(), not steer/followUp", async () => {
+    // Regression: extension commands (registered via pi.registerCommand)
+    // cannot be queued -- pi's steer()/followUp() throw on them. The UI
+    // sends them while the agent may be streaming; they must route through
+    // prompt(), which dispatches them immediately even mid-stream.
+    const { manager, session } = await makeManagerWithFakeAgent("agent-4", ["fast"]);
+
+    // 1. Idle agent: kick off a normal prompt() that stays in flight.
+    const firstSend = manager.sendMessage("agent-4", "do some work", { mode: "steer" });
+    await new Promise((r) => setImmediate(r));
+    expect(session.isStreaming).toBe(true);
+    expect(session.promptCalls).toHaveLength(1);
+
+    // 2. While streaming, send the extension command `/fast`.
+    const cmdSend = manager.sendMessage("agent-4", "/fast", { mode: "steer" });
+    const result = await settle(cmdSend, 200);
+    expect(result).toBe("resolved");
+
+    // It routed through prompt() (with streamingBehavior), NOT steer/followUp.
+    expect(session.promptCalls).toHaveLength(2);
+    expect(session.promptCalls[1].text).toBe("/fast");
+    expect(session.promptCalls[1].opts).toMatchObject({ streamingBehavior: "steer" });
+    expect(session.steerCalls).toHaveLength(0);
+    expect(session.followUpCalls).toHaveLength(0);
+
+    session.finishPrompt();
+    await firstSend;
+  });
+
+  it("a non-command message mid-stream still dispatches via steer() even when an extension command is registered", async () => {
+    // Guard: the extension-command detection must not hijack ordinary text.
+    const { manager, session } = await makeManagerWithFakeAgent("agent-5", ["fast"]);
+
+    const firstSend = manager.sendMessage("agent-5", "do some work", { mode: "steer" });
+    await new Promise((r) => setImmediate(r));
+    expect(session.isStreaming).toBe(true);
+
+    const steerSend = manager.sendMessage("agent-5", "please also handle X", { mode: "steer" });
+    expect(await settle(steerSend, 200)).toBe("resolved");
+    expect(session.steerCalls).toHaveLength(1);
+    expect(session.steerCalls[0].text).toBe("please also handle X");
+    expect(session.promptCalls).toHaveLength(1); // only the original turn
 
     session.finishPrompt();
     await firstSend;

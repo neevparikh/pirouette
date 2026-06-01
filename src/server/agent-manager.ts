@@ -7,6 +7,7 @@ import path from "node:path";
 import {
   AuthStorage,
   createAgentSession,
+  createEventBus,
   DefaultResourceLoader,
   getAgentDir,
   loadProjectContextFiles,
@@ -15,6 +16,7 @@ import {
   SettingsManager,
   type AgentSession,
   type AgentSessionEvent,
+  type EventBusController,
   type ResourceLoader,
 } from "@earendil-works/pi-coding-agent";
 
@@ -38,6 +40,7 @@ import {
   type ChatMessage,
   type DeleteAgentOptions,
   type ExtensionUIRequest,
+  type FastModeState,
   type NormalizedEvent,
   type WsEnvelope,
 } from "./types.js";
@@ -106,6 +109,15 @@ export class AgentManager {
    */
   private resourceLoader: DefaultResourceLoader | null = null;
   private resourceLoaderInit: Promise<void> | null = null;
+  /** Shared extension event bus, handed to the ResourceLoader so every
+   *  extension's `pi.events` is the same instance. We hold a reference to
+   *  subscribe to provider-wide channels like pi-cas-provider's
+   *  `pi:fast-mode` and relay them to the dashboard. */
+  private eventBus: EventBusController | null = null;
+  /** Latest global fast-mode badge state (null until a fast-mode-capable
+   *  provider reports in). Mirrored to clients via the `fast_mode`
+   *  WS envelope and primed on connect via getFastMode(). */
+  private fastMode: FastModeState | null = null;
 
   constructor(
     private readonly stateManager: StateManager,
@@ -151,9 +163,18 @@ export class AgentManager {
     if (this.resourceLoader) return this.resourceLoader;
     if (!this.resourceLoaderInit) {
       this.resourceLoaderInit = (async () => {
+        // Own the extension event bus so we can subscribe to provider-wide
+        // channels (e.g. pi-cas-provider's `pi:fast-mode`). Passing it in
+        // explicitly means every extension's `pi.events` is this same
+        // instance; otherwise the loader would create a private one we
+        // couldn't reach.
+        const eventBus = createEventBus();
+        this.eventBus = eventBus;
+        eventBus.on("pi:fast-mode", (data) => this.handleFastModeEvent(data));
         const loader = new DefaultResourceLoader({
           cwd: this.dataDir,
           agentDir: getAgentDir(),
+          eventBus,
         });
         await loader.reload();
         this.resourceLoader = loader;
@@ -483,6 +504,58 @@ export class AgentManager {
       }
     }
     return [];
+  }
+
+  /** Whether `text` is a slash command registered by a pi extension (via
+   *  `pi.registerCommand`) on this handle's session -- e.g. `/fast` from
+   *  pi-cas-provider. Such commands cannot be queued via steer()/followUp()
+   *  (pi throws); they must be dispatched through prompt(). Reaches into
+   *  pi's private `_extensionRunner` -- same deliberate pattern as
+   *  getExtensionCommands(). Returns false for non-slash text, unknown
+   *  commands, or when the runner is unavailable. */
+  private isExtensionCommand(handle: AgentHandle, text: string): boolean {
+    if (!text.startsWith("/")) return false;
+    const spaceIdx = text.indexOf(" ");
+    const name = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
+    if (!name) return false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const runner = (handle.session as any)._extensionRunner;
+    if (!runner || typeof runner.getCommand !== "function") return false;
+    try {
+      return Boolean(runner.getCommand(name));
+    } catch {
+      return false;
+    }
+  }
+
+  /** Current global fast-mode badge state, or null if no fast-mode-capable
+   *  provider has reported in. Used to prime newly-connected WS clients. */
+  getFastMode(): FastModeState | null {
+    return this.fastMode;
+  }
+
+  /** Handle a `pi:fast-mode` event from the shared extension bus
+   *  (pi-cas-provider). Normalizes the payload, stores it as the global
+   *  badge state, and broadcasts it to all dashboard clients. Defensive
+   *  about the payload shape since it crosses an extension boundary that
+   *  pirouette doesn't control. */
+  private handleFastModeEvent(data: unknown): void {
+    if (!data || typeof data !== "object") return;
+    const d = data as { intent?: unknown; actual?: unknown; model?: unknown };
+    const actual =
+      d.actual === "on" || d.actual === "off" || d.actual === "cooldown"
+        ? d.actual
+        : undefined;
+    const next: FastModeState = {
+      intent: Boolean(d.intent),
+      ...(actual ? { actual } : {}),
+      ...(typeof d.model === "string" ? { model: d.model } : {}),
+    };
+    this.fastMode = next;
+    console.log(
+      `[agent-manager] fast-mode update: intent=${next.intent} actual=${next.actual ?? "?"} model=${next.model ?? "?"}`,
+    );
+    this.broadcastWs({ kind: "fast_mode", state: next });
   }
 
   /** Live stats pulled from the pi session, matching the data pi's TUI
@@ -1195,6 +1268,26 @@ export class AgentManager {
       // steer() / followUp() are quick enqueues -- await them inside the
       // lock to surface errors before returning.
       if (handle.session.isStreaming) {
+        // Extension commands (registered via pi.registerCommand, e.g.
+        // `/fast`) cannot be queued: pi's steer()/followUp() throw
+        // `Extension command "/x" cannot be queued`. They must go through
+        // prompt(), which dispatches them immediately even mid-stream (pi
+        // runs _tryExecuteExtensionCommand before the streaming-queue
+        // branch). So route extension commands to prompt(); everything
+        // else keeps the steer/followUp split. We box the prompt promise
+        // and await it OUTSIDE the lock, same as the idle path -- the
+        // command handler runs quickly and resolves it.
+        if (this.isExtensionCommand(handle, message)) {
+          console.log(
+            `[agent-manager] dispatching extension command mid-stream via prompt: ${message}`,
+          );
+          return {
+            promptPromise: handle.session.prompt(message, {
+              streamingBehavior: mode,
+              ...(images ? { images } : {}),
+            }),
+          };
+        }
         if (mode === "followUp") {
           console.log(`[agent-manager] using followUp (agent is streaming)`);
           await handle.session.followUp(message, images);

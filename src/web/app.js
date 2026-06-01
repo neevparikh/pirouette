@@ -44,6 +44,13 @@ const statsByAgent = {};
  *  across reloads via localStorage `pirouette-raw-view`. */
 let rawView = localStorage.getItem("pirouette-raw-view") === "1";
 
+/** Latest global fast-mode badge state from the server's `fast_mode` WS
+ *  envelope (mirrored from pi-cas-provider's `pi:fast-mode` channel), or
+ *  null if no fast-mode-capable provider has reported in. Provider-wide,
+ *  so it's a single global value rather than per-agent.
+ *  @type {{intent: boolean, actual?: "on"|"off"|"cooldown", model?: string} | null} */
+let fastModeState = null;
+
 /** How to deliver the next message when the agent is currently streaming.
  *  "steer" = interrupt (pi's TUI default). "followUp" = queue for after
  *  the current turn ends. The toggle button only shows while streaming. */
@@ -98,6 +105,7 @@ const $forkBtn = document.getElementById("agent-fork-btn");
 const $rawBtn = document.getElementById("agent-raw-btn");
 const $vimLabel = document.getElementById("vim-mode-label");
 const $vimToggle = document.getElementById("vim-toggle-btn");
+const $fastModeBadge = document.getElementById("fast-mode-badge");
 const $mentionPopup = document.getElementById("mention-popup");
 const $slashPopup = document.getElementById("slash-popup");
 const $modelBtn = document.getElementById("agent-model-btn");
@@ -169,6 +177,49 @@ const vim = new VimMode($input, {
   shouldSkip: () =>
     !$mentionPopup.classList.contains("hidden") || !$slashPopup.classList.contains("hidden"),
 });
+
+/** Paint the fast-mode badge (↯) from `fastModeState`, mirroring pi-vim's
+ *  glyph + color logic so both surfaces agree on intent vs. ground truth:
+ *
+ *    intent off                  → no glyph (hidden)
+ *    intent on, actual "on"       → warning (engaged — premium pricing active)
+ *    intent on, actual "off"      → dim     (API ran standard — no premium charge)
+ *    intent on, actual "cooldown" → error   (extra-usage pool depleted)
+ *    intent on, actual unknown    → muted   (requested, no turn yet)
+ *
+ *  Global (provider-wide), so it's independent of the selected agent. */
+function renderFastModeBadge() {
+  if (!$fastModeBadge) return;
+  const st = fastModeState;
+  if (!st || !st.intent) {
+    $fastModeBadge.classList.add("hidden");
+    $fastModeBadge.textContent = "";
+    $fastModeBadge.removeAttribute("title");
+    return;
+  }
+  let color;
+  let title;
+  switch (st.actual) {
+    case "on":
+      color = "text-base16-yellow";
+      title = "Fast mode engaged — premium pricing active";
+      break;
+    case "off":
+      color = "text-base16-500";
+      title = "Fast mode requested, but the API ran standard (no premium charge)";
+      break;
+    case "cooldown":
+      color = "text-base16-red";
+      title = "Fast mode on cooldown — extra-usage pool depleted";
+      break;
+    default:
+      color = "text-base16-600";
+      title = "Fast mode requested — awaiting next turn";
+  }
+  $fastModeBadge.className = `text-[10px] font-mono ${color}`;
+  $fastModeBadge.textContent = "\u21af";
+  $fastModeBadge.title = st.model ? `${title} (${st.model})` : title;
+}
 
 function applyVimToggleStyle() {
   const on = vim.isEnabled();
@@ -1148,6 +1199,13 @@ function handleWsMessage(envelope) {
       console.log(
         `[extension:${envelope.agentId}] status[${envelope.statusKey}]=${envelope.statusText ?? "(cleared)"}`,
       );
+      break;
+
+    case "fast_mode":
+      // Global fast-mode badge state (pi-cas-provider's `pi:fast-mode`).
+      // `state` may be null (no fast-mode provider has reported in).
+      fastModeState = envelope.state;
+      renderFastModeBadge();
       break;
 
     case "error":

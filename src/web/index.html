@@ -932,6 +932,16 @@
           <span id="vim-mode-label" class="text-sm font-mono text-base16-pink"></span>
         </div>
 
+        <!-- Fast-mode badge (↯). Mirrors pi-vim's glyph: shown only when
+             pi-cas-provider reports fast-mode intent on, colored by the
+             API's ground-truth state. Global (provider-wide), so it sits on
+             the right of the top border line, independent of the vim label.
+             Same bg-cutout trick so it "breaks" the border. Hidden by
+             default; app.js toggles it from the `fast_mode` WS envelope. -->
+        <div class="absolute top-0 -translate-y-1/2 right-4 md:right-7 px-1.5 bg-base16-100 leading-none z-10">
+          <span id="fast-mode-badge" class="hidden text-[10px] font-mono"></span>
+        </div>
+
 
         <!-- Autocomplete popup: absolute, anchored to the top of the input
              bar so it floats above the textarea. Shown only while typing @. -->
