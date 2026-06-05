@@ -17,7 +17,6 @@ import { rm } from "./commands/rm.js";
 import { server } from "./commands/server.js";
 import { configShow, configPath, configEdit } from "./commands/config.js";
 import { projectAdd, projectList, projectRm } from "./commands/project.js";
-import { preflight } from "./commands/preflight.js";
 import { setup } from "./commands/setup.js";
 import { teardown } from "./commands/teardown.js";
 import { destroy } from "./commands/destroy.js";
@@ -46,35 +45,26 @@ const program = new Command();
 
 program
   .name("pru")
-  .description("Pirouette — manage cloud pi agents")
+  .description("Pirouette — manage pi agents on your own hosts")
   .version(readVersion())
-  // Global --config option. Lets users keep one TOML per deployment
-  // (e.g. ~/.pirouette/ec2.toml + ~/.pirouette/gpu.toml) and switch
-  // between them per-invocation. State file is automatically derived
-  // to sit alongside the config: ec2.toml -> ec2.host.json, etc., so
-  // each deployment's state stays separate.
+  // Global --host option. Selects which [hosts.<name>] block in
+  // ~/.pirouette/config.toml a command targets. Falls back to
+  // `default_host`, or the sole host if exactly one is defined.
   //
-  // Resolution precedence:
-  //   --config <path>           (this flag)
-  //   $PIROUETTE_CONFIG         (env var)
-  //   ~/.pirouette/config.toml  (historical default)
-  //
-  // Set as a preAction hook -- runs before any subcommand handler reads
-  // getConfig(). Hoisted into the env var (rather than threaded through
-  // every code path) because config-loading is module-singleton and
-  // re-plumbing the cache for an injected path would be invasive.
-  .option(
-    "-c, --config <path>",
-    "Path to pirouette config TOML (default: $PIROUETTE_CONFIG or ~/.pirouette/config.toml)",
-  )
+  // Set as a preAction hook -- runs before any subcommand handler
+  // resolves a host. Hoisted into $PIROUETTE_SELECTED_HOST (rather than
+  // threaded through every code path) because config-loading is a
+  // module-singleton and re-plumbing it for an injected name would be
+  // invasive. Read by selectHostName() in config.ts.
+  .option("-H, --host <name>", "Target host from config (default: default_host / sole host)")
   .hook("preAction", (thisCommand) => {
-    const cfg = thisCommand.opts().config as string | undefined;
-    if (cfg) process.env.PIROUETTE_CONFIG = cfg;
+    const host = thisCommand.opts().host as string | undefined;
+    if (host) process.env.PIROUETTE_SELECTED_HOST = host;
   });
 
 program
   .command("server")
-  .description("Start the pirouette server in-process (used by the container entrypoint and for local dev)")
+  .description("Start the pirouette server in-process (used by the host bootstrap and for local dev)")
   .option("-p, --port <port>", "Port to listen on (default: $PIROUETTE_PORT or 7777)")
   .option("-d, --data-dir <dir>", "Data directory (default: $PIROUETTE_DATA_DIR or .pirouette/data)")
   .action(server);
@@ -125,7 +115,7 @@ program
 
 program
   .command("tunnel <port>")
-  .description("Forward laptop:PORT ↔ container:PORT (or LOCAL:REMOTE). For OAuth loopback flows.")
+  .description("Forward laptop:PORT ↔ host:PORT (or LOCAL:REMOTE). For OAuth loopback flows.")
   .option("-d, --background", "Add the forward and return immediately (close with --close)")
   .option("--close", "Remove a previously-added forward")
   .action(async (port: string, opts: { background?: boolean; close?: boolean }) => {
@@ -134,8 +124,7 @@ program
 
 program
   .command("ssh")
-  .description("Shell into the pirouette host (agent-forwarded). EC2: lands in container; --host for the EC2 host. byo-host: lands on the configured SSH alias.")
-  .option("--host", "EC2 only: SSH into the host instead of the container")
+  .description("Shell into the selected host (the SSH alias from config)")
   .action(ssh);
 
 const projectCmd = program
@@ -182,44 +171,38 @@ configCmd
   .action(configEdit);
 
 program
-  .command("preflight")
-  .description("Check AWS config + resources are reachable (safe, read-only)")
-  .action(preflight);
-
-program
   .command("setup")
-  .description("Provision / resume the pirouette host (EC2 or byo-host, per provider.kind)")
+  .description("Set up / refresh the selected host (bootstrap + start the server)")
   .action(setup);
 
 program
   .command("teardown")
-  .description("Stop the host. EC2: stops the instance (EBS preserved). byo-host: kills the tmux session.")
+  .description("Stop the pirouette server on the host (kills the tmux session; state preserved)")
   .action(teardown);
 
 program
   .command("destroy")
-  .description("Destroy the host. EC2: terminates the instance. byo-host: clears local state. --delete-volume nukes the persistent volume on both.")
-  .option("--delete-volume", "Also delete the persistent EBS data volume (destructive)")
+  .description("Clear pirouette's local state for the host. --delete-data also nukes the host's persistent dirs.")
+  .option("--delete-data", "Also rm -rf the host's persistent data + home dirs (destructive)")
   .option("-y, --yes", "Skip interactive confirmation")
   .action(destroy);
 
 program
   .command("logs")
-  .description("Tail server logs from the container (default: server log)")
+  .description("Tail pirouette server logs from the host (default: server log)")
   .option("-f, --follow", "Stream continuously (like tail -f)")
   .option("-n, --lines <n>", "Number of lines to show", "200")
   .option("--tmux", "Show the current pirouette tmux pane")
-  .option("--entrypoint", "Show the container entrypoint startup log")
-  .option("--boot", "EC2 only: show cloud-init output (host-level bootstrap)")
+  .option("--entrypoint", "Show the host bootstrap log")
   .action(logs);
 
 program
   .command("sync")
-  .description("Ship local changes to the remote container (dev loop)")
+  .description("Ship local changes to the host (dev loop)")
   .option("--npm", "Upgrade from npm registry instead of rebuilding locally")
   .option(
     "--secrets",
-    "Re-push laptop-local auth state (auth.json, hawk token cache) into the container without a redeploy",
+    "Re-push laptop-local auth state (auth.json, AWS caches, ...) without a redeploy",
   )
   .action(sync);
 

@@ -1,20 +1,15 @@
-/** `pru open` \u2014 open the dashboard in your browser.
+/** `pru open` — open the dashboard in your browser.
  *
- *  Resolves the URL from the same precedence chain the CLI uses:
- *    1. `PIROUETTE_URL` env var
- *    2. `server.public_url` from config
- *    3. Refuse with a useful message
- *
- *  No SSH tunnel here \u2014 the canonical access path is whatever
- *  `public_url` points at (typically `https://<host>.<tailnet>.ts.net/`
- *  served by `tailscale serve`). If the tailnet is down and you need
- *  to escape-hatch via SSH, see the README troubleshooting section
- *  for the manual `ssh -L 7777:localhost:7777 ...` recipe.
+ *  Resolves the URL the same way the CLI's API client does (PIROUETTE_URL,
+ *  else the selected host's `public_url`). If neither is set, prints a useful
+ *  message. There's no SSH tunnel here — the canonical access path is whatever
+ *  `public_url` points at (typically a `tailscale serve` HTTPS URL). To
+ *  escape-hatch via SSH, see the `pru setup` output for the `ssh -L` recipe.
  */
 
 import { execSync } from "node:child_process";
 
-import { getConfig } from "../../config.js";
+import { getWebUrl } from "../api.js";
 
 function openBrowser(url: string): void {
   const platform = process.platform;
@@ -27,22 +22,13 @@ function openBrowser(url: string): void {
 }
 
 export async function open(): Promise<void> {
-  const fromEnv = process.env.PIROUETTE_URL;
-  const cfg = getConfig();
-  const fromConfig = cfg.server?.public_url ?? "";
-
-  const url = (fromEnv ?? fromConfig).replace(/\/+$/, "");
-  if (!url) {
-    console.error(
-      "error: no dashboard URL configured.\n" +
-        "       Set `server.public_url` in ~/.pirouette/config.toml, e.g.:\n" +
-        '         [server]\n' +
-        '         public_url = "https://pirouette-<you>.<tailnet>.ts.net"\n' +
-        "       or export PIROUETTE_URL for this shell.",
-    );
+  let url: string;
+  try {
+    url = getWebUrl();
+  } catch (err) {
+    console.error(`error: ${err instanceof Error ? err.message : err}`);
     process.exit(1);
   }
-
   console.log(`opening ${url}`);
   openBrowser(url);
 }

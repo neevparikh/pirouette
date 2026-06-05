@@ -1,7 +1,7 @@
-/** pru status — show host (provider-specific) + local server + agent status. */
+/** `pru status` — show the selected host's state + the pirouette server +
+ *  agent status. */
 import { apiGet } from "../api.js";
-import { getProvider } from "../remote/provider.js";
-import { loadRemoteState } from "../remote/state.js";
+import { getHost } from "../remote/host.js";
 
 interface Agent {
   id: string;
@@ -11,28 +11,17 @@ interface Agent {
 }
 
 export async function status(): Promise<void> {
-  // ---- remote host (provider-specific; best-effort) ----
-  const state = loadRemoteState();
-  const provisioned = Boolean(state.instanceId || state.volumeId);
-  if (provisioned) {
-    try {
-      const s = await getProvider().status();
-      // Multi-line format only when we have real instance info to show.
-      // "absent" / "unknown" (AWS query error) get the one-liner with the
-      // detail message inline — matches pre-refactor behaviour.
-      if (s.extraLines && s.extraLines.length > 0) {
-        console.log(`remote:`);
-        for (const line of s.extraLines) console.log(line);
-        console.log("");
-      } else {
-        console.log(`remote:    ${s.detail}\n`);
-      }
-    } catch (err) {
-      console.log(`remote:    ${err instanceof Error ? err.message : err}\n`);
-    }
+  // ---- remote host (best-effort) ----
+  try {
+    const s = await getHost().status();
+    console.log("host:");
+    for (const line of s.extraLines ?? []) console.log(line);
+    console.log("");
+  } catch (err) {
+    console.log(`host:      ${err instanceof Error ? err.message : err}\n`);
   }
 
-  // ---- local / tunneled pirouette server ----
+  // ---- pirouette server + agents ----
   try {
     const health = await apiGet<{ ok: boolean; agents: number }>("/api/health");
     console.log(`server:    ${health.ok ? "ok" : "down"}  (${health.agents} agent(s))`);
@@ -46,11 +35,8 @@ export async function status(): Promise<void> {
       }
     }
   } catch (err) {
-    if (provisioned) {
-      console.log(`server:    unreachable (${err instanceof Error ? err.message : err})`);
-      console.log("           try:  pru open    # set up SSH port-forward");
-    } else {
-      console.log(`server:    unreachable (${err instanceof Error ? err.message : err})`);
-    }
+    console.log(`server:    unreachable (${err instanceof Error ? err.message : err})`);
+    console.log("           set hosts.<name>.public_url or export PIROUETTE_URL,");
+    console.log("           or open an SSH tunnel (see `pru setup` output).");
   }
 }

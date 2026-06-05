@@ -71,7 +71,7 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
   const host = opts.host ?? process.env.PIROUETTE_HOST ?? "127.0.0.1";
   const port =
     opts.port ??
-    (process.env.PIROUETTE_PORT ? Number(process.env.PIROUETTE_PORT) : cfg.container.pirouette_port);
+    (process.env.PIROUETTE_PORT ? Number(process.env.PIROUETTE_PORT) : cfg.defaults.port);
   const dataDir =
     opts.dataDir ??
     process.env.PIROUETTE_DATA_DIR ??
@@ -81,14 +81,14 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
 
   // Make config-derived defaults visible to AgentManager via env vars.
   // Explicit env vars always win over config.
-  if (cfg.container.default_model && !process.env.PIROUETTE_DEFAULT_MODEL) {
-    process.env.PIROUETTE_DEFAULT_MODEL = cfg.container.default_model;
+  if (cfg.defaults.default_model && !process.env.PIROUETTE_DEFAULT_MODEL) {
+    process.env.PIROUETTE_DEFAULT_MODEL = cfg.defaults.default_model;
   }
   if (
-    cfg.container.default_thinking_level &&
+    cfg.defaults.default_thinking_level &&
     !process.env.PIROUETTE_DEFAULT_THINKING_LEVEL
   ) {
-    process.env.PIROUETTE_DEFAULT_THINKING_LEVEL = cfg.container.default_thinking_level;
+    process.env.PIROUETTE_DEFAULT_THINKING_LEVEL = cfg.defaults.default_thinking_level;
   }
 
   // ---- state + managers ----
@@ -253,11 +253,12 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
       allowed.add(`${host}:${portStr}`);
     }
 
-    // Extra hostnames from config or env. Used for non-loopback access
+    // Extra hostnames from the environment. Used for non-loopback access
     // paths (most commonly: a tailnet MagicDNS hostname when reaching
-    // the dashboard directly without an SSH tunnel). Each entry may be
-    // `<host>` (we append the port) or `<host>:<port>` (explicit).
-    const extras: string[] = [...(cfg.server?.allowed_hosts ?? [])];
+    // the dashboard directly without an SSH tunnel). The host's setup
+    // plumbs the configured allowed_hosts in via PIROUETTE_ALLOWED_HOSTS.
+    // Each entry may be `<host>` (we append the port) or `<host>:<port>`.
+    const extras: string[] = [];
     const envExtras = process.env.PIROUETTE_ALLOWED_HOSTS;
     if (envExtras) {
       extras.push(...envExtras.split(",").map((s) => s.trim()).filter(Boolean));

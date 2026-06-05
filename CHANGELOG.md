@@ -5,6 +5,42 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## 0.16.0 — single bring-your-own-host model; multi-host config
+
+### Changed (breaking — config)
+
+- **Dropped the EC2/Docker provider.** Pirouette no longer provisions or owns
+  any infrastructure. The only model is now bring-your-own host: point it at
+  an SSH alias you already manage and it installs itself over SSH. Removed
+  `aws.ts`, `container.ts`, the provider abstraction, the EC2 user-data and
+  container-entrypoint scripts, and the `pru preflight` command (~1,900 LOC).
+- **New multi-host config schema.** A single `~/.pirouette/config.toml` now
+  describes every host under `[hosts.<name>]`, with shared `[defaults]` and a
+  top-level `default_host`. The old `[provider]`, `[aws]`, `[instance]`,
+  `[ebs]`, EC2-specific `[container]`/`[ssh]`, and `[server]` tables are gone.
+  Per-host settings: `ssh_alias`, `user`, `persistent_root`, optional
+  `data_dir`/`home_dir`, `public_url`, `allowed_hosts`, `[hosts.<name>.tailscale]`,
+  and the new `bind_host` (server bind address; default `127.0.0.1`, set
+  `0.0.0.0` for containers behind a port-map / host-level `tailscale serve`)
+  and `adopt` (skip the home-migration on already-set-up hosts).
+- **Host selection via `--host <name>`** (global flag) → `default_host` → the
+  sole host if only one is defined. Removed the `--config` /
+  `$PIROUETTE_CONFIG` per-file mechanism; multiple hosts now live in one file.
+- **Per-host state** moved to `~/.pirouette/state/<host>.json` (was the
+  single `~/.pirouette/host.json` / legacy `ec2.json`).
+- **Command surface trimmed:** `pru ssh` lost `--host` (the EC2 host/container
+  toggle); `pru logs` lost `--boot` (cloud-init); `pru destroy` renamed
+  `--delete-volume` → `--delete-data`.
+
+### Migration
+
+- Rewrite `~/.pirouette/config.toml` into the `[hosts.<name>]` form (see the
+  README Quick start / Configuration). A devpod or VM that previously used the
+  `byo-host` provider maps directly: `provider.byo-host.*` → `[hosts.<name>].*`.
+- To keep managing an existing EC2 docker container, add a host with
+  `ssh_alias` pointing at its container alias, `adopt = true`, `bind_host =
+  "0.0.0.0"`, and `data_dir`/`home_dir` matching the container's layout.
+
 ## 0.15.0 — fast-mode badge in the dashboard; `/fast` works mid-stream
 
 ### Added

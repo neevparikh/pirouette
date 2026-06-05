@@ -60,6 +60,14 @@ log() { echo "[pirouette-bootstrap] $*"; }
 export PIROUETTE_PORT="${PIROUETTE_PORT:-7777}"
 export PIROUETTE_HOME_DIR="${PIROUETTE_HOME_DIR:-$PIROUETTE_PERSISTENT_ROOT/home/$(id -un)}"
 export PIROUETTE_DATA_DIR="${PIROUETTE_DATA_DIR:-$PIROUETTE_PERSISTENT_ROOT/pirouette/data}"
+# Address the server binds. 127.0.0.1 (reach via SSH tunnel) by default;
+# 0.0.0.0 when something in front of the loopback bind needs to reach it
+# (a docker `-p` mapping, a host-level `tailscale serve`, ...).
+export PIROUETTE_BIND_HOST="${PIROUETTE_BIND_HOST:-127.0.0.1}"
+# Adopt mode: skip the whole-home migration (section 2). Set for hosts that
+# are already laid out the way you want -- e.g. a docker container whose
+# $HOME is a bind-mount, not a symlink we should move.
+export PIROUETTE_ADOPT="${PIROUETTE_ADOPT:-0}"
 
 # Sanity: persistent_root must look like a real mountpoint / writable dir.
 # The first-mount case (PVC just attached, root-owned) is handled below
@@ -74,6 +82,8 @@ log "starting on $(hostname) as $(id -un)"
 log "  persistent_root = $PIROUETTE_PERSISTENT_ROOT"
 log "  home_dir        = $PIROUETTE_HOME_DIR"
 log "  data_dir        = $PIROUETTE_DATA_DIR"
+log "  bind_host       = $PIROUETTE_BIND_HOST"
+log "  adopt           = $PIROUETTE_ADOPT"
 log "  package         = $PIROUETTE_PACKAGE"
 
 # ---- 1. Take ownership of $PIROUETTE_PERSISTENT_ROOT ---------------------
@@ -105,6 +115,13 @@ ensure_persistent_home() {
     user="$(id -un)"
     persistent_home="$PIROUETTE_HOME_DIR"
     current_home="$HOME"
+
+    # Adopt mode: the host is already laid out the way the user wants
+    # (e.g. a container with a bind-mounted $HOME). Don't touch $HOME.
+    if [ "${PIROUETTE_ADOPT:-0}" = "1" ]; then
+        log "adopt mode: skipping home migration (using existing \$HOME=$current_home)"
+        return 0
+    fi
 
     # Already migrated to OUR target? Idempotent fast path.
     if [ -L "$current_home" ] \
@@ -248,8 +265,8 @@ else
 fi
 
 # ---- 7. Start the server in tmux ------------------------------------------
-# Idempotent: only spawn if not already running. Bind 127.0.0.1 (loopback
-# only) -- access from laptop is via SSH tunnel. Decision 6 in the plan.
+# Idempotent: only spawn if not already running. Bind $PIROUETTE_BIND_HOST
+# (default 127.0.0.1 loopback -- access from laptop via SSH tunnel).
 #
 # The tmux command forwards a curated set of env vars that the laptop's
 # byo-host provider plumbs through (default model / thinking level,
@@ -286,10 +303,10 @@ SESSION_NAME="pirouette"
 if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
     log "tmux session '$SESSION_NAME' already running; not restarting"
 else
-    log "starting tmux session '$SESSION_NAME' (binding 127.0.0.1:$PIROUETTE_PORT)"
+    log "starting tmux session '$SESSION_NAME' (binding $PIROUETTE_BIND_HOST:$PIROUETTE_PORT)"
     server_env="$(build_server_env)"
     tmux new-session -d -s "$SESSION_NAME" \
-        "PIROUETTE_DATA_DIR='$PIROUETTE_DATA_DIR' PIROUETTE_PORT='$PIROUETTE_PORT' PIROUETTE_HOST='127.0.0.1' $server_env pirouette server 2>&1 | tee -a '$PIROUETTE_DATA_DIR/logs/pirouette.log'"
+        "PIROUETTE_DATA_DIR='$PIROUETTE_DATA_DIR' PIROUETTE_PORT='$PIROUETTE_PORT' PIROUETTE_HOST='$PIROUETTE_BIND_HOST' $server_env pirouette server 2>&1 | tee -a '$PIROUETTE_DATA_DIR/logs/pirouette.log'"
 fi
 
 # ---- 8. Tailscale (optional) ----------------------------------------------
@@ -414,7 +431,7 @@ if [ "${PIROUETTE_TS_ENABLED:-0}" = "1" ]; then
             # with the tailscale FQDN so we don't drop existing entries.
             server_env="$(build_server_env "$ts_fqdn")"
             tmux new-session -d -s "$SESSION_NAME" \
-                "PIROUETTE_DATA_DIR='$PIROUETTE_DATA_DIR' PIROUETTE_PORT='$PIROUETTE_PORT' PIROUETTE_HOST='127.0.0.1' $server_env pirouette server 2>&1 | tee -a '$PIROUETTE_DATA_DIR/logs/pirouette.log'"
+                "PIROUETTE_DATA_DIR='$PIROUETTE_DATA_DIR' PIROUETTE_PORT='$PIROUETTE_PORT' PIROUETTE_HOST='$PIROUETTE_BIND_HOST' $server_env pirouette server 2>&1 | tee -a '$PIROUETTE_DATA_DIR/logs/pirouette.log'"
             echo "$ts_fqdn" > "$sentinel"
         fi
     fi

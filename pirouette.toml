@@ -1,157 +1,87 @@
 # Pirouette default configuration.
 #
 # Layering (later wins):
-#   built-in defaults  <  ./pirouette.toml (this file)  <  ~/.pirouette/config.toml  <  CLI flags
+#   built-in defaults  <  ./pirouette.toml (this file)  <  ~/.pirouette/config.toml
 #
-# This file ships with the package and contains generic defaults. Put your
-# per-user / environment-specific values in `~/.pirouette/config.toml`
-# (not in the repo). Run `pru config show` to see the effective merged config.
+# This file ships with the package and contains generic defaults only. Put
+# your hosts and per-user values in `~/.pirouette/config.toml` (not in the
+# repo). Run `pru config show` to see the effective merged config.
 #
-# Required fields (the CLI will refuse to run AWS operations until these are set):
-#   - aws.tags.Owner
-#   - aws.network.vpc_name
-#   - aws.network.subnet_name_pattern
-#   - aws.network.security_group_name
-#   - instance.key_name
+# Pirouette manages one or more SSH-reachable hosts you already own (a METR
+# devpod, a long-running VM, a dev container, ...). Describe each under
+# `[hosts.<name>]`; commands target one host at a time via the global
+# `--host <name>` flag (falling back to `default_host`, or the sole host if
+# only one is defined).
 #
-# A minimal ~/.pirouette/config.toml looks like:
+# A minimal ~/.pirouette/config.toml:
 #
-#   [aws]
-#   profile = "my-aws-profile"
-#   region  = "us-west-2"
+#   default_host = "gpu"
 #
-#   [aws.network]
-#   vpc_name            = "my-vpc"
-#   subnet_name_pattern = "my-private-subnet-*"
-#   security_group_name = "my-dev-sg"
+#   [defaults]
+#   npm_package   = "@neevparikh/pirouette@latest"
+#   default_model = "anthropic/claude-sonnet-4-5"
 #
-#   [aws.tags]
-#   Owner = "you@example.com"
+#   [hosts.gpu]
+#   ssh_alias       = "gpu"          # entry in ~/.ssh/config
+#   user            = "you"          # SSH login user
+#   persistent_root = "/data"        # mount-point of your persistent volume
+#   public_url      = "https://pirouette-gpu.<tailnet>.ts.net"   # optional
 #
-#   [instance]
-#   key_name = "you@example.com"
+#   [hosts.gpu.tailscale]
+#   enabled  = true                  # bridge the dashboard onto your tailnet
+#   hostname = "pirouette-gpu"
 #
-#   [dotfiles]
-#   clone_url           = "https://github.com/you/dotfiles.git"
-#   authorized_keys_url = "https://github.com/you.keys"
+# The remote host needs: node, npm, git, tmux, an SSH server, a non-root
+# sudo-able user, and (recommended) yadm for dotfiles.
 
-[aws]
-profile = "default"
-region  = "us-west-2"
+# Host targeted when --host isn't passed. Empty => use the sole host if
+# exactly one is defined, else error asking for --host.
+default_host = ""
 
-[aws.network]
-# Resources are discovered by name/tag at runtime (no hardcoded IDs).
-# All three must be set before `pru setup`.
-vpc_name            = ""
-subnet_name_pattern = ""
-security_group_name = ""
-
-[aws.tags]
-# Applied to every resource we create. Set Owner to your email; add any others
-# required by your AWS account (e.g. Environment, CostCenter).
-Owner = ""
-
-[instance]
-type     = "m6i.16xlarge"
-# Lookup: latest Ubuntu 24.04 (Noble) x86_64 gp3 from Canonical. Rarely needs override.
-ami_name_pattern = "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"
-ami_owner        = "099720109477"  # Canonical
-# Name of an existing EC2 keypair in the target account/region. If not found,
-# `pru setup` will try to import `ssh.public_key_path` under this name.
-key_name = ""
-
-[ebs]
-size_gb     = 500
-type        = "gp3"
-# Name tag used to find the volume across instance lifecycles. The volume
-# survives `pru teardown` and is reattached on the next `pru setup`.
-volume_name = "pirouette-data"
-
-[ssh]
-# EC2 host user. Ubuntu AMIs use "ubuntu"; Amazon Linux uses "ec2-user".
-user            = "ubuntu"
-private_key     = "~/.ssh/id_ed25519"
-public_key_path = "~/.ssh/id_ed25519.pub"
-# Local SSH config alias added by `pru setup`. You can `ssh pirouette` after
-# setup; `pru ssh` jumps through this alias into the container.
-host_alias      = "pirouette"
-
-[container]
-# Dev container image. Must be set in your ~/.pirouette/config.toml.
-#
-# Requirements for any image pirouette can use:
-#   - a non-root user (ideally uid 1000) with passwordless sudo
-#   - node + npm installed
-#   - tmux, git, ssh server, curl
-#   - (optional) yadm if you want the dotfiles feature
-#
-# The image `npx27/dev-unfetched:latest` satisfies all of the above and
-# happens to use uid 1000 / user `neev`. Build your own for a cleaner
-# footprint if you prefer.
-image          = ""
-# The non-root user baked into the image above. `pru setup` bind-mounts
-# `/home/<container_user>` on the host into the container so dotfiles and
-# npm globals persist across container restarts.
-container_user = ""
-# Optional; defaults to `/home/<container_user>` if unset.
-container_home = ""
-pirouette_port = 7777
-# npm package `pirouette server` is installed from at first boot. Override
+[defaults]
+# npm package `pirouette server` is installed from on first setup. Override
 # with your fork's scope if you publish your own build.
-npm_package    = "@neevparikh/pirouette@latest"
-# Default model used when `pru launch` doesn't pass --model. Must be a model
-# string your credentials can actually reach (e.g. "anthropic/claude-sonnet-4-5").
-default_model  = ""
-# Default thinking level for new agents when none is specified (e.g. when
-# quick-creating from the web UI via @<newname>). Empty = off. Options:
-# off | minimal | low | medium | high.
+npm_package = "@neevparikh/pirouette@latest"
+# Default model used when `pru launch` / the web UI don't specify one. Must be
+# a model string your credentials can actually reach
+# (e.g. "anthropic/claude-sonnet-4-5", "hawk/claude-opus-4-7").
+default_model = ""
+# Default thinking level for new agents when none is specified. Empty = off.
+# Options: off | minimal | low | medium | high.
 default_thinking_level = ""
+# Port the pirouette server binds on the host.
+port = 7777
+# Address the server binds on the host. 127.0.0.1 (reach via SSH tunnel) is
+# the safe default. Set "0.0.0.0" per-host when something in front of the
+# loopback bind needs to reach it (a docker `-p` mapping, a host-level
+# `tailscale serve`, ...).
+bind_host = "127.0.0.1"
 
-# Optional path to your own container entrypoint script. The default
-# (bundled with the npm package) does:
-#   1. yadm clone $PIROUETTE_DOTFILES_URL
-#   2. fetch authorized_keys, start sshd
-#   3. install $PIROUETTE_PACKAGE globally
-#   4. start `pirouette server` in a tmux session
-# Override if you use chezmoi/stow/vcsh, want different install steps,
-# need extra setup before the server, etc. The script must run as the
-# container's non-root user, leave the container alive (e.g.
-# `exec sleep infinity`), and read PIROUETTE_PACKAGE / PIROUETTE_DATA_DIR /
-# PIROUETTE_PORT from its env. Path may start with `~`.
-# entrypoint_script = "~/.config/pirouette/my-entrypoint.sh"
-entrypoint_script = ""
-
-[dotfiles]
-# Optional. If set, the container's entrypoint runs `yadm clone <url>` on
-# first boot. Must be a PUBLIC HTTPS URL (no credentials available inside
-# the container). Leave empty to skip.
+[defaults.dotfiles]
+# Optional. If set, `pru setup` runs `yadm clone <url>` on the host on first
+# setup. SSH-form URLs work if your ssh-agent is forwarded to the host. Leave
+# empty to skip. Override per host under [hosts.<name>.dotfiles].
 clone_url = ""
-# Optional. URL that returns an SSH authorized_keys file (e.g. GitHub's
-# `/USER.keys` endpoint). The container's entrypoint curls this into
-# ~/.ssh/authorized_keys so you can `ssh` into it. Leave empty to skip.
+# Optional. URL returning an SSH authorized_keys file (e.g. GitHub's
+# `/<user>.keys`). Curled into ~/.ssh/authorized_keys on the host. Empty=skip.
 authorized_keys_url = ""
 
-[server]
-# Extra hostnames the server will accept in HTTP `Host` and WS `Origin`
-# headers. Default: empty (only loopback addresses, which is right for
-# the SSH-tunnel access path). Add entries when reaching the dashboard
-# at a non-loopback name — e.g. via Tailscale MagicDNS:
+# ---- Per-host blocks live in ~/.pirouette/config.toml, e.g.: ----
 #
-#   allowed_hosts = ["pirouette-neev", "pirouette-neev.<tailnet>.ts.net"]
+# [hosts.gpu]
+# ssh_alias       = "gpu"
+# user            = "you"
+# persistent_root = "/data"
+# # data_dir      = ""        # optional; default ${persistent_root}/pirouette/data
+# # home_dir      = ""        # optional; default ${persistent_root}/home/${user}
+# # bind_host     = "0.0.0.0" # optional; overrides [defaults].bind_host
+# # adopt         = true      # optional; skip the home-migration on setup
+# #                           #   (for hosts already laid out as you want them,
+# #                           #    e.g. a container with a bind-mounted $HOME)
+# # public_url    = "https://pirouette-gpu.<tailnet>.ts.net"
+# # allowed_hosts = ["pirouette-gpu", "pirouette-gpu.<tailnet>.ts.net"]
 #
-# Each entry can be `<host>` (both bare and `:<configured_port>` variants
-# get added automatically — covers TLS proxies on default ports) or
-# `<host>:<port>` (explicit, added as-is). You can also set the
-# PIROUETTE_ALLOWED_HOSTS env var (comma-separated) for the same effect.
-allowed_hosts = []
-
-# Canonical URL where the dashboard is served. Used by `pru open` to
-# pick a browser target and by the CLI as the default API base. When
-# this is empty, `pru open` and CLI commands like `pru list` fail with
-# a useful error directing you to set this or PIROUETTE_URL.
-#
-# Typical value: the HTTPS Tailscale Serve URL once you've run
-#   sudo tailscale serve --bg --https=443 http://localhost:7777
-# on the EC2 host:
-#   public_url = "https://pirouette-neev.<tailnet>.ts.net"
-public_url = ""
+# [hosts.gpu.tailscale]
+# enabled          = true
+# hostname         = "pirouette-gpu"
+# state_persistent = true

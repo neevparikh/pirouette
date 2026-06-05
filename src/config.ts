@@ -1,9 +1,18 @@
 /** Pirouette config loader.
  *
- *  Layering (later wins):
- *    built-in defaults  <  ./pirouette.toml  <  ~/.pirouette/config.toml  <  CLI flags
+ *  Pirouette manages one or more SSH-reachable hosts the user already owns
+ *  (a METR devpod, a long-running VM, a dev container, ...). A single config
+ *  file describes every host under `[hosts.<name>]`; commands target one host
+ *  at a time, selected with the global `--host <name>` flag (falling back to
+ *  `default_host`, or the sole host if only one is defined).
  *
- *  Use `getConfig()` to read the merged effective config once per CLI invocation.
+ *  Layering (later wins):
+ *    built-in defaults  <  ./pirouette.toml (packaged)  <  ~/.pirouette/config.toml
+ *
+ *  Use `getConfig()` to read the merged effective config once per invocation,
+ *  `selectHostName()` to resolve which host a command targets, and
+ *  `resolveHost()` to get the effective per-host settings (with `[defaults]`
+ *  merged in and computed dirs/tailscale-hostname applied).
  */
 
 import { readFileSync } from "node:fs";
@@ -13,207 +22,107 @@ import { fileURLToPath } from "node:url";
 
 import { parse as parseToml } from "smol-toml";
 
-export interface PirouetteConfig {
-  /** Which host-provider implementation to use. Absent `[provider]` table
-   *  reads as "ec2" — the AWS+Docker path (`pru setup` provisions an EC2
-   *  instance, mounts an EBS data volume, runs the container). "byo-host"
-   *  targets an existing SSH-reachable Linux host (a METR devpod, a
-   *  long-running personal VM, etc.) with a persistent volume mounted
-   *  somewhere; pirouette uploads a bootstrap script over SSH.
-   *  See docs/plans/2026-05-13-provider-abstraction.md. */
-  provider: {
-    kind: "ec2" | "byo-host";
-    /** Settings consumed when `kind = "byo-host"`. Ignored otherwise.
-     *  Key with bracket-quotes in TOML: `[provider.byo-host]`. */
-    "byo-host": {
-      /** Entry in `~/.ssh/config` the user already has (e.g. "gpu").
-       *  Pirouette doesn't write anything to ssh_config for this
-       *  provider; it just runs `ssh <alias>`. */
-      ssh_alias: string;
-      /** Where on the remote the persistent volume is mounted. Anything
-       *  under this dir survives across pod/instance recreates. */
-      persistent_root: string;
-      /** SSH login user on the remote (also the user owning `$HOME`). */
-      user: string;
-      /** Override the persistent `$HOME` path. Default:
-       *  `${persistent_root}/home/${user}`. The bootstrap symlinks
-       *  `/home/${user}` -> this path. Empty = use default. */
-      home_dir: string;
-      /** Override `$PIROUETTE_DATA_DIR`. Default:
-       *  `${persistent_root}/pirouette/data`. Server state lives here.
-       *  Empty = use default. */
-      data_dir: string;
-      /** Tailscale integration. When enabled, the bootstrap installs
-       *  tailscale (if missing), starts tailscaled in userspace mode,
-       *  runs `tailscale up` (interactive on first boot — prints a
-       *  login URL the user approves in a browser), and bridges the
-       *  tailnet's :443 to the pirouette server's loopback bind via
-       *  `tailscale serve`. Lets you reach the dashboard from any
-       *  device on the tailnet (phone, other laptop, ...) without an
-       *  SSH tunnel. Server binding stays 127.0.0.1; only tailscaled
-       *  (same netns) reaches it. */
-      tailscale: {
-        /** Master switch. Default false. */
-        enabled: boolean;
-        /** Tailnet hostname for this device. Empty = derived from
-         *  ssh_alias as `pirouette-${ssh_alias}`. The full FQDN you
-         *  reach from your phone is `${hostname}.<your-tailnet>.ts.net`. */
-        hostname: string;
-        /** Symlink `/var/lib/tailscale` to
-         *  `${persistent_root}/tailscale-state` so the node key + auth
-         *  state survive pod recreate. Default true. Set false if you
-         *  prefer fresh tailnet identity per pod. */
-        state_persistent: boolean;
-      };
-    };
-  };
-  aws: {
-    profile: string;
-    region: string;
-    network: {
-      vpc_name: string;
-      subnet_name_pattern: string;
-      security_group_name: string;
-    };
-    tags: Record<string, string>;
-  };
-  instance: {
-    type: string;
-    ami_name_pattern: string;
-    ami_owner: string;
-    key_name: string;
-  };
-  ebs: {
-    size_gb: number;
-    type: string;
-    volume_name: string;
-  };
-  ssh: {
-    user: string;
-    private_key: string;
-    public_key_path: string;
-    host_alias: string;
-  };
-  container: {
-    image: string;
-    container_user: string;
-    container_home: string;
-    pirouette_port: number;
-    /** npm package spec the container's entrypoint installs globally
-     *  (e.g. `@your-scope/pirouette@latest`). Must be non-empty. */
-    npm_package: string;
-    /** Default model string used when `pru launch` doesn't pass `--model`.
-     *  Set to something your credentials can actually talk to, e.g.
-     *  `anthropic/claude-sonnet-4-5` or `hawk/claude-opus-4-7`. */
-    default_model: string;
-    /** Default thinking level for new agents when none is specified
-     *  (e.g. @<newname> quick-creates from the web UI). Empty = "off".
-     *  Values: off | minimal | low | medium | high. */
-    default_thinking_level: string;
-    /** Optional path to a custom entrypoint script. When set, this file is
-     *  uploaded to the host instead of pirouette's bundled
-     *  `scripts/pirouette-entrypoint.sh`. Use this when you want to swap
-     *  yadm for chezmoi/stow/vcsh, change how the npm package is installed,
-     *  add pre-server hooks, etc. The script must:
-     *    - run as the container's non-root user (uid 1000 by default)
-     *    - read PIROUETTE_PACKAGE / PIROUETTE_DATA_DIR / PIROUETTE_PORT etc.
-     *    - leave the container alive (e.g. `exec sleep infinity` at the end)
-     *  Path may be `~`-prefixed; resolved relative to laptop. Empty = use
-     *  bundled default. */
-    entrypoint_script: string;
-  };
-  dotfiles: {
-    /** Public HTTPS URL to `yadm clone` on first container boot. Empty → skip. */
-    clone_url: string;
-    /** URL that returns an `authorized_keys`-formatted body (e.g. GitHub's
-     *  `/<user>.keys`). Empty → skip; container sshd will have no authorized
-     *  users. */
-    authorized_keys_url: string;
-  };
-  server: {
-    /** Extra hostnames the server will accept in the HTTP `Host` header
-     *  and the WS `Origin` header. Useful when reaching the dashboard via
-     *  a tailnet hostname (`pirouette-neev`) or any non-loopback name.
-     *  Each entry can be `<host>` (port appended automatically and the
-     *  bare-host variant added too — covers TLS proxies on default ports)
-     *  or `<host>:<port>` (explicit, added as-is). Default: empty — only
-     *  loopback addresses accepted. */
-    allowed_hosts: string[];
-    /** Canonical URL where the dashboard lives — used by `pru open` to
-     *  pick a browser target and by the CLI as the default API base.
-     *  When set, the CLI talks to this directly (no SSH tunnel). When
-     *  empty, you'll get a `pru open` error directing you to set this
-     *  or the `PIROUETTE_URL` env var. Example:
-     *    public_url = "https://pirouette-neev.<your-tailnet>.ts.net"
-     */
-    public_url: string;
-  };
+/** Dotfiles bootstrap inputs. Shared `[defaults.dotfiles]` with optional
+ *  `[hosts.<name>.dotfiles]` overrides. */
+export interface DotfilesConfig {
+  /** Public/SSH git URL to `yadm clone` on first setup. Empty → skip. */
+  clone_url: string;
+  /** URL returning an `authorized_keys` body (e.g. GitHub `/<user>.keys`).
+   *  Empty → skip. */
+  authorized_keys_url: string;
 }
 
-/** Built-in fallback values. These are last-resort defaults for anything not
- *  specified in the TOML files. pirouette.toml at the repo root is the real
- *  source of truth — this is only in case the TOML is missing for some
- *  reason (e.g. `npm pack` misconfiguration).
- *
- *  Deliberately empty for values that tie the tool to a specific AWS
- *  environment — those must come from `~/.pirouette/config.toml`. */
+/** Tailscale integration for a host. When enabled, setup installs tailscale
+ *  (if missing), brings it up (interactive login on first boot), and bridges
+ *  the tailnet's :443 to the pirouette server's loopback bind via
+ *  `tailscale serve`. */
+export interface TailscaleConfig {
+  enabled: boolean;
+  /** Tailnet hostname. Empty → derived as `pirouette-<ssh_alias>`. */
+  hostname: string;
+  /** Symlink `/var/lib/tailscale` onto the persistent volume so the node key
+   *  survives host recreate. Default true. */
+  state_persistent: boolean;
+}
+
+/** Values shared across hosts unless a host overrides them. */
+export interface DefaultsConfig {
+  /** npm package spec the host installs globally (e.g.
+   *  `@your-scope/pirouette@latest`). */
+  npm_package: string;
+  /** Default model when `pru launch` / the web UI doesn't pass one. */
+  default_model: string;
+  /** Default thinking level for new agents. Empty = "off". */
+  default_thinking_level: string;
+  /** Port the pirouette server binds on the host. Default 7777. */
+  port: number;
+  /** Address the server binds on the host. Default `127.0.0.1` (reach via
+   *  SSH tunnel). Set `0.0.0.0` when something in front of the loopback bind
+   *  needs to reach it (a docker `-p` mapping, a host-level `tailscale
+   *  serve`, ...). */
+  bind_host: string;
+  dotfiles: DotfilesConfig;
+}
+
+/** Per-host config as written in TOML (`[hosts.<name>]`). All fields except
+ *  the SSH triple are optional and fall back to `[defaults]` / computed
+ *  values; see `resolveHost`. */
+export interface HostConfig {
+  /** Entry in `~/.ssh/config` (e.g. "gpu"). Pirouette runs `ssh <alias>`;
+   *  the alias owns identity/user/port. Required. */
+  ssh_alias: string;
+  /** SSH login user on the remote (owns `$HOME`). Required. */
+  user: string;
+  /** Mount-point of the persistent volume on the remote (e.g. `/data`).
+   *  Anything under here survives host recreate. Required. */
+  persistent_root: string;
+  /** Override `$HOME` target. Default `${persistent_root}/home/${user}`. */
+  home_dir: string;
+  /** Override `$PIROUETTE_DATA_DIR`. Default
+   *  `${persistent_root}/pirouette/data`. */
+  data_dir: string;
+  /** Override `[defaults].bind_host` for this host. */
+  bind_host: string;
+  /** Skip the bootstrap's home-migration on `pru setup`. Set true when the
+   *  host is already set up the way you want (e.g. a docker container whose
+   *  `$HOME` is a bind-mount, not a symlink). */
+  adopt: boolean;
+  /** Dashboard URL — `pru open` target + CLI API base. */
+  public_url: string;
+  /** Extra hostnames accepted in HTTP `Host` / WS `Origin` headers. */
+  allowed_hosts: string[];
+  // ---- optional per-host overrides of [defaults] scalars ----
+  npm_package: string;
+  default_model: string;
+  default_thinking_level: string;
+  port: number;
+  tailscale: TailscaleConfig;
+  dotfiles: DotfilesConfig;
+}
+
+export interface PirouetteConfig {
+  /** Host targeted when `--host` isn't passed. Empty → use the sole host if
+   *  there's exactly one, else error. */
+  default_host: string;
+  defaults: DefaultsConfig;
+  /** Named hosts, keyed by `<name>` from `[hosts.<name>]`. */
+  hosts: Record<string, Partial<HostConfig>>;
+}
+
+/** Built-in fallback values. The packaged `pirouette.toml` is the real source
+ *  of generic defaults; this is a last resort if that file is missing. No
+ *  hosts are defined here — those are always user-specific. */
 const BUILTIN_DEFAULTS: PirouetteConfig = {
-  provider: {
-    kind: "ec2",
-    "byo-host": {
-      ssh_alias: "",
-      persistent_root: "",
-      user: "",
-      home_dir: "",
-      data_dir: "",
-      tailscale: {
-        enabled: false,
-        hostname: "",
-        state_persistent: true,
-      },
-    },
-  },
-  aws: {
-    profile: "default",
-    region: "us-west-2",
-    network: { vpc_name: "", subnet_name_pattern: "", security_group_name: "" },
-    tags: { Owner: "" },
-  },
-  instance: {
-    type: "m6i.16xlarge",
-    ami_name_pattern: "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*",
-    ami_owner: "099720109477",
-    key_name: "",
-  },
-  ebs: {
-    size_gb: 500,
-    type: "gp3",
-    volume_name: "pirouette-data",
-  },
-  ssh: {
-    user: "ubuntu",
-    private_key: "~/.ssh/id_ed25519",
-    public_key_path: "~/.ssh/id_ed25519.pub",
-    host_alias: "pirouette",
-  },
-  container: {
-    image: "",
-    container_user: "",
-    container_home: "",
-    entrypoint_script: "",
-    pirouette_port: 7777,
+  default_host: "",
+  defaults: {
     npm_package: "",
     default_model: "",
     default_thinking_level: "",
+    port: 7777,
+    bind_host: "127.0.0.1",
+    dotfiles: { clone_url: "", authorized_keys_url: "" },
   },
-  dotfiles: {
-    clone_url: "",
-    authorized_keys_url: "",
-  },
-  server: {
-    allowed_hosts: [],
-    public_url: "",
-  },
+  hosts: {},
 };
 
 export interface ConfigSource {
@@ -222,39 +131,23 @@ export interface ConfigSource {
   data: Partial<PirouetteConfig>;
 }
 
-/** Find the repo/package's pirouette.toml by walking up from this source file.
- *  Works in both dev (src/config.ts) and built (dist/config.js) layouts — one
- *  level up from either reaches the package root. */
+/** Find the packaged pirouette.toml by walking up from this source file.
+ *  One level up reaches the package root in both dev (src/) and built (dist/)
+ *  layouts. */
 function repoConfigPath(): string {
   const here = fileURLToPath(import.meta.url);
   return path.resolve(path.dirname(here), "..", "pirouette.toml");
 }
 
-/** Default location for the user override config when no explicit path is
- *  supplied. Kept as a separate constant so callers (state.ts in particular)
- *  can detect whether they're operating against the historical default
- *  layout vs a custom path. */
-export function defaultUserConfigPath(): string {
+/** Location of the user override config. */
+export function userConfigPath(): string {
   return path.join(homedir(), ".pirouette", "config.toml");
 }
 
-/** Resolve the active user-override config path. Resolution order:
- *    1. `$PIROUETTE_CONFIG` env var (set by the CLI's `--config` flag or
- *       by the caller directly).
- *    2. `~/.pirouette/config.toml` (the historical default).
- *
- *  The CLI's top-level `--config <path>` option sets the env var in a
- *  pre-action hook so subcommand handlers see the override through this
- *  function transparently. Same path resolution is used by the state-
- *  file location logic so multi-deployment setups stay self-contained
- *  (one TOML + one host.json per deployment, both in the same dir by
- *  default). */
-export function userConfigPath(): string {
-  const fromEnv = process.env.PIROUETTE_CONFIG;
-  if (fromEnv && fromEnv.trim().length > 0) {
-    return expandHome(fromEnv);
-  }
-  return defaultUserConfigPath();
+/** Kept for callers that previously distinguished a custom path; now always
+ *  the single default. */
+export function defaultUserConfigPath(): string {
+  return userConfigPath();
 }
 
 function loadTomlIfExists(p: string): ConfigSource {
@@ -266,9 +159,8 @@ function loadTomlIfExists(p: string): ConfigSource {
   }
 }
 
-/** Deep-merge `b` on top of `a`, returning a new object. Plain objects merge
- *  recursively; everything else replaces. Arrays replace (we don't need array
- *  merging for this config). */
+/** Deep-merge `b` on top of `a`. Plain objects merge recursively; arrays and
+ *  scalars replace. */
 function deepMerge<T>(a: T, b: Partial<T>): T {
   if (a === null || a === undefined) return b as T;
   if (b === null || b === undefined) return a;
@@ -278,15 +170,12 @@ function deepMerge<T>(a: T, b: Partial<T>): T {
   const out: Record<string, unknown> = { ...(a as Record<string, unknown>) };
   for (const [k, v] of Object.entries(b as Record<string, unknown>)) {
     if (v === undefined) continue;
-    out[k] = deepMerge(
-      (a as Record<string, unknown>)[k],
-      v as Partial<unknown>,
-    );
+    out[k] = deepMerge((a as Record<string, unknown>)[k], v as Partial<unknown>);
   }
   return out as T;
 }
 
-/** Expand ~ at the start of a path to the user's home directory. */
+/** Expand a leading `~` to the user's home directory. */
 export function expandHome(p: string): string {
   if (p.startsWith("~/")) return path.join(homedir(), p.slice(2));
   if (p === "~") return homedir();
@@ -298,9 +187,6 @@ export interface LoadedConfig {
   sources: ConfigSource[];
 }
 
-/** Load and merge all config sources. Does not validate that required fields
- *  (Owner, key_name) are set — callers should call `requireConfigured(config)`
- *  before using the config for an operation that creates AWS resources. */
 export function loadConfig(): LoadedConfig {
   const sources: ConfigSource[] = [
     loadTomlIfExists(repoConfigPath()),
@@ -314,8 +200,6 @@ export function loadConfig(): LoadedConfig {
   return { config, sources };
 }
 
-/** Cached singleton. `loadConfig()` is deterministic and cheap, but callers
- *  shouldn't reload per access. */
 let cached: LoadedConfig | null = null;
 export function getConfig(): PirouetteConfig {
   if (!cached) cached = loadConfig();
@@ -332,163 +216,151 @@ export function resetConfigCache(): void {
   cached = null;
 }
 
-/** Container home path, derived from `container_user` if not explicitly set.
- *  Convention: Linux users have homes at /home/<user>. Override
- *  `container.container_home` if your image does something else. */
-export function containerHome(config: PirouetteConfig = getConfig()): string {
-  return config.container.container_home || `/home/${config.container.container_user}`;
+// ---- host selection + resolution ----------------------------------------
+
+/** Names of all configured hosts. */
+export function listHostNames(config: PirouetteConfig = getConfig()): string[] {
+  return Object.keys(config.hosts ?? {});
 }
 
-/** Fields that are environment-specific and have no safe default. Each
- *  provider has its own required-fields list — the EC2 path needs AWS +
- *  container config; byo-host needs an SSH alias + persistent root.
- *  `pru setup` and related remote commands call `requireConfigured()`
- *  before touching the host; it errors with a pointer to the exact keys
- *  that need filling in. */
-type RequiredField = {
-  path: string;
-  get: (c: PirouetteConfig) => string;
-};
+/** Resolve which host a command targets. Precedence:
+ *    1. `explicit` (the global `--host` flag, threaded via
+ *       `$PIROUETTE_SELECTED_HOST` set in the CLI preAction hook)
+ *    2. `config.default_host`
+ *    3. the sole host if exactly one is defined
+ *  Throws an actionable error otherwise. */
+export function selectHostName(
+  explicit?: string,
+  config: PirouetteConfig = getConfig(),
+): string {
+  const names = listHostNames(config);
+  const chosen = explicit ?? process.env.PIROUETTE_SELECTED_HOST ?? config.default_host ?? "";
 
-const EC2_REQUIRED_FIELDS: RequiredField[] = [
-  { path: "aws.network.vpc_name", get: (c) => c.aws.network.vpc_name },
-  { path: "aws.network.subnet_name_pattern", get: (c) => c.aws.network.subnet_name_pattern },
-  { path: "aws.network.security_group_name", get: (c) => c.aws.network.security_group_name },
-  { path: "aws.tags.Owner", get: (c) => c.aws.tags.Owner ?? "" },
-  { path: "instance.key_name", get: (c) => c.instance.key_name },
-  { path: "container.image", get: (c) => c.container.image },
-  { path: "container.container_user", get: (c) => c.container.container_user },
-  { path: "container.npm_package", get: (c) => c.container.npm_package },
-];
-
-const BYO_HOST_REQUIRED_FIELDS: RequiredField[] = [
-  { path: "provider.byo-host.ssh_alias", get: (c) => c.provider["byo-host"]?.ssh_alias ?? "" },
-  { path: "provider.byo-host.persistent_root", get: (c) => c.provider["byo-host"]?.persistent_root ?? "" },
-  { path: "provider.byo-host.user", get: (c) => c.provider["byo-host"]?.user ?? "" },
-  { path: "container.npm_package", get: (c) => c.container.npm_package },
-];
-
-function requiredFieldsFor(kind: PirouetteConfig["provider"]["kind"]): RequiredField[] {
-  switch (kind) {
-    case "ec2":
-      return EC2_REQUIRED_FIELDS;
-    case "byo-host":
-      return BYO_HOST_REQUIRED_FIELDS;
-    default: {
-      // Exhaustiveness check so adding a new kind here errors at compile
-      // time if its required-fields list is forgotten.
-      const _exhaustive: never = kind;
-      void _exhaustive;
-      return [];
+  if (chosen) {
+    if (!names.includes(chosen)) {
+      throw new Error(
+        `Unknown host ${JSON.stringify(chosen)}. ` +
+          (names.length > 0
+            ? `Configured hosts: ${names.join(", ")}. `
+            : `No hosts configured. `) +
+          `Define [hosts.${chosen}] in ${userConfigPath()}.`,
+      );
     }
+    return chosen;
   }
-}
 
-const EXAMPLE_EC2 = [
-  `[aws]`,
-  `profile = "your-aws-profile"`,
-  `region  = "us-west-2"`,
-  ``,
-  `[aws.network]`,
-  `vpc_name            = "your-vpc"`,
-  `subnet_name_pattern = "your-private-subnet-*"`,
-  `security_group_name = "your-dev-sg"`,
-  ``,
-  `[aws.tags]`,
-  `Owner = "you@example.com"`,
-  ``,
-  `[instance]`,
-  `key_name = "your-ec2-keypair-name"`,
-  ``,
-  `[container]`,
-  `image          = "your-dev-container:latest"`,
-  `container_user = "you"                # non-root user inside the image`,
-  `npm_package    = "@your-scope/pirouette@latest"`,
-].join("\n");
-
-const EXAMPLE_BYO_HOST = [
-  `[provider]`,
-  `kind = "byo-host"`,
-  ``,
-  `[provider.byo-host]`,
-  `ssh_alias       = "gpu"           # entry in ~/.ssh/config`,
-  `persistent_root = "/data"         # mount-point of your persistent volume`,
-  `user            = "your-username" # SSH login user`,
-  `# home_dir = ""                   # optional: default "\${persistent_root}/home/\${user}"`,
-  `# data_dir = ""                   # optional: default "\${persistent_root}/pirouette/data"`,
-  ``,
-  `[container]`,
-  `npm_package = "@your-scope/pirouette@latest"`,
-].join("\n");
-
-/** Throw with a helpful message if required fields are empty. Used by remote
- *  commands (`pru setup`, etc.) before they touch the host. The error
- *  message lists the missing keys and an example block scoped to the
- *  current `provider.kind`. */
-export function requireConfigured(config: PirouetteConfig = getConfig()): void {
-  const kind = config.provider?.kind ?? "ec2";
-  const fields = requiredFieldsFor(kind);
-  const missing = fields
-    .filter(({ get }) => !get(config) || get(config) === "UNSET")
-    .map(({ path }) => path);
-  if (missing.length === 0) return;
-
-  const example = kind === "ec2" ? EXAMPLE_EC2 : EXAMPLE_BYO_HOST;
-
+  if (names.length === 1) return names[0];
+  if (names.length === 0) {
+    throw new Error(
+      `No hosts configured. Add a [hosts.<name>] block to ${userConfigPath()}.\n\n` +
+        EXAMPLE_CONFIG,
+    );
+  }
   throw new Error(
-    `Missing required config values for provider.kind="${kind}":\n` +
-      missing.map((k) => `  - ${k}`).join("\n") +
-      `\n\nSet them in ${userConfigPath()}. Example:\n\n${example}\n`,
+    `Multiple hosts configured (${names.join(", ")}); pick one with --host <name> ` +
+      `or set default_host in ${userConfigPath()}.`,
   );
 }
 
-/** Effective byo-host config with computed defaults applied for empty
- *  override fields. Only meaningful when `provider.kind === "byo-host"`. */
-export interface EffectiveByoHostConfig {
+/** Effective per-host config: `[defaults]` merged with `[hosts.<name>]`, plus
+ *  computed `home_dir`/`data_dir`/tailscale hostname. */
+export interface EffectiveHostConfig {
+  name: string;
   ssh_alias: string;
-  persistent_root: string;
   user: string;
+  persistent_root: string;
   home_dir: string;
   data_dir: string;
-  tailscale: EffectiveByoHostTailscaleConfig;
+  bind_host: string;
+  adopt: boolean;
+  port: number;
+  npm_package: string;
+  default_model: string;
+  default_thinking_level: string;
+  public_url: string;
+  allowed_hosts: string[];
+  dotfiles: DotfilesConfig;
+  tailscale: TailscaleConfig;
 }
 
-export interface EffectiveByoHostTailscaleConfig {
-  enabled: boolean;
-  /** Resolved short hostname (e.g. "pirouette-gpu-devpod"). The full
-   *  FQDN is `${hostname}.<tailnet>.ts.net` once tailscale is up. */
-  hostname: string;
-  state_persistent: boolean;
-}
-
-/** Resolve byo-host config with default home_dir/data_dir computed from
- *  persistent_root + user when not explicitly set. Throws if the
- *  required fields are missing (call `requireConfigured` first to get a
- *  better error message). */
-export function resolveByoHostConfig(config: PirouetteConfig = getConfig()): EffectiveByoHostConfig {
-  const b = config.provider["byo-host"];
-  if (!b || !b.ssh_alias || !b.persistent_root || !b.user) {
+/** Resolve the effective config for a named host. Throws if the host is not
+ *  defined or is missing a required field (ssh_alias / user / persistent_root). */
+export function resolveHost(
+  name: string,
+  config: PirouetteConfig = getConfig(),
+): EffectiveHostConfig {
+  const h = config.hosts?.[name];
+  if (!h) {
     throw new Error(
-      "byo-host provider not configured; set provider.byo-host.{ssh_alias, persistent_root, user}",
+      `Host ${JSON.stringify(name)} is not defined in ${userConfigPath()}. ` +
+        `Add a [hosts.${name}] block.`,
     );
   }
-  const ts = b.tailscale ?? { enabled: false, hostname: "", state_persistent: true };
+
+  const d = config.defaults;
+  const missing: string[] = [];
+  if (!h.ssh_alias) missing.push(`hosts.${name}.ssh_alias`);
+  if (!h.user) missing.push(`hosts.${name}.user`);
+  if (!h.persistent_root) missing.push(`hosts.${name}.persistent_root`);
+  const npm_package = h.npm_package || d.npm_package;
+  if (!npm_package) missing.push(`hosts.${name}.npm_package (or defaults.npm_package)`);
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required config for host ${JSON.stringify(name)}:\n` +
+        missing.map((m) => `  - ${m}`).join("\n") +
+        `\n\nSet them in ${userConfigPath()}. Example:\n\n${EXAMPLE_CONFIG}`,
+    );
+  }
+
+  const ts: Partial<TailscaleConfig> = h.tailscale ?? {};
+  const dot: Partial<DotfilesConfig> = h.dotfiles ?? {};
   return {
-    ssh_alias: b.ssh_alias,
-    persistent_root: b.persistent_root,
-    user: b.user,
-    home_dir: b.home_dir || `${b.persistent_root}/home/${b.user}`,
-    data_dir: b.data_dir || `${b.persistent_root}/pirouette/data`,
+    name,
+    ssh_alias: h.ssh_alias!,
+    user: h.user!,
+    persistent_root: h.persistent_root!,
+    home_dir: h.home_dir || `${h.persistent_root}/home/${h.user}`,
+    data_dir: h.data_dir || `${h.persistent_root}/pirouette/data`,
+    bind_host: h.bind_host || d.bind_host || "127.0.0.1",
+    adopt: h.adopt === true,
+    port: h.port ?? d.port ?? 7777,
+    npm_package,
+    default_model: h.default_model ?? d.default_model ?? "",
+    default_thinking_level: h.default_thinking_level ?? d.default_thinking_level ?? "",
+    public_url: h.public_url ?? "",
+    allowed_hosts: h.allowed_hosts ?? [],
+    dotfiles: {
+      clone_url: dot.clone_url ?? d.dotfiles.clone_url ?? "",
+      authorized_keys_url: dot.authorized_keys_url ?? d.dotfiles.authorized_keys_url ?? "",
+    },
     tailscale: {
-      enabled: ts.enabled,
-      // Default short hostname: `pirouette-<alias>` with non-alphanumerics
-      // collapsed to single hyphens (tailnet hostnames are DNS labels:
-      // letters/digits/hyphens only, <=63 chars). If the user supplied an
-      // explicit hostname, trust it.
+      enabled: ts.enabled === true,
       hostname:
         ts.hostname ||
-        `pirouette-${b.ssh_alias.replace(/[^a-zA-Z0-9-]+/g, "-")}`.slice(0, 63),
+        `pirouette-${(h.ssh_alias ?? name).replace(/[^a-zA-Z0-9-]+/g, "-")}`.slice(0, 63),
       state_persistent: ts.state_persistent !== false,
     },
   };
 }
+
+/** Convenience: resolve the host the current invocation targets (honouring
+ *  `--host` via `$PIROUETTE_SELECTED_HOST`). */
+export function resolveSelectedHost(
+  config: PirouetteConfig = getConfig(),
+): EffectiveHostConfig {
+  return resolveHost(selectHostName(undefined, config), config);
+}
+
+const EXAMPLE_CONFIG = [
+  `default_host = "gpu"`,
+  ``,
+  `[defaults]`,
+  `npm_package   = "@your-scope/pirouette@latest"`,
+  `default_model = "anthropic/claude-sonnet-4-5"`,
+  ``,
+  `[hosts.gpu]`,
+  `ssh_alias       = "gpu"           # entry in ~/.ssh/config`,
+  `user            = "you"           # SSH login user`,
+  `persistent_root = "/data"         # mount-point of your persistent volume`,
+  `public_url      = "https://pirouette-gpu.<tailnet>.ts.net"  # optional`,
+].join("\n");
