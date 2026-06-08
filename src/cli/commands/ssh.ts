@@ -4,16 +4,14 @@
  *  the alias; we just run `ssh <alias>`.
  */
 
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 
 import { getHost } from "../remote/host.js";
 
 export async function ssh(): Promise<void> {
   const target = getHost().shellAlias();
   console.log(`ssh ${target}`);
-  try {
-    execSync(`ssh ${target}`, { stdio: "inherit" });
-  } catch {
-    // ssh exits non-zero on disconnect; that's fine.
-  }
+  // Arg array (no shell) so an unusual alias can't be misparsed. ssh exits
+  // non-zero on disconnect; that's fine, we ignore the status.
+  spawnSync("ssh", [target], { stdio: "inherit" });
 }

@@ -13,9 +13,9 @@ interface Agent {
 export async function status(): Promise<void> {
   // ---- remote host (best-effort) ----
   try {
-    const s = await getHost().status();
+    const lines = await getHost().status();
     console.log("host:");
-    for (const line of s.extraLines ?? []) console.log(line);
+    for (const line of lines) console.log(line);
     console.log("");
   } catch (err) {
     console.log(`host:      ${err instanceof Error ? err.message : err}\n`);

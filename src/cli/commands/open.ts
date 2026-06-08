@@ -7,18 +7,16 @@
  *  escape-hatch via SSH, see the `pru setup` output for the `ssh -L` recipe.
  */
 
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 
 import { getWebUrl } from "../api.js";
 
 function openBrowser(url: string): void {
   const platform = process.platform;
   const cmd = platform === "darwin" ? "open" : platform === "win32" ? "start" : "xdg-open";
-  try {
-    execSync(`${cmd} "${url}"`, { stdio: "ignore" });
-  } catch {
-    console.log(`(could not auto-open; visit ${url} manually)`);
-  }
+  // Arg array (no shell) so a URL with shell metacharacters can't be misparsed.
+  const r = spawnSync(cmd, [url], { stdio: "ignore" });
+  if (r.error) console.log(`(could not auto-open; visit ${url} manually)`);
 }
 
 export async function open(): Promise<void> {

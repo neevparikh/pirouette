@@ -149,9 +149,17 @@ adopt           = true                    # skip the home-migration on setup
 public_url      = "https://pirouette-neev.<tailnet>.ts.net"
 ```
 
-With `adopt = true`, `pru setup` skips the `$HOME` migration and just
-(re)installs pirouette + restarts the server — safe to run against a box
-that's already serving.
+With `adopt = true`, `pru setup` skips the `$HOME` migration. Setup is
+idempotent and **non-disruptive**: it won't reinstall pirouette if it's
+already present, and won't restart the tmux server if it's already running —
+so it's safe to run against a box that's already serving, but it also won't
+*apply* a new version or changed config on its own. Use `pru sync` (local
+build) or `pru sync --npm` (published) to upgrade + restart a running host.
+
+> Container note: if you reach the box through a docker `-p` mapping or a
+> host-level `tailscale serve`, set `bind_host = "0.0.0.0"` — otherwise a
+> `pru sync` restart rebinds the server to loopback and the dashboard goes
+> dark. `pru setup` warns when `adopt` is set but `bind_host` is loopback.
 
 ## Quick start (local dev)
 

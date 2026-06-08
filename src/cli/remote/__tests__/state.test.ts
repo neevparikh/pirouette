@@ -110,6 +110,15 @@ describe("host state — round-trip + paths", () => {
     writeFileSync(p, "not json{");
     expect(loadHostState("gpu")).toEqual({});
   });
+
+  it.each(["[]", "123", "\"hi\"", "null"])(
+    "degrades valid-but-non-object JSON (%s) to {}",
+    (body) => {
+      saveHostState("gpu", { setupAt: "t0" });
+      writeFileSync(stateFilePath("gpu"), body);
+      expect(loadHostState("gpu")).toEqual({});
+    },
+  );
 });
 
 describe("loadHostState — corrupt content via direct write", () => {

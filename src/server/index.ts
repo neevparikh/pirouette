@@ -5,8 +5,8 @@
  *    - Executing this file directly still works (`npm run dev` → tsx).
  *
  *  The server reads configuration from env vars so it behaves identically
- *  whether it's started by the CLI, by `npm run dev`, or inside the Docker
- *  container where the entrypoint script sets the env before launch.
+ *  whether it's started by `npm run dev` locally or by the host bootstrap
+ *  (scripts/pirouette-bootstrap.sh) which sets the env before launch.
  */
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
@@ -55,18 +55,18 @@ function defaultWebDir(): string {
 export async function runServer(opts: RunServerOptions = {}): Promise<ServerHandle> {
   // Config resolution precedence (highest to lowest):
   //   1. Explicit `opts` from the caller (e.g. CLI --port flag)
-  //   2. Environment variables (set by `docker run -e` or a parent shell)
+  //   2. Environment variables (set by the host bootstrap or a parent shell)
   //   3. pirouette.toml (repo) + ~/.pirouette/config.toml (user)
   //   4. Built-in defaults inside getConfig / code below
   // The CLI is no longer responsible for bridging config → env; the server
   // reads the TOML directly so `npm run dev` and `pirouette server` inside
-  // the container behave identically given the same config file.
+  // a host bootstrap behave identically given the same config file.
   const cfg = getConfig();
 
-  // Default bind: 127.0.0.1. The container path explicitly passes
-  // PIROUETTE_HOST=0.0.0.0 (necessary for Docker port mapping); local-dev
-  // and any "someone runs `pirouette server` directly" paths get the
-  // safer default. The remaining defense — Host header validation
+  // Default bind: 127.0.0.1. A host with bind_host="0.0.0.0" passes
+  // PIROUETTE_HOST=0.0.0.0 (e.g. a container behind a docker -p mapping or a
+  // host-level `tailscale serve`); local-dev and the default path get the
+  // safer loopback bind. The remaining defense — Host header validation
   // below — is what protects against DNS rebinding regardless.
   const host = opts.host ?? process.env.PIROUETTE_HOST ?? "127.0.0.1";
   const port =
@@ -245,8 +245,8 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
       `localhost:${portStr}`,
       `127.0.0.1:${portStr}`,
     ]);
-    // When binding 0.0.0.0 (container path) clients may also legitimately
-    // address us by the container's bind IP. We can't enumerate every
+    // When binding 0.0.0.0 clients may also legitimately address us by the
+    // host's bind IP. We can't enumerate every
     // possible source, so allow the actual bind host if it's not the
     // wildcard.
     if (host !== "0.0.0.0" && host !== "127.0.0.1") {
@@ -279,8 +279,8 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
       }
     }
 
-    // Container path: the docker port mapping makes this listener
-    // reachable as the container's hostname or any IP, but we only
+    // 0.0.0.0 bind: a fronting port-map / proxy can make this listener
+    // reachable as the host's hostname or any IP, but we only
     // accept connections we can recognize — same-origin only.
     return allowed;
   }

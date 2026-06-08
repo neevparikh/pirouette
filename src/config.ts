@@ -144,12 +144,6 @@ export function userConfigPath(): string {
   return path.join(homedir(), ".pirouette", "config.toml");
 }
 
-/** Kept for callers that previously distinguished a custom path; now always
- *  the single default. */
-export function defaultUserConfigPath(): string {
-  return userConfigPath();
-}
-
 function loadTomlIfExists(p: string): ConfigSource {
   try {
     const raw = readFileSync(p, "utf8");
@@ -175,13 +169,6 @@ function deepMerge<T>(a: T, b: Partial<T>): T {
   return out as T;
 }
 
-/** Expand a leading `~` to the user's home directory. */
-export function expandHome(p: string): string {
-  if (p.startsWith("~/")) return path.join(homedir(), p.slice(2));
-  if (p === "~") return homedir();
-  return p;
-}
-
 export interface LoadedConfig {
   config: PirouetteConfig;
   sources: ConfigSource[];
@@ -204,11 +191,6 @@ let cached: LoadedConfig | null = null;
 export function getConfig(): PirouetteConfig {
   if (!cached) cached = loadConfig();
   return cached.config;
-}
-
-export function getConfigSources(): ConfigSource[] {
-  if (!cached) cached = loadConfig();
-  return cached.sources;
 }
 
 /** Reset cached config (used by tests). */

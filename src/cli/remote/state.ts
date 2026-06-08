@@ -2,11 +2,12 @@
  *  `~/.pirouette/state/<host>.json`.
  *
  *  Most of what we need about a host lives in the config (`[hosts.<name>]`),
- *  so this record is intentionally tiny: it exists mainly to record that
- *  `pru setup` has run against a host (so `pru status` can distinguish
- *  "configured but never set up" from "set up") and to remember the resolved
- *  SSH alias / dirs for cleanup. Records are trivially re-creatable by
- *  re-running `pru setup`.
+ *  so this record is intentionally tiny: its job is to record that `pru setup`
+ *  has run against a host (so `pru status` can distinguish "configured but
+ *  never set up" from "set up", via `hasHostState`). The resolved alias / dirs
+ *  are stamped alongside purely for human inspection of the file; commands
+ *  read live values from the config, not from here. Records are trivially
+ *  re-creatable by re-running `pru setup`.
  */
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -43,10 +44,13 @@ export function hasHostState(hostName: string): boolean {
   return existsSync(stateFilePath(hostName));
 }
 
-/** Read a host's state. Missing file → `{}` (not set up yet). */
+/** Read a host's state. Missing / unparseable / non-object content → `{}`
+ *  (treated as "not set up yet"). */
 export function loadHostState(hostName: string): HostState {
   try {
-    return JSON.parse(readFileSync(stateFilePath(hostName), "utf8")) as HostState;
+    const parsed = JSON.parse(readFileSync(stateFilePath(hostName), "utf8")) as unknown;
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return parsed as HostState;
   } catch {
     return {};
   }

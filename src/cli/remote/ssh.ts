@@ -18,12 +18,13 @@ export interface RemoteTarget {
   user?: string;
 }
 
-/** Run a remote command via SSH and capture output. Throws on non-zero exit. */
+/** Run a remote command via SSH and capture output. Throws on non-zero exit.
+ *  Agent forwarding, identity, etc. come from the alias's `~/.ssh/config`. */
 export async function ssh(
   command: string,
-  opts: { target: RemoteTarget; timeoutMs?: number; forwardAgent?: boolean },
+  opts: { target: RemoteTarget; timeoutMs?: number },
 ): Promise<{ stdout: string; stderr: string }> {
-  const args = [...(opts.forwardAgent ? ["-A"] : []), opts.target.host, command];
+  const args = [opts.target.host, command];
   const { stdout, stderr } = await pExecFile("ssh", args, {
     timeout: opts.timeoutMs ?? 5 * 60 * 1000,
     maxBuffer: 50 * 1024 * 1024,
@@ -39,9 +40,9 @@ export async function ssh(
  *  bootstrap steps that look hung when buffered). */
 export function sshStreaming(
   command: string,
-  opts: { target: RemoteTarget; forwardAgent?: boolean; timeoutMs?: number },
+  opts: { target: RemoteTarget; timeoutMs?: number },
 ): Promise<number> {
-  const args = [...(opts.forwardAgent ? ["-A"] : []), opts.target.host, command];
+  const args = [opts.target.host, command];
   return new Promise<number>((resolve, reject) => {
     const child = spawn("ssh", args, { stdio: "inherit" });
     let timer: NodeJS.Timeout | null = null;

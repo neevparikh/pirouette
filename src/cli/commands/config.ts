@@ -27,13 +27,12 @@ export function configPath(): void {
 }
 
 export function configEdit(): void {
-  // Edit the active user-override path (respects --config / $PIROUETTE_CONFIG).
-  // We deliberately don't fall back to the repo's pirouette.toml -- editing
-  // that would leak personal values into the published package.
+  // Edit the user-override config (~/.pirouette/config.toml). We deliberately
+  // don't fall back to the repo's pirouette.toml -- editing that would leak
+  // personal values into the published package.
   const targetPath = userConfigPath();
-  // If the active path doesn't exist yet (e.g. user did `pru --config ec2.toml
-  // config edit` to create a fresh one), seed an empty file so the editor
-  // has something to open.
+  // Seed an empty file if it doesn't exist yet so the editor has something
+  // to open.
   if (!existsSync(targetPath)) {
     mkdirSync(path.dirname(targetPath), { recursive: true });
     writeFileSync(targetPath, "", { mode: 0o600 });

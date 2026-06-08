@@ -1,19 +1,16 @@
 #!/bin/bash
-# Pirouette byo-host bootstrap.
+# Pirouette host bootstrap.
 #
-# Runs over SSH from the laptop on every `pru setup` against a byo-host
-# (and re-run on `pru sync --npm` / `pru sync`). Idempotent end-to-end:
-# the slow work (skel seed, yadm clone, npm install) happens once; later
-# runs detect the previous state and short-circuit.
+# Runs over SSH from the laptop on every `pru setup` (and is uploaded again
+# for `pru sync`). Idempotent end-to-end: the slow work (skel seed, yadm
+# clone, npm install) happens once; later runs detect the previous state and
+# short-circuit.
 #
-# Mirrors the EC2 entrypoint (scripts/pirouette-entrypoint.sh) so EC2 and
-# byo-host deployments have the same "what's in $HOME, what's on the
-# persistent volume" mental model.
-#
-# Required env (set by ByoHostProvider before invoking us over SSH):
+# Required env (set by src/cli/remote/host.ts buildBootstrapEnv() before
+# invoking us over SSH):
 #   PIROUETTE_PERSISTENT_ROOT   mount-point of the persistent volume
 #                               (e.g. /data on a METR k8s devpod, /srv on
-#                               a long-running EC2 you set up by hand).
+#                               a long-running VM you set up by hand).
 #   PIROUETTE_HOME_DIR          target of the $HOME symlink. Defaults to
 #                               ${PIROUETTE_PERSISTENT_ROOT}/home/$USER if
 #                               unset.
@@ -74,7 +71,7 @@ export PIROUETTE_ADOPT="${PIROUETTE_ADOPT:-0}"
 # via sudo chown; this catches genuinely bad config.
 if [ ! -d "$PIROUETTE_PERSISTENT_ROOT" ]; then
     echo "[pirouette-bootstrap] ERROR: $PIROUETTE_PERSISTENT_ROOT is not a directory." >&2
-    echo "  Check provider.byo-host.persistent_root in ~/.pirouette/config.toml." >&2
+    echo "  Check hosts.<name>.persistent_root in ~/.pirouette/config.toml." >&2
     exit 1
 fi
 
@@ -100,9 +97,8 @@ mkdir -p "$PIROUETTE_DATA_DIR" "$(dirname "$PIROUETTE_HOME_DIR")"
 
 # ---- 2. Whole-home migration ---------------------------------------------
 # $HOME -> $PIROUETTE_HOME_DIR via symlink, seeded once from /opt/home-skel.
-# Same source the EC2 entrypoint uses (scripts/pirouette-entrypoint.sh:46-63)
-# so image-baked $HOME state ends up in the persistent volume on first boot
-# and survives pod/instance recreates.
+# Image-baked $HOME state ends up in the persistent volume on first boot and
+# survives pod/instance recreates. Skipped entirely in adopt mode (see above).
 #
 # Safety notes:
 #   - We cd /tmp before mv'ing /home/<user> so we don't orphan our own CWD.
@@ -136,8 +132,8 @@ ensure_persistent_home() {
         existing="$(readlink "$current_home")"
         echo "[pirouette-bootstrap] ERROR: $current_home is a symlink to $existing," >&2
         echo "  but pirouette expects it to point to $persistent_home." >&2
-        echo "  Either set provider.byo-host.home_dir = \"$existing\" in your config" >&2
-        echo "  to adopt the existing layout, or manually fix and re-run." >&2
+        echo "  Either set hosts.<name>.home_dir = \"$existing\" in your config" >&2
+        echo "  (or hosts.<name>.adopt = true to use \$HOME as-is), or fix and re-run." >&2
         exit 1
     fi
 
@@ -145,7 +141,7 @@ ensure_persistent_home() {
     mkdir -p "$persistent_home"
 
     # First-boot seeding from /opt/home-skel. Sentinel prevents re-seed on
-    # subsequent boots (matches EC2 behaviour: image bumps don't re-seed,
+    # subsequent boots (image bumps don't re-seed,
     # which is the price of persistent home).
     local seed_src="/opt/home-skel"
     local seed_sentinel="$persistent_home/.pirouette-home-seeded"
@@ -187,8 +183,8 @@ mkdir -p "$HOME/logs" "$PIROUETTE_DATA_DIR/logs"
 exec > >(tee -a "$HOME/logs/bootstrap.log") 2>&1
 
 # ---- 3. authorized_keys ---------------------------------------------------
-# Idempotent overwrite on every run, mirroring scripts/pirouette-entrypoint.sh:
-# 117-127. Key rotation Just Works (rotate at the URL, re-run `pru setup`).
+# Idempotent overwrite on every run. Key rotation Just Works (rotate at the
+# URL, re-run `pru setup`).
 if [ -n "${PIROUETTE_AUTHORIZED_KEYS_URL:-}" ]; then
     log "fetching authorized_keys from $PIROUETTE_AUTHORIZED_KEYS_URL"
     mkdir -p "$HOME/.ssh"
@@ -198,8 +194,7 @@ if [ -n "${PIROUETTE_AUTHORIZED_KEYS_URL:-}" ]; then
 fi
 
 # ---- 4. npm prefix --------------------------------------------------------
-# Same logic as scripts/pirouette-entrypoint.sh. user-local npm prefix so
-# `npm install -g` doesn't need sudo. Idempotent.
+# user-local npm prefix so `npm install -g` doesn't need sudo. Idempotent.
 NPM_PREFIX="$HOME/.npm-global"
 mkdir -p "$NPM_PREFIX/bin" "$NPM_PREFIX/lib"
 if [ "$(npm config get prefix 2>/dev/null)" != "$NPM_PREFIX" ]; then
@@ -247,7 +242,7 @@ elif command -v yadm >/dev/null 2>&1; then
     else
         log "WARN: yadm clone failed; continuing without dotfiles"
         log "  (if URL is SSH-form, check that ForwardAgent yes is in"
-        log "   your ~/.ssh/config for the byo-host alias, and that the"
+        log "   your ~/.ssh/config for the host alias, and that the"
         log "   key your local ssh-agent has access to is also a deploy"
         log "   key / collaborator on the dotfiles repo.)"
     fi
@@ -269,7 +264,7 @@ fi
 # (default 127.0.0.1 loopback -- access from laptop via SSH tunnel).
 #
 # The tmux command forwards a curated set of env vars that the laptop's
-# byo-host provider plumbs through (default model / thinking level,
+# host module plumbs through (default model / thinking level,
 # config-level allowed_hosts). Empty / unset vars are omitted rather
 # than passed as empty strings because the server falls back to
 # config.toml / defaults via nullish-coalesce -- an explicit empty

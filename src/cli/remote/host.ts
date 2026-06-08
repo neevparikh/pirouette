@@ -46,13 +46,6 @@ export interface LogsCommand {
   sshAlias: string;
 }
 
-/** Coarse lifecycle + detail for `pru status`. */
-export interface HostStatus {
-  state: "absent" | "not-setup" | "running" | "stopped" | "unknown";
-  detail: string;
-  extraLines?: string[];
-}
-
 /** Where the bootstrap script lands on the remote. /tmp is fine — re-uploaded
  *  on every setup/sync. */
 const REMOTE_BOOTSTRAP_PATH = "/tmp/pirouette-bootstrap.sh";
@@ -71,7 +64,7 @@ function bootstrapScriptPath(): string {
 
 /** Env the bootstrap script reads. Keep in lock-step with
  *  `scripts/pirouette-bootstrap.sh`. */
-interface BootstrapEnv {
+export interface BootstrapEnv {
   PIROUETTE_PERSISTENT_ROOT: string;
   PIROUETTE_HOME_DIR: string;
   PIROUETTE_DATA_DIR: string;
@@ -89,6 +82,35 @@ interface BootstrapEnv {
   PIROUETTE_TS_ENABLED?: string;
   PIROUETTE_TS_HOSTNAME?: string;
   PIROUETTE_TS_STATE_PERSISTENT?: string;
+}
+
+/** Map an effective host config to the env the bootstrap script reads. Pure
+ *  (no I/O) so it can be unit-tested against the script's contract. Empty /
+ *  false-y optional values are omitted rather than passed as empty strings,
+ *  so the script's own defaults apply. */
+export function buildBootstrapEnv(c: EffectiveHostConfig): BootstrapEnv {
+  const env: BootstrapEnv = {
+    PIROUETTE_PERSISTENT_ROOT: c.persistent_root,
+    PIROUETTE_HOME_DIR: c.home_dir,
+    PIROUETTE_DATA_DIR: c.data_dir,
+    PIROUETTE_PACKAGE: c.npm_package,
+    PIROUETTE_PORT: String(c.port),
+    PIROUETTE_BIND_HOST: c.bind_host,
+  };
+  if (c.adopt) env.PIROUETTE_ADOPT = "1";
+  if (c.dotfiles.clone_url) env.PIROUETTE_DOTFILES_URL = c.dotfiles.clone_url;
+  if (c.dotfiles.authorized_keys_url) {
+    env.PIROUETTE_AUTHORIZED_KEYS_URL = c.dotfiles.authorized_keys_url;
+  }
+  if (c.default_model) env.PIROUETTE_DEFAULT_MODEL = c.default_model;
+  if (c.default_thinking_level) env.PIROUETTE_DEFAULT_THINKING_LEVEL = c.default_thinking_level;
+  if (c.allowed_hosts.length > 0) env.PIROUETTE_ALLOWED_HOSTS = c.allowed_hosts.join(",");
+  if (c.tailscale.enabled) {
+    env.PIROUETTE_TS_ENABLED = "1";
+    env.PIROUETTE_TS_HOSTNAME = c.tailscale.hostname;
+    env.PIROUETTE_TS_STATE_PERSISTENT = c.tailscale.state_persistent ? "1" : "0";
+  }
+  return env;
 }
 
 export class Host {
@@ -124,6 +146,22 @@ export class Host {
     }
     console.log(`  ok (logged in as ${c.user}@${c.ssh_alias})`);
 
+    // A host that's adopted (already set up the way the user wants) but left
+    // on the default loopback bind is almost always a mistake for the
+    // container case: something in front of the bind (docker -p, a host-level
+    // `tailscale serve`) won't be able to reach a 127.0.0.1-bound server, so
+    // the dashboard silently goes dark. Warn rather than fail (there are
+    // valid adopt+loopback setups, e.g. SSH-tunnel-only access).
+    if (c.adopt && c.bind_host === "127.0.0.1") {
+      console.log("");
+      console.log(
+        `WARNING: hosts.${c.name} has adopt=true but bind_host=127.0.0.1. If you ` +
+          `reach this host through a docker -p mapping or a host-level \`tailscale ` +
+          `serve\`, set bind_host = "0.0.0.0" or the dashboard will be unreachable.`,
+      );
+      console.log("");
+    }
+
     const auth = checkLocalAuth();
     if (!auth.ready) {
       console.log("");
@@ -141,30 +179,8 @@ export class Host {
     console.log(`uploading bootstrap script -> ${c.ssh_alias}:${REMOTE_BOOTSTRAP_PATH}`);
     await runScp(localScript, REMOTE_BOOTSTRAP_PATH, { target: this.target() });
 
-    const env: BootstrapEnv = {
-      PIROUETTE_PERSISTENT_ROOT: c.persistent_root,
-      PIROUETTE_HOME_DIR: c.home_dir,
-      PIROUETTE_DATA_DIR: c.data_dir,
-      PIROUETTE_PACKAGE: c.npm_package,
-      PIROUETTE_PORT: String(c.port),
-      PIROUETTE_BIND_HOST: c.bind_host,
-    };
-    if (c.adopt) env.PIROUETTE_ADOPT = "1";
-    if (c.dotfiles.clone_url) env.PIROUETTE_DOTFILES_URL = c.dotfiles.clone_url;
-    if (c.dotfiles.authorized_keys_url) {
-      env.PIROUETTE_AUTHORIZED_KEYS_URL = c.dotfiles.authorized_keys_url;
-    }
-    if (c.default_model) env.PIROUETTE_DEFAULT_MODEL = c.default_model;
-    if (c.default_thinking_level) env.PIROUETTE_DEFAULT_THINKING_LEVEL = c.default_thinking_level;
-    if (c.allowed_hosts.length > 0) env.PIROUETTE_ALLOWED_HOSTS = c.allowed_hosts.join(",");
-    if (c.tailscale.enabled) {
-      env.PIROUETTE_TS_ENABLED = "1";
-      env.PIROUETTE_TS_HOSTNAME = c.tailscale.hostname;
-      env.PIROUETTE_TS_STATE_PERSISTENT = c.tailscale.state_persistent ? "1" : "0";
-    }
-
-    const envPrefix = Object.entries(env)
-      .map(([k, v]) => `${k}=${shellQuote(v as string)}`)
+    const envPrefix = Object.entries(buildBootstrapEnv(c))
+      .map(([k, v]) => `${k}=${shellQuote(v)}`)
       .join(" ");
 
     if (c.adopt) {
@@ -306,9 +322,11 @@ export class Host {
 
   // ---- status -----------------------------------------------------------
 
-  async status(): Promise<HostStatus> {
+  /** Lines describing the host for `pru status`. Best-effort: never throws
+   *  on a transient SSH error — surfaces it as a line instead. */
+  async status(): Promise<string[]> {
     const c = this.cfg;
-    const extra: string[] = [
+    const lines: string[] = [
       `  host       ${this.name}`,
       `  alias      ${c.ssh_alias}`,
       `  user       ${c.user}`,
@@ -316,40 +334,32 @@ export class Host {
     ];
 
     if (!hasHostState(this.name)) {
-      return {
-        state: "not-setup",
-        detail: `configured but not set up (run \`pru --host ${this.name} setup\`)`,
-        extraLines: extra,
-      };
+      lines.push(`  state      not set up (run \`pru --host ${this.name} setup\`)`);
+      return lines;
     }
 
-    const home = `/home/${c.user}`;
+    // One round-trip: is tmux running, does the data dir exist, and the
+    // tailscale FQDN (if the bootstrap wrote one).
     const probe =
-      `if [ -L ${shellQuote(home)} ] && [ "$(readlink ${shellQuote(home)})" = ${shellQuote(c.home_dir)} ]; then echo SYMLINK_OK; else echo SYMLINK_NA; fi; ` +
       `tmux has-session -t pirouette 2>/dev/null && echo TMUX_RUNNING || echo TMUX_STOPPED; ` +
       `if [ -d ${shellQuote(c.data_dir)} ]; then echo DATA_DIR_OK; else echo DATA_DIR_MISSING; fi; ` +
       `echo TS_FQDN="$(cat ${shellQuote(c.data_dir + "/tailscale-fqdn")} 2>/dev/null || echo none)"`;
     try {
       const { stdout } = await runSsh(probe, { target: this.target(), timeoutMs: 15_000 });
-      const lines = stdout.trim().split("\n").map((l) => l.trim());
-      const tmuxRunning = lines.includes("TMUX_RUNNING");
-      const dataDirOk = lines.includes("DATA_DIR_OK");
-      const tsLine = lines.find((l) => l.startsWith("TS_FQDN="));
+      const out = stdout.trim().split("\n").map((l) => l.trim());
+      const tmuxRunning = out.includes("TMUX_RUNNING");
+      const dataDirOk = out.includes("DATA_DIR_OK");
+      const tsLine = out.find((l) => l.startsWith("TS_FQDN="));
       const tsFqdn = tsLine ? tsLine.slice("TS_FQDN=".length) : "none";
-      extra.push(`  data dir   ${dataDirOk ? "\u2705 present" : "\u26a0 missing"} (${c.data_dir})`);
-      extra.push(`  tmux       ${tmuxRunning ? "\u2705 running" : "\u26a0 stopped"}`);
+      lines.push(`  data dir   ${dataDirOk ? "\u2705 present" : "\u26a0 missing"} (${c.data_dir})`);
+      lines.push(`  tmux       ${tmuxRunning ? "\u2705 running" : "\u26a0 stopped"}`);
       if (tsFqdn !== "none" && tsFqdn !== "") {
-        extra.push(`  tailscale  \u2705 https://${tsFqdn}`);
+        lines.push(`  tailscale  \u2705 https://${tsFqdn}`);
       }
-      return {
-        state: tmuxRunning ? "running" : "stopped",
-        detail: `${c.ssh_alias} (${tmuxRunning ? "running" : "stopped"})`,
-        extraLines: extra,
-      };
     } catch (err) {
-      extra.push(`  health     unreachable (${err instanceof Error ? err.message : err})`);
-      return { state: "unknown", detail: `${c.ssh_alias} (unreachable)`, extraLines: extra };
+      lines.push(`  health     unreachable (${err instanceof Error ? err.message : err})`);
     }
+    return lines;
   }
 
   // ---- ssh / logs targets ----------------------------------------------
@@ -463,12 +473,17 @@ export class Host {
       envPairs.push(`PIROUETTE_ALLOWED_HOSTS=${shellQuote([...allowedHosts].join(","))}`);
     }
 
-    const envPrefix = envPairs.join(" ");
+    // Build the inner server command, then nest-quote it twice: once so it's
+    // a single argument to `tmux new-session`, once so the whole thing is a
+    // single argument to `bash -lc`. shellQuote handles embedded single
+    // quotes (the per-value quoting in envPairs) at each level, so values
+    // containing spaces survive (a previous version wrapped the command in a
+    // bare '...' which truncated spaced values at the first word).
+    const logPath = `${c.data_dir}/logs/pirouette.log`;
+    const inner = `${envPairs.join(" ")} pirouette server 2>&1 | tee -a ${shellQuote(logPath)}`;
+    const tmuxCmd = `tmux new-session -d -s pirouette ${shellQuote(inner)}`;
     await runSsh(`tmux kill-session -t pirouette 2>/dev/null || true`, { target: this.target() });
-    await runSsh(
-      `bash -lc "tmux new-session -d -s pirouette '${envPrefix} pirouette server 2>&1 | tee -a ${shellQuote(c.data_dir + "/logs/pirouette.log")}'"`,
-      { target: this.target() },
-    );
+    await runSsh(`bash -lc ${shellQuote(tmuxCmd)}`, { target: this.target() });
   }
 
   /** Read the tailscale FQDN the bootstrap writes after `tailscale serve`.
@@ -535,11 +550,14 @@ async function confirm(prompt: string): Promise<boolean> {
   }
 }
 
-function shellQuote(s: string): string {
+/** Single-quote a string for safe interpolation into a remote shell command,
+ *  escaping embedded single quotes via the `'\''` idiom. Exported for tests. */
+export function shellQuote(s: string): string {
   return "'" + s.replace(/'/g, `'\\''`) + "'";
 }
 
-function validateLines(raw: string | undefined): string {
+/** Validate `--lines` for `pru logs`. Exported for tests. */
+export function validateLines(raw: string | undefined): string {
   const n = Number(raw ?? "200");
   if (!Number.isFinite(n) || n <= 0 || n > 100_000) {
     throw new Error(`--lines must be a positive integer up to 100000 (got: ${raw})`);
