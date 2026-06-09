@@ -1,21 +1,18 @@
-/** `pru sync` — ship local changes (or a fresh npm install) to the remote.
+/** `pru sync` — ship local changes (or a fresh npm install) to the host.
  *
- *  Provider-aware: the provider implements the actual sync mechanics.
- *    - `--secrets`: re-push laptop auth state.
- *    - `--npm`:     `npm install -g <pkg>` on remote + restart server.
+ *    - `--secrets`: re-push laptop auth state (auth.json, AWS caches, ...).
+ *    - `--npm`:     `npm install -g <pkg>` on the host + restart the server.
  *    - (default):   npm pack locally, upload, install from tarball, restart.
- *
- *  EC2 wraps everything in `docker exec`; byo-host runs directly via SSH.
  */
 
-import { getProvider } from "../remote/provider.js";
+import { getHost } from "../remote/host.js";
 
 export async function sync(opts: { npm?: boolean; secrets?: boolean }): Promise<void> {
-  const provider = getProvider();
+  const host = getHost();
 
   if (opts.secrets) {
     console.log("pushing local auth secrets to remote...");
-    const result = await provider.pushSecrets();
+    const result = await host.pushSecrets();
     console.log(
       `  done. pushed=${result.pushed}, skipped=${result.skipped}` +
         (result.missing.length > 0 ? `, missing=${result.missing.join(", ")}` : ""),
@@ -24,9 +21,9 @@ export async function sync(opts: { npm?: boolean; secrets?: boolean }): Promise<
   }
 
   if (opts.npm) {
-    await provider.syncFromNpm();
+    await host.syncFromNpm();
     return;
   }
 
-  await provider.syncFromLocalBuild();
+  await host.syncFromLocalBuild();
 }

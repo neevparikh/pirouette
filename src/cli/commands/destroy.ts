@@ -1,19 +1,16 @@
-/** `pru destroy` — destroy the host.
+/** `pru destroy` — clear pirouette's local state for the host, and optionally
+ *  nuke the host's persistent dirs (`--delete-data`).
  *
- *  Provider-aware: on the EC2 path this terminates the instance, optionally
- *  also deletes the EBS data volume (with `--delete-volume`). Phase 2 will
- *  extend this for byo-host (no-op on compute; `--delete-volume` deletes
- *  the persistent dirs after confirmation).
- *
- *  After destroy you can `pru setup` again; unless you also deleted the
- *  persistent volume, your agent state survives.
+ *  Pirouette doesn't own the host itself, so this never touches the host's
+ *  lifecycle — only the pirouette state on it. Without `--delete-data`, your
+ *  agent state survives and `pru setup` brings it back.
  */
 
-import { getProvider } from "../remote/provider.js";
+import { getHost } from "../remote/host.js";
 
-export async function destroy(opts: { deleteVolume?: boolean; yes?: boolean }): Promise<void> {
-  await getProvider().destroy({
-    deletePersistent: opts.deleteVolume === true,
+export async function destroy(opts: { deleteData?: boolean; yes?: boolean }): Promise<void> {
+  await getHost().destroy({
+    deletePersistent: opts.deleteData === true,
     yes: opts.yes,
   });
 }

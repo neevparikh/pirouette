@@ -1,44 +1,40 @@
 # pirouette
 
 Run long-lived [pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)
-coding agents on a cloud VM, with a web dashboard for talking to them
-and a CLI (`pru`) for managing the box.
+coding agents on a host you already have, with a web dashboard for talking
+to them and a CLI (`pru`) for managing the box.
 
-You provision one EC2 instance with a Docker container; pirouette's server
-runs inside the container and manages a pool of pi agents. Each agent gets
-its own git worktree so they can work on different branches in parallel.
+You point pirouette at one or more SSH-reachable Linux hosts. It installs
+itself over SSH and runs a pool of pi agents inside a tmux session. Each
+agent gets its own git worktree so they can work on different branches in
+parallel.
 
 ## What this is
 
-- **Single-user.** Designed for one person on one cloud box. No multi-user
-  features, no public access path.
-- **Long-running.** Agents survive across SSH disconnects, browser
-  refreshes, container restarts, even instance reboots (state lives on
-  a persistent volume).
+- **Bring-your-own host.** Pirouette doesn't provision or own infrastructure.
+  You give it an SSH alias to a host you already manage — a METR k8s devpod,
+  a long-running VM, a dev container, your team's shared researcher box — and
+  it installs itself there over SSH. No cloud API calls.
+- **Single-user.** Designed for one person. No multi-user features, no public
+  access path.
+- **Long-running.** Agents survive SSH disconnects, browser refreshes, and
+  host restarts (state lives on a persistent volume you point pirouette at).
 - **Pi-native.** Uses [pi-coding-agent](https://github.com/badlogic/pi-mono)
   directly — same session format, same extensions, same provider plumbing.
-  If you've used pi locally you'll recognize the model.
-- **Web + CLI.** Browser dashboard for chatting; `pru` for provisioning,
-  shelling in, viewing logs, shipping local changes.
-- **Provider-pluggable.** Two host providers today:
-  - `ec2` (default): pirouette owns the lifecycle — provisions an EC2
-    instance, attaches an EBS data volume, runs the container.
-  - `byo-host`: you provide an SSH-reachable Linux host (e.g. a METR
-    k8s devpod); pirouette installs itself there over SSH. No AWS calls,
-    no Docker.
-  Toggle via `provider.kind` in `~/.pirouette/config.toml`.
+- **Web + CLI.** Browser dashboard for chatting; `pru` for setup, shelling
+  in, viewing logs, shipping local changes.
+- **Multi-host.** One config file describes every host under `[hosts.<name>]`;
+  target one at a time with `--host <name>`.
 
 ## What this isn't
 
-- **Not a multi-tenant service.** Anyone who can reach the dashboard's
-  port has full shell access on your container (the agents have
-  bash/edit/write tools by design). Today the only thing keeping that
-  perimeter narrow is your AWS security group + SSH tunnel.
-  See [Trust model](#trust-model) below.
-- **Not yet authenticated** at the application layer. A random shared
-  bearer token is on the roadmap.
-- **Not an `eval`-style harness.** No sandboxing of agent actions
-  beyond what the container itself provides.
+- **Not a multi-tenant service.** Anyone who can reach the dashboard's port
+  has full shell access on the host (the agents have bash/edit/write tools by
+  design). The perimeter is the SSH tunnel (or your tailnet ACL). See
+  [Trust model](#trust-model).
+- **Not yet authenticated** at the application layer.
+- **Not an `eval`-style harness.** No sandboxing of agent actions beyond what
+  the host itself provides.
 
 ## Install
 
@@ -46,143 +42,138 @@ its own git worktree so they can work on different branches in parallel.
 npm install -g @neevparikh/pirouette   # provides both `pirouette` and `pru`
 ```
 
-## Quick start (cloud)
+## Requirements for a host
 
-The primary use case. Provisions an EC2 instance, attaches a 500 GiB
-EBS volume, runs your Docker image, installs pirouette inside it, and
-serves the dashboard at a Tailscale HTTPS URL.
+Any host you target needs:
 
-One-time setup:
+- `node` + `npm`
+- `git`, `tmux`, `curl`, an OpenSSH server
+- a non-root user with passwordless `sudo`
+- a persistent directory (survives host recreate) for pirouette's state
+- (optional) `yadm` for dotfiles
 
-1. Install the AWS CLI and `aws sso login` (or otherwise authenticate)
-   to a profile that can create EC2 + EBS in your target region.
-2. Create `~/.pirouette/config.toml` with your AWS + tailnet info —
-   see [Configuration](#configuration) below.
+You also need an `~/.ssh/config` entry for the host so `ssh <alias>` works.
 
-Then:
+## Quick start
+
+1. Make sure you can reach the host: an `~/.ssh/config` entry with `HostName`,
+   `User`, etc., and `ssh gpu echo ok` succeeds.
+
+2. Write `~/.pirouette/config.toml`:
+
+   ```toml
+   default_host = "gpu"
+
+   [defaults]
+   npm_package   = "@neevparikh/pirouette@latest"
+   default_model = "anthropic/claude-sonnet-4-5"
+
+   [hosts.gpu]
+   ssh_alias       = "gpu"            # entry in ~/.ssh/config
+   user            = "you"            # SSH login user
+   persistent_root = "/data"          # mount-point of the persistent volume
+   # data_dir      = ""               # optional; default ${persistent_root}/pirouette/data
+   # home_dir      = ""               # optional; default ${persistent_root}/home/${user}
+
+   [hosts.gpu.tailscale]
+   enabled  = true                    # bridge the dashboard onto your tailnet
+   hostname = "pirouette-gpu"
+
+   [defaults.dotfiles]                # optional
+   clone_url           = "git@github.com:you/dotfiles.git"
+   authorized_keys_url = "https://github.com/you.keys"
+   ```
+
+3. Set it up:
+
+   ```bash
+   pru setup        # upload bootstrap, run it (install + tmux server), push secrets
+   ```
+
+   `pru setup` uploads a bootstrap script over SSH that migrates `$HOME` onto
+   the persistent volume, clones dotfiles, installs the pirouette package,
+   starts the server in tmux, and (if enabled) brings up Tailscale. It's
+   idempotent — safe to re-run.
+
+If Tailscale is enabled, setup prints an `https://<host>.<tailnet>.ts.net`
+URL; drop it into `hosts.gpu.public_url`. Otherwise reach the dashboard via
+an SSH tunnel (the server binds `127.0.0.1` on the host):
 
 ```bash
-pru preflight     # read-only: verify AWS config + resource discovery
-pru setup         # provision: instance + EBS + container + server
+ssh -fN -L 7777:localhost:7777 gpu
+export PIROUETTE_URL=http://localhost:7777
 ```
-
-The last step of `pru setup` prints a one-time bring-up recipe for
-Tailscale on the host (install + `tailscale up --ssh --hostname=...`
-+ `tailscale serve --bg --https=443 http://localhost:7777`) which
-gives you `https://<host>.<tailnet>.ts.net/` as the dashboard URL.
-Drop that into `server.public_url` in your config and you're ready.
 
 Day-to-day:
 
 ```bash
 pru open          # open the dashboard URL in your browser
-pru ssh           # shell into the container
-pru status        # instance state + server health
+pru ssh           # shell into the host
+pru status        # SSH probe + server health
 pru logs -f       # tail server logs
-```
-
-When you're done for a while:
-
-```bash
-pru teardown      # stop the instance; EBS preserved (state survives)
-```
-
-To rebuild from scratch:
-
-```bash
-pru destroy [--delete-volume]   # terminate; optionally also delete EBS
-```
-
-## Quick start (byo-host)
-
-If you already have an SSH-reachable Linux box you want to use — a
-METR k8s devpod, a long-running personal VM, your team's shared
-researcher box — the byo-host provider points pirouette at it without
-any provisioning. Pirouette uploads a bootstrap script over SSH that
-handles the home migration, pirouette install, and tmux session.
-
-The remote needs `node`, `npm`, `git`, `tmux`, `sshd`, a non-root
-sudo-able user, and (recommended) `yadm` for dotfiles. Use the same
-image you'd use for `pru setup` — the entrypoint contract is
-identical (see [Container image requirements](#container-image-requirements)).
-
-One-time setup:
-
-1. Make sure you have an `~/.ssh/config` entry for the host (e.g.
-   `Host gpu` with `HostName`, `User`, etc.). Test it: `ssh gpu echo ok`.
-2. Write `~/.pirouette/config.toml`:
-
-   ```toml
-   [provider]
-   kind = "byo-host"
-
-   [provider.byo-host]
-   ssh_alias       = "gpu"             # entry in ~/.ssh/config
-   persistent_root = "/data"           # mount-point of the persistent volume
-   user            = "neev"            # SSH login user
-   # home_dir = ""                     # optional override; default ${persistent_root}/home/${user}
-   # data_dir = ""                     # optional override; default ${persistent_root}/pirouette/data
-
-   [container]
-   npm_package = "@neevparikh/pirouette@latest"
-
-   [dotfiles]
-   clone_url           = "https://github.com/you/dotfiles.git"  # optional
-   authorized_keys_url = "https://github.com/you.keys"          # recommended
-   ```
-
-Then:
-
-```bash
-pru preflight     # ssh alias resolves, ssh probe, persistent root exists, tooling present
-pru setup         # upload bootstrap, run it, push secrets, wait for /api/health
-```
-
-Laptop access goes through an SSH tunnel (the server binds `127.0.0.1`
-on the remote — see [Trust model](#trust-model)):
-
-```bash
-# Easiest: add a LocalForward line to your ssh_config:
-#   Host gpu
-#     LocalForward 7777 localhost:7777
-# Then any `ssh gpu` opens the tunnel as a side-effect.
-export PIROUETTE_URL=http://localhost:7777
-pru open          # dashboard
-pru list          # CLI
-```
-
-Day-to-day (same commands as the EC2 path; provider-aware under the hood):
-
-```bash
-pru ssh           # shell on the remote (no host/container split)
-pru logs -f       # tail the server log
-pru status        # ssh probe + home-symlink health + tmux state
-pru sync          # local rebuild -> remote install -> tmux restart
-pru sync --npm    # upgrade to latest published package
-pru sync --secrets   # re-push laptop pi auth state
+pru sync          # rebuild locally -> install on host -> restart server
+pru sync --npm    # upgrade to the latest published package
+pru sync --secrets   # re-push laptop auth state
 pru teardown      # kill the pirouette tmux session (host stays up)
-pru destroy       # clear local state (use --delete-volume to also rm -rf the persistent dirs)
+pru destroy       # clear local state (use --delete-data to also rm the persistent dirs)
 ```
 
-Provisioning the devpod itself, GPU allocation, etc. — those are your
-responsibility (use whatever you already use, e.g. METR's `devpod` TUI).
-Pirouette doesn't touch the pod lifecycle.
+### Targeting multiple hosts
+
+Add more `[hosts.<name>]` blocks and select per-invocation:
+
+```bash
+pru --host gpu status
+pru --host ec2 logs -f
+```
+
+If `--host` is omitted, pirouette uses `default_host`, or the sole host if
+only one is defined.
+
+### Adopting an already-set-up host (e.g. a dev container)
+
+If a host is already laid out the way you want — most commonly a Docker
+container whose `$HOME` is a bind-mount rather than a symlink pirouette
+should move — set `adopt` and (for containers behind a port-map or a
+host-level `tailscale serve`) `bind_host`:
+
+```toml
+[hosts.ec2]
+ssh_alias       = "pirouette-container"   # the alias that lands in the container
+user            = "neev"
+persistent_root = "/data"
+data_dir        = "/data"                 # reuse existing data in place
+home_dir        = "/home/neev"            # the container's bind-mounted home
+bind_host       = "0.0.0.0"               # keep docker -p / tailscale-serve working
+adopt           = true                    # skip the home-migration on setup
+public_url      = "https://pirouette-neev.<tailnet>.ts.net"
+```
+
+With `adopt = true`, `pru setup` skips the `$HOME` migration. Setup is
+idempotent and **non-disruptive**: it won't reinstall pirouette if it's
+already present, and won't restart the tmux server if it's already running —
+so it's safe to run against a box that's already serving, but it also won't
+*apply* a new version or changed config on its own. Use `pru sync` (local
+build) or `pru sync --npm` (published) to upgrade + restart a running host.
+
+> Container note: if you reach the box through a docker `-p` mapping or a
+> host-level `tailscale serve`, set `bind_host = "0.0.0.0"` — otherwise a
+> `pru sync` restart rebinds the server to loopback and the dashboard goes
+> dark. `pru setup` warns when `adopt` is set but `bind_host` is loopback.
 
 ## Quick start (local dev)
 
-For developing pirouette itself, or running agents locally without any
-remote host:
+For developing pirouette itself, or running agents locally without a remote
+host:
 
 ```bash
 pirouette server                # binds 127.0.0.1:7777
 open http://localhost:7777
 ```
 
-Local mode skips the entire AWS / Docker / Tailscale layer — you're
-just running the server process directly. Most useful for working on
-the dashboard or the server code. Set `PIROUETTE_URL=http://localhost:7777`
-in the same shell so the CLI talks to your local server instead of
-the cloud one.
+Local mode runs the server process directly. Set
+`PIROUETTE_URL=http://localhost:7777` in the same shell so the CLI talks to
+your local server.
 
 ## Configuration
 
@@ -190,68 +181,37 @@ Pirouette reads TOML from three places, in order (later wins):
 
 1. Built-in defaults
 2. `./pirouette.toml` (packaged with the tool; generic defaults only)
-3. `~/.pirouette/config.toml` (your per-user overrides; not checked in)
+3. `~/.pirouette/config.toml` (your hosts + per-user overrides; not checked in)
 
-`pru config show` prints the effective merged config; `pru config edit`
-opens your override file in `$EDITOR`.
+`pru config show` prints the effective merged config; `pru config edit` opens
+your override file in `$EDITOR`.
 
-### Required fields for `pru setup`
+### Schema
 
-`pru setup` will refuse to run until these are set in
-`~/.pirouette/config.toml`:
+| key | scope | what it is |
+|---|---|---|
+| `default_host` | top-level | Host used when `--host` isn't passed |
+| `defaults.npm_package` | defaults | npm spec installed on the host (required) |
+| `defaults.default_model` | defaults | Model used when none is specified |
+| `defaults.default_thinking_level` | defaults | `off`/`minimal`/`low`/`medium`/`high` |
+| `defaults.port` | defaults | Server port (default 7777) |
+| `defaults.bind_host` | defaults | Server bind address (default `127.0.0.1`) |
+| `defaults.dotfiles.clone_url` | defaults | `yadm clone` URL (optional) |
+| `defaults.dotfiles.authorized_keys_url` | defaults | authorized_keys URL (optional) |
+| `hosts.<name>.ssh_alias` | host | `~/.ssh/config` alias (required) |
+| `hosts.<name>.user` | host | SSH login user (required) |
+| `hosts.<name>.persistent_root` | host | Mount-point of the persistent volume (required) |
+| `hosts.<name>.data_dir` | host | Override `$PIROUETTE_DATA_DIR` |
+| `hosts.<name>.home_dir` | host | Override `$HOME` target |
+| `hosts.<name>.bind_host` | host | Override `defaults.bind_host` |
+| `hosts.<name>.adopt` | host | Skip the home-migration on setup |
+| `hosts.<name>.public_url` | host | Dashboard URL (API base / `pru open`) |
+| `hosts.<name>.allowed_hosts` | host | Extra `Host`/`Origin` header values |
+| `hosts.<name>.tailscale.*` | host | Tailscale bring-up (see below) |
 
-| key | what it is |
-|---|---|
-| `aws.network.vpc_name` | Name tag of the VPC to launch into |
-| `aws.network.subnet_name_pattern` | Name-tag glob for private subnets; first alphabetical match wins |
-| `aws.network.security_group_name` | Existing SG attached to the instance (must allow SSH inbound from your location) |
-| `aws.tags.Owner` | Tag applied to every created resource — usually your email |
-| `instance.key_name` | An existing EC2 keypair; if missing, pirouette imports `ssh.public_key_path` under this name |
-| `container.image` | Dev container image the instance runs (see [container requirements](#container-image-requirements)) |
-| `container.container_user` | Non-root user baked into that image (used for bind-mount paths) |
-| `container.npm_package` | The npm package spec to install inside the container (e.g. `@your-scope/pirouette@latest`) |
-
-### Container image requirements
-
-Any image you use as `container.image` needs:
-
-- A non-root user (`container.container_user`) with passwordless `sudo`
-- `node` + `npm` installed globally
-- `tmux`, `git`, `curl`, and an `ssh` server
-- (Optional) `yadm` if you want dotfiles support
-
-[`npx27/dev-unfetched`](https://hub.docker.com/r/npx27/dev-unfetched)
-satisfies all of this out of the box (Arch Linux, user `neev`, uid
-1000). Build your own for a leaner footprint.
-
-### Minimal `~/.pirouette/config.toml`
-
-```toml
-[aws]
-profile = "my-aws-profile"
-region  = "us-west-2"
-
-[aws.network]
-vpc_name            = "my-vpc"
-subnet_name_pattern = "my-private-subnet-*"
-security_group_name = "my-dev-sg"
-
-[aws.tags]
-Owner = "you@example.com"
-
-[instance]
-key_name = "you@example.com"
-
-[container]
-image          = "npx27/dev-unfetched:latest"   # or your own image
-container_user = "neev"                         # match your image's user
-npm_package    = "@neevparikh/pirouette@latest"
-
-# Optional — both are skipped if empty.
-[dotfiles]
-clone_url           = "https://github.com/you/dotfiles.git"
-authorized_keys_url = "https://github.com/you.keys"
-```
+Any `defaults` scalar (`npm_package`, `default_model`, `port`, ...) can be
+overridden inside a `[hosts.<name>]` block. `[defaults.dotfiles]` can be
+overridden per host under `[hosts.<name>.dotfiles]`.
 
 ## Commands
 
@@ -259,31 +219,32 @@ authorized_keys_url = "https://github.com/you.keys"
 
 | command | purpose |
 |---|---|
-| `pru launch <name>` | Create a new pi agent (`--repo`, `--model`, `--thinking` optional) |
+| `pru launch <name>` | Create a new pi agent (`--project`, `--model`, `--thinking` optional) |
 | `pru list` | List all agents and their state |
 | `pru send <agent> <msg>` | Send a message to an agent |
 | `pru stop <agent>` | Stop an agent (keeps its state) |
 | `pru rm <agent>` | Remove an agent; `--all` also deletes its worktree + session files |
-| `pru status` | Show remote instance + server health |
+| `pru status` | Show host + server health |
 
 You can also create agents from the web UI by typing `@<newname> message`
 in the input bar.
 
-### Infrastructure
+### Host
+
+All host commands accept the global `--host <name>` selector.
 
 | command | purpose |
 |---|---|
-| `pru preflight` | Read-only: validate AWS config + resource discovery |
-| `pru setup` | Provision / resume the EC2 instance + start the container |
-| `pru teardown` | Stop the instance; EBS preserved |
-| `pru destroy [--delete-volume]` | Terminate; optionally delete EBS |
-| `pru open` | Open the dashboard (uses `server.public_url`) |
-| `pru ssh` / `pru ssh --host` | Shell into the container (agent forwarded) / the EC2 host |
-| `pru tunnel <port>` | Forward an extra port (mainly for OAuth loopback flows — see below) |
-| `pru logs [-f]` | Tail server logs (`--tmux`, `--entrypoint`, `--boot` for other sources) |
-| `pru sync` | Ship local changes to the remote container (dev loop) |
-| `pru sync --npm` | Upgrade the container from the npm registry |
-| `pru sync --secrets` | Re-push laptop's auth state (`auth.json` etc.) without redeploying |
+| `pru setup` | Set up / refresh the host (bootstrap + start the server) |
+| `pru teardown` | Kill the pirouette tmux session (host stays up; state preserved) |
+| `pru destroy [--delete-data]` | Clear local state; `--delete-data` also nukes the host's persistent dirs |
+| `pru open` | Open the dashboard (uses `public_url` / `PIROUETTE_URL`) |
+| `pru ssh` | Shell into the host's SSH alias |
+| `pru tunnel <port>` | Forward an extra port (mainly OAuth loopback flows — see below) |
+| `pru logs [-f]` | Tail server logs (`--tmux`, `--entrypoint` for other sources) |
+| `pru sync` | Rebuild locally → install on host → restart server |
+| `pru sync --npm` | Upgrade the host from the npm registry |
+| `pru sync --secrets` | Re-push laptop auth state (`auth.json` etc.) without redeploying |
 
 ### Config
 
@@ -295,150 +256,98 @@ in the input bar.
 
 ### Environment variables
 
-Rarely needed — the CLI reads config from TOML. These override specific
-runtime values.
-
 | var | default | purpose |
 |---|---|---|
-| `PIROUETTE_HOST` | `127.0.0.1` (container path passes `0.0.0.0`) | Server bind host |
-| `PIROUETTE_PORT` | `7777` | Server port (or `container.pirouette_port` in config) |
+| `PIROUETTE_SELECTED_HOST` | — | Host to target (set by `--host`) |
+| `PIROUETTE_URL` | selected host's `public_url` | CLI → server URL (overrides config) |
+| `PIROUETTE_HOST` | `127.0.0.1` | Server bind host (set on the host by setup) |
+| `PIROUETTE_PORT` | `7777` | Server port |
 | `PIROUETTE_DATA_DIR` | `.pirouette/data` | Server data directory |
-| `PIROUETTE_URL` | `server.public_url` from config | CLI → server URL (overrides config; useful for local dev with `npm run dev`) |
-| `AWS_PROFILE` | — | Overrides `aws.profile` |
 
-## Authenticating tools inside the container
+## Authenticating tools inside the host
 
-Most modern CLIs you'd run in the container support **device flow** —
-they print a URL and a short code, you approve on any device, the CLI
-polls a server until it sees the approval. No local callback, no port
-forwarding required:
+Most modern CLIs support **device flow** — they print a URL and a short code,
+you approve on any device. No local callback, no port forwarding:
 
 | tool | what to run |
 |---|---|
-| AWS SSO | `aws sso login` (default behavior) |
+| AWS SSO | `aws sso login` |
 | GitHub CLI | `gh auth login --web` |
 | gcloud | `gcloud auth login --no-launch-browser` |
 | Tailscale | `tailscale up` |
 
-For these you just `pru ssh`, run the command, copy the URL it prints
-into your laptop browser, approve, done.
+For these, `pru ssh`, run the command, copy the URL into your laptop browser,
+approve, done.
 
-The exception is OAuth tools that **only** support the "loopback IP"
-flow — they spin up a local HTTP server on a random port and require the
-browser to redirect to `http://localhost:<port>`. `gws` (Google
-Workspace CLI) is one such tool. For these you need to forward the
-callback port from your laptop to the container:
+The exception is OAuth tools that **only** support the "loopback IP" flow
+(e.g. `gws`). For these, forward the callback port:
 
 ```bash
-# Terminal 1 — inside container
+# Terminal 1 — on the host
 pru ssh
 gws auth login --services drive,sheets
-# Note the port from the URL it prints, e.g. redirect_uri=http://localhost:42103
+# Note the port from the URL, e.g. redirect_uri=http://localhost:42103
 
 # Terminal 2 — on laptop
 pru tunnel 42103
 # (foreground; ctrl-c to close when auth is done)
 
-# Terminal 3 (or just paste into your browser): open the URL gws printed
+# Then paste the URL gws printed into your browser.
 ```
 
-Use `LOCAL:REMOTE` syntax if you need different ports on each side
-(e.g. `pru tunnel 8080:42103`), or `--background` to add the forward
-and return immediately (close later with `pru tunnel --close 42103`).
-
-Under the hood, `pru tunnel` reuses the SSH ControlMaster connection
-that pirouette sets up at `pru setup` time (`~/.pirouette/ssh-control/`),
-so adding/removing forwards is instant after the first SSH call. If no
-master exists it falls back to spawning a fresh `ssh -L …` process.
-
-## Troubleshooting
-
-### Tailnet outage — SSH-tunnel escape hatch
-
-The canonical access path goes through Tailscale. If your tailnet is
-unreachable (account issue, ACL change, Tailscale incident, etc.),
-you can fall back to a manual SSH tunnel as long as your AWS SG and
-SSH key still work:
-
-```bash
-# Start a port forward in one terminal:
-ssh -L 7777:localhost:7777 -N pirouette
-
-# In another terminal, point the CLI + browser at localhost:
-export PIROUETTE_URL=http://localhost:7777
-pru open
-```
-
-This is intentionally not wired up as a `pru` subcommand — if you're
-in this situation you're already debugging something out of band, and
-the two-line manual recipe is clearer than `pru open --tunnel` magic.
+Use `LOCAL:REMOTE` (e.g. `pru tunnel 8080:42103`) for asymmetric ports, or
+`--background` to add the forward and return (close with `pru tunnel --close
+42103`).
 
 ## Trust model
 
 Pirouette has no application-layer authentication. The HTTP and WebSocket
-APIs are wide open to anyone who can reach the listener. What keeps that
-narrow today depends on the provider:
+APIs are open to anyone who can reach the listener. What keeps that narrow:
 
-- **`ec2` provider:** AWS security group (only port 22 inbound, only
-  from the source SG you configure, e.g. a Tailscale subnet router) +
-  the SSH key required to open the port-forward to the container. The
-  container binds `0.0.0.0:7777` (Docker port-mapping needs it); the SG
-  + SSH layer is the actual perimeter.
-- **`byo-host` provider:** the bootstrap binds the server to
-  `127.0.0.1` on the remote. The only way in is an SSH tunnel from
-  your laptop; the remote's network can't reach the listener at all.
-  No 0.0.0.0 exposure even on a shared k8s pod network.
-- **`pirouette server` (local-dev):** binds `127.0.0.1` for the same
-  reason.
-- **Same-origin web app** — the dashboard is served from the same
-  listener as the API. Cross-origin requests are rejected by `Host`
-  validation (HTTP) and `Origin` validation (WebSocket); there are no
-  `Access-Control-Allow-*` headers. (DNS-rebinding defense; not auth.)
+- **Loopback bind (default).** The server binds `127.0.0.1` on the host; the
+  only way in is an SSH tunnel from your laptop. The host's network can't
+  reach the listener at all — safe even on a shared k8s pod network.
+- **`bind_host = "0.0.0.0"` (opt-in).** Needed when something in front of the
+  loopback bind must reach it (a docker `-p` mapping, a host-level `tailscale
+  serve`). The perimeter is then whatever fronts it (the SSH tunnel into the
+  container, or your tailnet ACL).
+- **Tailscale.** When `tailscale.enabled`, the server stays bound to loopback;
+  `tailscale serve` (same netns) bridges the tailnet's :443 to it. The
+  perimeter is your tailnet ACL.
+- **Same-origin web app.** The dashboard is served from the same listener as
+  the API. Cross-origin requests are rejected by `Host` (HTTP) and `Origin`
+  (WebSocket) validation; no `Access-Control-Allow-*` headers. (DNS-rebinding
+  defense; not auth.) Non-loopback hostnames must be allow-listed via
+  `hosts.<name>.allowed_hosts`.
 
-In practice: **anyone who can establish a TCP connection to the
-dashboard port has shell access on the host pirouette runs on.** The
-agents have full bash/edit/write tools by design. The SG + SSH tunnel
-(EC2) or SSH-tunnel-only access (byo-host) is the perimeter.
+In practice: **anyone who can open a TCP connection to the dashboard port has
+shell access on the host.** The agents have full bash/edit/write tools by
+design.
 
 ### Things you're trusting (the supply chain)
 
-- The npm package `@neevparikh/pirouette` (or whatever you set
-  `container.npm_package` to).
-- The dotfiles repo at `dotfiles.clone_url` (yadm clone over HTTPS).
-- The keys served at `dotfiles.authorized_keys_url` (used as
-  `authorized_keys` for the container's sshd).
-- Your AWS account's network isolation.
-- Trust-on-first-use SSH host keys (`StrictHostKeyChecking=accept-new`).
-  Fine for a private VPC; pre-seed `~/.ssh/known_hosts` manually if
-  you're sharing a network with untrusted parties.
+- The npm package `@neevparikh/pirouette` (or whatever `defaults.npm_package`
+  points at).
+- The dotfiles repo at `dotfiles.clone_url`.
+- The keys served at `dotfiles.authorized_keys_url`.
+- Trust-on-first-use SSH host keys (governed by your `~/.ssh/config`).
 
 Browser libraries (marked, marked-highlight, DOMPurify, highlight.js,
 Tailwind) are vendored at build time — no CDN dependency at runtime.
 
-### Operational mitigations
-
-If your threat model is stricter than what's enforced by code today:
-
-1. Don't broaden the SG.
-2. Don't bind the dashboard to a public IP. `PIROUETTE_HOST=0.0.0.0`
-   is for the container path; everything else should stay loopback.
-3. Treat anyone with read access to your laptop's `~/.ssh/` as having
-   full pirouette access.
-
 ## Architecture
 
 ```
-Your laptop                      EC2 instance                       Docker container
-───────────       SSH tunnel    ─────────────       port 7777      ──────────────────
-pru CLI  ─────── localhost:7777 ──── :7777 ──── pirouette server
-                                                                    ├── agent manager (pi SDK)
-                                                                    ├── HTTP + WebSocket
-                                                                    └── web dashboard (static)
-Browser  ─────── localhost:7777 ──── :7777 ────
-                                                                    sshd on :22
-pru ssh ────── jump via host ─────── :2222 ────  zsh + yadm dotfiles
-                                                                                     │
-                                                 persistent EBS volume at /data ────┘
+Your laptop                         Host (devpod / VM / container)
+───────────         SSH tunnel      ──────────────────────────────
+pru CLI  ───────  localhost:7777 ─────── :7777  pirouette server
+                  (or tailscale serve)            ├── agent manager (pi SDK)
+Browser  ───────  localhost:7777 ─────── :7777   ├── HTTP + WebSocket
+                                                  └── web dashboard (static)
+pru ssh ─────────────── ssh <alias> ───────────  tmux: pirouette server
+                                                                     │
+                                  persistent volume ($PIROUETTE_DATA_DIR,
+                                  $HOME) ─────────────────────────────┘
 ```
 
 ## License

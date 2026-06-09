@@ -1,7 +1,7 @@
-/** `pru tunnel` — forward a TCP port from laptop to container.
+/** `pru tunnel` — forward a TCP port from laptop to the host.
  *
  *  Primary use case: OAuth loopback flows in CLI tools running inside the
- *  container that bind a local HTTP listener. Most modern CLIs support
+ *  tools on the host that bind a local HTTP listener. Most modern CLIs support
  *  device flow and don't need this (`aws sso login`, `gh auth login --web`,
  *  `gcloud auth login --no-launch-browser`, ...). The exception is older
  *  tools like `gws` that only do "loopback IP" OAuth.
@@ -16,15 +16,14 @@
  *  - If no master exists, fall back to spawning a fresh `ssh -L … -N`
  *    process (slower, but works without setup).
  *
- *  Port spec is either `PORT` (laptop and container same port) or
+ *  Port spec is either `PORT` (laptop and host same port) or
  *  `LOCAL:REMOTE` for asymmetric mappings.
  */
 
 import { spawn } from "node:child_process";
 import net from "node:net";
 
-import { getProvider } from "../remote/provider.js";
-import { loadRemoteState } from "../remote/state.js";
+import { getHost } from "../remote/host.js";
 import { sshControl } from "../remote/ssh.js";
 
 interface PortSpec {
@@ -61,18 +60,10 @@ async function isLocalPortFree(port: number): Promise<boolean> {
   });
 }
 
-/** Resolve the SSH alias to forward through. Provider-aware:
- *  EC2 returns `<host_alias>-container` (ProxyJump'd to the container's
- *  sshd); byo-host returns the user's single alias. Throws if no
- *  state — forwarding requires a provisioned host. */
+/** Resolve the SSH alias to forward through — the selected host's alias.
+ *  Throws if no host is configured/selected. */
 function ensureRemote(): string {
-  const state = loadRemoteState();
-  // Both providers stamp at least one identifier on first provision; if
-  // neither is set we haven't run `pru setup` yet.
-  if (!state.instanceId && !state.sshAlias) {
-    throw new Error("no remote host configured. Run `pru setup` first.");
-  }
-  return getProvider().shellAlias();
+  return getHost().shellAlias();
 }
 
 function forwardSpec(p: PortSpec): string {
@@ -92,10 +83,10 @@ export async function tunnel(spec: string, opts: TunnelOptions = {}): Promise<vo
     console.error(`error: ${(err as Error).message}`);
     process.exit(1);
   }
-  const containerAlias = ensureRemote();
+  const hostAlias = ensureRemote();
 
   if (opts.close) {
-    await closeTunnel(port, containerAlias);
+    await closeTunnel(port, hostAlias);
     return;
   }
 
@@ -109,16 +100,16 @@ export async function tunnel(spec: string, opts: TunnelOptions = {}): Promise<vo
   }
 
   // Try the master first. ssh -O check returns 0 if a master is alive.
-  const master = await sshControl(containerAlias, "check");
+  const master = await sshControl(hostAlias, "check");
 
   if (master.ok) {
     // Master exists — add the forward via -O forward (instant, no new TCP).
-    const result = await sshControl(containerAlias, "forward", ["-L", forwardSpec(port)]);
+    const result = await sshControl(hostAlias, "forward", ["-L", forwardSpec(port)]);
     if (!result.ok) {
       console.error(`failed to add forward via control master:\n${result.stderr}`);
       process.exit(1);
     }
-    console.log(`tunnel: localhost:${port.local} -> ${containerAlias}:${port.remote} (via master)`);
+    console.log(`tunnel: localhost:${port.local} -> ${hostAlias}:${port.remote} (via master)`);
 
     if (opts.background) {
       console.log(`(backgrounded; close with \`pru tunnel --close ${spec}\`)`);
@@ -131,7 +122,7 @@ export async function tunnel(spec: string, opts: TunnelOptions = {}): Promise<vo
       const onSig = async () => {
         process.off("SIGINT", onSig);
         process.off("SIGTERM", onSig);
-        await closeTunnel(port, containerAlias).catch(() => {});
+        await closeTunnel(port, hostAlias).catch(() => {});
         resolve();
       };
       process.on("SIGINT", onSig);
@@ -143,10 +134,10 @@ export async function tunnel(spec: string, opts: TunnelOptions = {}): Promise<vo
   // No master — fall back to a fresh ssh -L … -N. This will itself become
   // the master (ControlMaster auto in our SSH config block), so subsequent
   // `pru tunnel` calls in the next 10m piggyback on it.
-  console.log(`tunnel: localhost:${port.local} -> ${containerAlias}:${port.remote} (new connection)`);
+  console.log(`tunnel: localhost:${port.local} -> ${hostAlias}:${port.remote} (new connection)`);
   if (opts.background) {
     // -f backgrounds after auth completes.
-    const child = spawn("ssh", ["-L", forwardSpec(port), "-N", "-f", containerAlias], {
+    const child = spawn("ssh", ["-L", forwardSpec(port), "-N", "-f", hostAlias], {
       stdio: "inherit",
     });
     await new Promise<void>((resolve, reject) => {
@@ -159,15 +150,15 @@ export async function tunnel(spec: string, opts: TunnelOptions = {}): Promise<vo
 
   // Foreground: child holds the connection; ctrl-c kills it.
   console.log("press ctrl-c to close.");
-  const child = spawn("ssh", ["-L", forwardSpec(port), "-N", containerAlias], { stdio: "inherit" });
+  const child = spawn("ssh", ["-L", forwardSpec(port), "-N", hostAlias], { stdio: "inherit" });
   await new Promise<void>((resolve) => child.on("exit", () => resolve()));
 }
 
-async function closeTunnel(port: PortSpec, containerAlias: string): Promise<void> {
+async function closeTunnel(port: PortSpec, hostAlias: string): Promise<void> {
   // First try the master.
-  const result = await sshControl(containerAlias, "cancel", ["-L", forwardSpec(port)]);
+  const result = await sshControl(hostAlias, "cancel", ["-L", forwardSpec(port)]);
   if (result.ok) {
-    console.log(`closed: localhost:${port.local} -> ${containerAlias}:${port.remote}`);
+    console.log(`closed: localhost:${port.local} -> ${hostAlias}:${port.remote}`);
     return;
   }
 
@@ -193,7 +184,7 @@ async function closeTunnel(port: PortSpec, containerAlias: string): Promise<void
         /* race: already gone */
       }
     }
-    console.log(`closed: localhost:${port.local} -> ${containerAlias}:${port.remote} (killed pid ${pids.join(", ")})`);
+    console.log(`closed: localhost:${port.local} -> ${hostAlias}:${port.remote} (killed pid ${pids.join(", ")})`);
   } catch (err) {
     console.error(`failed to close tunnel: ${(err as Error).message}`);
   }

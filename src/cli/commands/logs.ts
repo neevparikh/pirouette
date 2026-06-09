@@ -1,24 +1,21 @@
-/** `pru logs` — tail pirouette server logs from the remote host.
+/** `pru logs` — tail pirouette logs from the host over SSH.
  *
- *  Several sources available:
+ *  Sources:
  *    --server   (default)  tail $PIROUETTE_DATA_DIR/logs/pirouette.log
  *    --tmux                capture the live tmux pane (latest state, no history)
- *    --entrypoint          entrypoint startup log (yadm, npm install, sshd launch)
- *    --boot                EC2 cloud-init output (user-data bootstrap)
+ *    --entrypoint          the bootstrap log (yadm, npm install, server start)
  *
- *  Use `-f` / `--follow` to stream. Implemented by tailing over SSH; the
- *  provider builds the remote command (EC2 wraps in `docker exec pirouette`;
- *  future byo-host runs directly).
+ *  Use `-f` / `--follow` to stream.
  */
 
 import { spawn } from "node:child_process";
 
-import { getProvider, type LogsOptions } from "../remote/provider.js";
+import { getHost, type LogsOptions } from "../remote/host.js";
 
 export type { LogsOptions };
 
 export async function logs(opts: LogsOptions): Promise<void> {
-  const { command, sshAlias } = getProvider().buildLogsCommand(opts);
+  const { command, sshAlias } = getHost().buildLogsCommand(opts);
 
   const child = spawn("ssh", ["-t", sshAlias, command], { stdio: "inherit" });
   await new Promise<void>((resolve) => {
