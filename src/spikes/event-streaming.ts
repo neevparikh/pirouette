@@ -3,11 +3,9 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
-import { getModel } from "@earendil-works/pi-ai";
 import {
-  AuthStorage,
   createAgentSession,
-  ModelRegistry,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
   type AgentSessionEvent,
@@ -55,15 +53,14 @@ async function ensureWorkspace(): Promise<void> {
   );
 }
 
-function createManagers() {
-  const authStorage = AuthStorage.create();
-  const modelRegistry = ModelRegistry.create(authStorage);
+async function createManagers() {
+  const modelRuntime = await ModelRuntime.create();
   const settingsManager = SettingsManager.inMemory({
     compaction: { enabled: false },
   });
   const sessionManager = SessionManager.create(WORKSPACE_DIR, SESSION_DIR);
 
-  return { authStorage, modelRegistry, settingsManager, sessionManager };
+  return { modelRuntime, settingsManager, sessionManager };
 }
 
 function normalizeMessageText(content: unknown): string | undefined {
@@ -159,6 +156,8 @@ function normalizeEvent(event: AgentSessionEvent): NormalizedEvent {
       return { type: event.type, name: event.name };
     case "thinking_level_changed":
       return { type: event.type, level: event.level };
+    default:
+      return { type: (event as { type: string }).type };
   }
 }
 
@@ -231,16 +230,15 @@ async function readRequestBody(req: IncomingMessage): Promise<string> {
 }
 
 async function createSession() {
-  const { authStorage, modelRegistry, settingsManager, sessionManager } = createManagers();
-  const model = getModel("anthropic", "claude-haiku-4-5");
+  const { modelRuntime, settingsManager, sessionManager } = await createManagers();
+  const model = modelRuntime.getModel("anthropic", "claude-haiku-4-5");
   if (!model) {
     throw new Error("Could not find anthropic/claude-haiku-4-5 model");
   }
 
   const result = await createAgentSession({
     cwd: WORKSPACE_DIR,
-    authStorage,
-    modelRegistry,
+    modelRuntime,
     sessionManager,
     settingsManager,
     model,
