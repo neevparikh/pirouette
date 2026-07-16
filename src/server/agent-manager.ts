@@ -223,8 +223,10 @@ export class AgentManager {
         let registered = 0;
         for (const { name, config, extensionPath } of pending) {
           try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (this.modelRegistry as any).registerProvider(name, config);
+            this.modelRegistry.registerProvider(
+              name,
+              config as Parameters<ModelRegistry["registerProvider"]>[1],
+            );
             registered++;
           } catch (err) {
             console.log(
@@ -639,22 +641,15 @@ export class AgentManager {
     // Ensure extensions are loaded (providers registered) and the
     // modelRuntime/modelRegistry exist before we read from them.
     await this.ensureResourceLoader();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const reg = this.modelRegistry as any;
     try {
-      const models = (await reg.getAvailable()) as Array<{
-        provider: string;
-        id: string;
-        contextWindow?: number;
-        reasoning?: boolean;
-      }>;
+      const models = this.modelRegistry.getAvailable();
       return models
         .map((m) => ({
           qualifiedId: `${m.provider}/${m.id}`,
           provider: m.provider,
           id: m.id,
-          contextWindow: m.contextWindow ?? 0,
-          reasoning: !!m.reasoning,
+          contextWindow: m.contextWindow,
+          reasoning: m.reasoning,
         }))
         .sort((a, b) =>
           a.provider === b.provider ? a.id.localeCompare(b.id) : a.provider.localeCompare(b.provider),
@@ -683,11 +678,8 @@ export class AgentManager {
       // empty `models: []` so we fall back to the discovered list.
       let model = this.modelRegistry.find(provider, modelId) ?? undefined;
       if (!model) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const available = await (this.modelRegistry as any).getAvailable();
-        model = available.find(
-          (m: { provider: string; id: string }) => m.provider === provider && m.id === modelId,
-        );
+        const available = this.modelRegistry.getAvailable();
+        model = available.find((m) => m.provider === provider && m.id === modelId);
       }
       if (!model) {
         throw new Error(`Model "${qualifiedId}" not found in the registry.`);

@@ -148,10 +148,28 @@ export function normalizeEvent(event: AgentSessionEvent): NormalizedEvent {
       return { type: event.type, name: event.name };
     case "thinking_level_changed":
       return { type: event.type, level: event.level };
-    default:
-      // Passthrough for event types we don't specially normalize (e.g.
-      // `agent_settled`, added in newer pi SDKs). Broadcast the bare type
-      // so the frontend at least sees it; JSON-safe by construction.
-      return { type: (event as { type: string }).type };
+    case "agent_settled":
+      // Fired once the agent has fully settled after a turn. Carries no
+      // payload; the bare type is all the frontend needs.
+      return { type: event.type };
+    case "entry_appended":
+      // A new entry was persisted to the session log. Forward the JSON-safe
+      // base fields (all primitives); the entry body is omitted since the
+      // frontend rebuilds state from the streamed message events.
+      return {
+        type: event.type,
+        entryType: event.entry.type,
+        entryId: event.entry.id,
+        parentId: event.entry.parentId,
+        timestamp: event.entry.timestamp,
+      };
+    default: {
+      // Exhaustiveness guard: if a future pi SDK adds an event type, this
+      // assignment fails to compile until a case is added above. At runtime
+      // we still broadcast the bare type so an unknown event degrades
+      // gracefully rather than being dropped.
+      const _exhaustive: never = event;
+      return { type: (_exhaustive as { type: string }).type };
+    }
   }
 }

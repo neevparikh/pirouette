@@ -156,8 +156,20 @@ function normalizeEvent(event: AgentSessionEvent): NormalizedEvent {
       return { type: event.type, name: event.name };
     case "thinking_level_changed":
       return { type: event.type, level: event.level };
-    default:
-      return { type: (event as { type: string }).type };
+    case "agent_settled":
+      return { type: event.type };
+    case "entry_appended":
+      return {
+        type: event.type,
+        entryType: event.entry.type,
+        entryId: event.entry.id,
+        parentId: event.entry.parentId,
+        timestamp: event.entry.timestamp,
+      };
+    default: {
+      const _exhaustive: never = event;
+      return { type: (_exhaustive as { type: string }).type };
+    }
   }
 }
 
