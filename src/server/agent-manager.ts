@@ -5,13 +5,13 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 import {
-  AuthStorage,
   createAgentSession,
   createEventBus,
   DefaultResourceLoader,
   getAgentDir,
   loadProjectContextFiles,
   ModelRegistry,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
   type AgentSession,
@@ -101,8 +101,14 @@ export class AgentManager {
    *  server shutdown), or another client wins the race. */
   private pendingUIRequests = new Map<string, PendingUIRequest>();
 
-  private authStorage: ReturnType<typeof AuthStorage.create>;
-  private modelRegistry: ReturnType<typeof ModelRegistry.create>;
+  /** Canonical model/auth runtime. Created once during resource-loader init
+   *  (async, so it can't live in the constructor). Shared with every session
+   *  we create via createAgentSession, so extension-registered providers are
+   *  visible to both our lookups and the session's internal registry. */
+  private modelRuntime!: ModelRuntime;
+  /** Synchronous facade over `modelRuntime` for provider registration and
+   *  model lookup. Populated alongside `modelRuntime`. */
+  private modelRegistry!: ModelRegistry;
   /** Shared ResourceLoader. We load it once at init so extensions (like
    *  pi-hawk-provider) register their providers + models in the modelRegistry
    *  before any agent session is created. Every session reuses this loader.
@@ -123,10 +129,7 @@ export class AgentManager {
     private readonly stateManager: StateManager,
     private readonly projectManager: ProjectManager,
     private readonly dataDir: string,
-  ) {
-    this.authStorage = AuthStorage.create();
-    this.modelRegistry = ModelRegistry.create(this.authStorage);
-  }
+  ) {}
 
   /** Serialize operations on a single agent. If a prior op is in flight, the
    *  new one waits for it. Prevents races like "send while starting" or
@@ -171,6 +174,14 @@ export class AgentManager {
         const eventBus = createEventBus();
         this.eventBus = eventBus;
         eventBus.on("pi:fast-mode", (data) => this.handleFastModeEvent(data));
+
+        // Canonical model/auth runtime, using the default agent dir paths
+        // (auth.json / models.json) — matches what createAgentSession would
+        // build for itself. We share this exact instance with every session
+        // so extension provider registrations flow through to them.
+        this.modelRuntime = await ModelRuntime.create();
+        this.modelRegistry = new ModelRegistry(this.modelRuntime);
+
         const loader = new DefaultResourceLoader({
           cwd: this.dataDir,
           agentDir: getAgentDir(),
@@ -212,8 +223,10 @@ export class AgentManager {
         let registered = 0;
         for (const { name, config, extensionPath } of pending) {
           try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (this.modelRegistry as any).registerProvider(name, config);
+            this.modelRegistry.registerProvider(
+              name,
+              config as Parameters<ModelRegistry["registerProvider"]>[1],
+            );
             registered++;
           } catch (err) {
             console.log(
@@ -225,10 +238,11 @@ export class AgentManager {
           console.log(`[agent-manager] registered ${registered} provider(s) from extensions`);
         }
 
-        // Summary: providers available for lookup
+        // Summary: providers available for lookup. Use the runtime's async
+        // getAvailable() so freshly-registered providers are refreshed into
+        // the availability snapshot that the synchronous facade reads later.
         try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const avail = await (this.modelRegistry as any).getAvailable();
+          const avail = await this.modelRuntime.getAvailable();
           const byProvider = new Map<string, number>();
           for (const m of avail) byProvider.set(m.provider, (byProvider.get(m.provider) ?? 0) + 1);
           const summary = [...byProvider.entries()]
@@ -624,22 +638,18 @@ export class AgentManager {
       reasoning: boolean;
     }>
   > {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const reg = this.modelRegistry as any;
+    // Ensure extensions are loaded (providers registered) and the
+    // modelRuntime/modelRegistry exist before we read from them.
+    await this.ensureResourceLoader();
     try {
-      const models = (await reg.getAvailable()) as Array<{
-        provider: string;
-        id: string;
-        contextWindow?: number;
-        reasoning?: boolean;
-      }>;
+      const models = this.modelRegistry.getAvailable();
       return models
         .map((m) => ({
           qualifiedId: `${m.provider}/${m.id}`,
           provider: m.provider,
           id: m.id,
-          contextWindow: m.contextWindow ?? 0,
-          reasoning: !!m.reasoning,
+          contextWindow: m.contextWindow,
+          reasoning: m.reasoning,
         }))
         .sort((a, b) =>
           a.provider === b.provider ? a.id.localeCompare(b.id) : a.provider.localeCompare(b.provider),
@@ -655,6 +665,7 @@ export class AgentManager {
    *  switches it via pi's `session.setModel()` so the next turn uses the
    *  new model immediately. Throws if the model isn't registered. */
   async setAgentModel(id: string, qualifiedId: string): Promise<void> {
+    await this.ensureResourceLoader();
     return this.withAgentLock(id, async () => {
       const slash = qualifiedId.indexOf("/");
       if (slash < 0) {
@@ -667,11 +678,8 @@ export class AgentManager {
       // empty `models: []` so we fall back to the discovered list.
       let model = this.modelRegistry.find(provider, modelId) ?? undefined;
       if (!model) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const available = await (this.modelRegistry as any).getAvailable();
-        model = available.find(
-          (m: { provider: string; id: string }) => m.provider === provider && m.id === modelId,
-        );
+        const available = this.modelRegistry.getAvailable();
+        model = available.find((m) => m.provider === provider && m.id === modelId);
       }
       if (!model) {
         throw new Error(`Model "${qualifiedId}" not found in the registry.`);
@@ -1624,8 +1632,7 @@ export class AgentManager {
       cwd: config.worktreePath,
       sessionManager,
       settingsManager,
-      authStorage: this.authStorage,
-      modelRegistry: this.modelRegistry,
+      modelRuntime: this.modelRuntime,
       resourceLoader: agentResourceLoader,
       model,
       thinkingLevel,

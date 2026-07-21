@@ -3,9 +3,8 @@ import path from "node:path";
 import process from "node:process";
 
 import {
-  AuthStorage,
   createAgentSession,
-  ModelRegistry,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -65,9 +64,8 @@ async function ensureWorkspace(): Promise<void> {
   );
 }
 
-function createManagers(mode: "new" | "resume") {
-  const authStorage = AuthStorage.create();
-  const modelRegistry = ModelRegistry.create(authStorage);
+async function createManagers(mode: "new" | "resume") {
+  const modelRuntime = await ModelRuntime.create();
   const settingsManager = SettingsManager.inMemory({
     compaction: { enabled: false },
   });
@@ -76,7 +74,7 @@ function createManagers(mode: "new" | "resume") {
       ? SessionManager.create(WORKSPACE_DIR, SESSION_DIR)
       : SessionManager.continueRecent(WORKSPACE_DIR, SESSION_DIR);
 
-  return { authStorage, modelRegistry, settingsManager, sessionManager };
+  return { modelRuntime, settingsManager, sessionManager };
 }
 
 function summarizeMessage(message: { role: string } & Record<string, unknown>): string {
@@ -119,12 +117,11 @@ function printSessionSnapshot(sessionManager: SessionManager): void {
 }
 
 async function createSession(mode: "new" | "resume") {
-  const { authStorage, modelRegistry, settingsManager, sessionManager } = createManagers(mode);
+  const { modelRuntime, settingsManager, sessionManager } = await createManagers(mode);
 
   const result = await createAgentSession({
     cwd: WORKSPACE_DIR,
-    authStorage,
-    modelRegistry,
+    modelRuntime,
     sessionManager,
     settingsManager,
     thinkingLevel: "off",
