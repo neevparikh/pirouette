@@ -443,6 +443,13 @@ export class AgentManager {
     return this.stateManager.getAgent(id);
   }
 
+  /** Mark an agent archived / unarchived. Archived agents remain fully
+   *  functional and on disk; the dashboard hides them from the default
+   *  listing. Purely a metadata flag. */
+  setArchived(id: string, archived: boolean): void {
+    this.stateManager.updateAgentState(id, { archived: !!archived });
+  }
+
   /** Resolve a CLI/URL agent reference (id or human-friendly name) to a
    *  single agent. Strategy:
    *    1. Exact id match wins (canonical case).

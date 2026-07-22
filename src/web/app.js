@@ -32,6 +32,10 @@ const collapsedProjects = new Set(
   JSON.parse(localStorage.getItem("pirouette-collapsed-projects") || "[]"),
 );
 
+/** Whether archived chats are shown in the sidebar. Archived chats are
+ *  hidden by default; toggled via the "show archived" button. Persisted. */
+let showArchived = localStorage.getItem("pirouette-show-archived") === "1";
+
 /** @type {Record<string, import("./transcript.js").TranscriptState>} */
 const transcriptByAgent = {};
 /** @type {Record<string, boolean>} */
@@ -74,6 +78,7 @@ let reconnectTimer = null;
 
 const $agentList = document.getElementById("agent-list");
 const $agentName = document.getElementById("agent-name");
+const $agentTitle = document.getElementById("agent-title");
 const $agentStatus = document.getElementById("agent-status");
 // v0.13.8: identity (left) + tokens+model (right) live on a single
 // footer row. The earlier #agent-model-line is gone; renderAgentHeader
@@ -689,30 +694,33 @@ const $mobileActionsBtn = document.getElementById("mobile-actions-btn");
 const $mobileBackdrop = document.getElementById("mobile-backdrop");
 const $headerActions = document.getElementById("header-actions");
 const $agentFooter = document.getElementById("agent-footer");
+// The left chat sidebar is the element that slides in as a drawer on
+// mobile. On desktop it's a persistent column (CSS handles that).
+const $chatSidebar = document.getElementById("chat-sidebar");
 // Aliases kept for legacy call-sites:
-const $sidebar = $agentFooter;
+const $sidebar = $chatSidebar;
 const $sidebarBackdrop = $mobileBackdrop;
 const $sidebarToggle = $mobileMenuBtn;
 function _setBackdrop() {
   if (!$mobileBackdrop) return;
   const anyOpen =
-    ($agentFooter && $agentFooter.classList.contains("drawer-open")) ||
+    ($chatSidebar && $chatSidebar.classList.contains("drawer-open")) ||
     ($headerActions && $headerActions.classList.contains("drawer-open"));
   $mobileBackdrop.classList.toggle("hidden", !anyOpen);
 }
 function openSidebar() {
-  if ($agentFooter) $agentFooter.classList.add("drawer-open");
+  if ($chatSidebar) $chatSidebar.classList.add("drawer-open");
   // Mutual exclusion: opening the left drawer closes the right one.
   if ($headerActions) $headerActions.classList.remove("drawer-open");
   _setBackdrop();
 }
 function closeSidebar() {
-  if ($agentFooter) $agentFooter.classList.remove("drawer-open");
+  if ($chatSidebar) $chatSidebar.classList.remove("drawer-open");
   _setBackdrop();
 }
 function openActionsDrawer() {
   if ($headerActions) $headerActions.classList.add("drawer-open");
-  if ($agentFooter) $agentFooter.classList.remove("drawer-open");
+  if ($chatSidebar) $chatSidebar.classList.remove("drawer-open");
   _setBackdrop();
 }
 function closeActionsDrawer() {
@@ -742,7 +750,7 @@ function closeAllPickers() {
 }
 if ($mobileMenuBtn) {
   $mobileMenuBtn.addEventListener("click", () => {
-    if ($agentFooter && $agentFooter.classList.contains("drawer-open")) {
+    if ($chatSidebar && $chatSidebar.classList.contains("drawer-open")) {
       closeSidebar();
     } else {
       openSidebar();
@@ -1126,6 +1134,18 @@ function handleWsMessage(envelope) {
       renderAgentList();
       break;
 
+    case "agent_updated": {
+      // A metadata-only update (e.g. archive/unarchive). Merge the new
+      // fields into the local agent record and re-render the list.
+      const idx = agents.findIndex((a) => a.id === envelope.agentId);
+      if (idx !== -1 && envelope.agent) {
+        agents[idx] = { ...agents[idx], ...envelope.agent };
+      }
+      renderAgentList();
+      if (selectedAgentId === envelope.agentId) renderAgentHeader();
+      break;
+    }
+
     case "agent_session_reset":
       // The server discarded this agent's session and started a fresh one
       // (in response to /new). Clear local transcript caches so the next
@@ -1423,17 +1443,32 @@ function renderAgentRow(a, _depth = 0) {
   // "?" glyph: an extension fired AskUserQuestion (or similar) for this
   // agent and is waiting for the user to answer. Pulses to draw the eye.
   const needsAnswer = agentHasPendingExtensionUI(a.id);
+  // Vertical row: full-width, chat name on its own line, with an
+  // archive/unarchive toggle that appears on hover. Archived chats are
+  // dimmed so it's clear they're tucked away.
+  const archiveLabel = a.archived ? "unarchive" : "archive";
+  const archiveGlyph = a.archived ? "↩" : "✕";
+  const dimClass = a.archived ? "opacity-50" : "";
   return `
-    <button
-      class="flex items-center gap-1.5 px-2 py-1 rounded ${activeClass} cursor-pointer text-sm whitespace-nowrap font-mono"
-      data-agent-id="${a.id}"
-      title="${escHtml(titleParts.join(" — ") + (needsAnswer ? " — waiting on you" : ""))}"
-    >
-      <span class="w-2 h-2 rounded-full flex-none ${dot}"></span>
-      ${a.parentAgentId ? '<span class="text-base16-500 text-xs">↳</span>' : ""}
-      <span class="truncate">${escHtml(a.name)}</span>
-      ${needsAnswer ? '<span class="text-base16-yellow text-xs pulse-dot">?</span>' : ""}
-    </button>
+    <div class="group flex items-center gap-1 rounded ${activeClass} ${dimClass}" data-agent-row="${a.id}">
+      <button
+        class="flex items-center gap-1.5 px-2 py-1 flex-1 min-w-0 cursor-pointer text-sm font-mono text-left"
+        data-agent-id="${a.id}"
+        title="${escHtml(titleParts.join(" — ") + (needsAnswer ? " — waiting on you" : ""))}"
+      >
+        <span class="w-2 h-2 rounded-full flex-none ${dot}"></span>
+        ${a.parentAgentId ? '<span class="text-base16-500 text-xs flex-none">↳</span>' : ""}
+        <span class="truncate">${escHtml(a.name)}</span>
+        ${needsAnswer ? '<span class="text-base16-yellow text-xs pulse-dot flex-none">?</span>' : ""}
+      </button>
+      <button
+        class="flex-none px-1.5 py-1 text-xs text-base16-500 hover:text-base16-orange cursor-pointer md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
+        data-agent-archive="${a.id}"
+        data-archived="${a.archived ? "1" : "0"}"
+        title="${archiveLabel} this chat"
+        aria-label="${archiveLabel} chat"
+      >${archiveGlyph}</button>
+    </div>
   `;
 }
 
@@ -1486,14 +1521,11 @@ function renderAgentList() {
     agentsByProject.get(a.projectName).push(a);
   }
 
-  // v0.13.0: horizontal layout. Each project is a horizontal group --
-  // project name (clickable, doubles as "select project" affordance) +
-  // a row of agent chips. Multiple projects flow left-to-right; the
-  // outer footer scrolls horizontally on overflow.
-  //
-  // Forks no longer indent (renderAgentRow ignores depth) -- a chip
-  // row can't show a tree visually. The `↳` glyph stays on forked
-  // chips so the relationship is still discoverable.
+  // Vertical layout: each project is a section stacked top-to-bottom.
+  // The project name header is a clickable "select project" affordance
+  // (also a collapse toggle via the chevron); its chats are listed
+  // vertically beneath it. Archived chats are hidden unless the global
+  // `showArchived` toggle is on.
   const sections = projects
     .slice()
     .sort((a, b) => {
@@ -1503,68 +1535,76 @@ function renderAgentList() {
       return a.name.localeCompare(b.name);
     })
     .map((p) => {
-      const as = (agentsByProject.get(p.name) ?? []).sort((x, y) =>
-        x.name.localeCompare(y.name),
-      );
+      const allAgents = (agentsByProject.get(p.name) ?? []);
+      const archivedCount = allAgents.filter((a) => a.archived).length;
+      // Filter archived chats out unless the toggle is on.
+      const visible = allAgents.filter((a) => showArchived || !a.archived);
       const isSelected = selectedProjectName === p.name;
+      const isCollapsed = collapsedProjects.has(p.name);
       const subtitle = p.repoUrl
         ? p.repoUrl.replace(/^https?:\/\//, "")
         : p.name === "scratchpad"
           ? "default (bare)"
           : "bare";
-      const chipsHtml = as.length > 0
-        ? orderAgentsAsTree(as)
+      const rowsHtml = visible.length > 0
+        ? orderAgentsAsTree(visible)
             .map(({ agent }) => renderAgentRow(agent))
             .join("")
-        : `<span class="text-xs text-base16-500 italic px-1 py-1 self-center">no agents — type <code class="text-base16-orange">@name</code></span>`;
+        : `<div class="text-xs text-base16-500 italic px-2 py-1">no chats — type <code class="text-base16-orange">@name</code></div>`;
       const delBtn =
         p.name === "scratchpad"
           ? ""
-          : `<button class="text-base16-500 hover:text-base16-red text-xs cursor-pointer self-center" data-project-delete="${escHtml(p.name)}" title="delete project">×</button>`;
-      // Each project section: label on the left, agent chips after.
-      // Wrapped in a flex container that stays one row on desktop.
-      //
-      // On mobile (in the left drawer) the outer flex flips to column
-      // via CSS, but we want the project name + delete-x to stay on
-      // the same row at the TOP of the column (not have the x get
-      // stretched to its own line and centered awkwardly below the
-      // chips). The `header-row` wrapper uses `flex justify-between`
-      // by default (mobile: name on left, x on right), but switches
-      // to `display: contents` on `md+` so it collapses into its
-      // parent and the desktop layout (name, chips..., x) is
-      // preserved unchanged.
+          : `<button class="flex-none text-base16-500 hover:text-base16-red text-xs cursor-pointer px-1" data-project-delete="${escHtml(p.name)}" title="delete project">×</button>`;
+      const chevron = isCollapsed ? "▸" : "▾";
+      const archivedNote =
+        !showArchived && archivedCount > 0
+          ? `<span class="text-[10px] text-base16-500 whitespace-nowrap">(${archivedCount} archived)</span>`
+          : "";
       return `
-        <div class="flex items-center gap-1.5 flex-none">
-          <div class="flex items-center justify-between gap-1.5 md:contents">
+        <div class="flex flex-col gap-0.5">
+          <div class="flex items-center gap-1 px-1 py-1 rounded ${isSelected ? "bg-base16-cyan/8" : "hover:bg-base16-300/20"}">
             <button
-              class="flex items-baseline gap-1 cursor-pointer px-1 py-1 rounded ${isSelected ? "bg-base16-cyan/8" : "hover:bg-base16-300/20"}"
+              class="flex-none text-base16-500 hover:text-base16-700 text-xs cursor-pointer w-4"
+              data-project-toggle="${escHtml(p.name)}"
+              title="collapse/expand"
+            >${chevron}</button>
+            <button
+              class="flex items-baseline gap-1.5 cursor-pointer flex-1 min-w-0 text-left"
               data-project-select="${escHtml(p.name)}"
-              title="${escHtml(subtitle + " · " + as.length + " agent" + (as.length === 1 ? "" : "s"))}"
+              title="${escHtml(subtitle + " · " + visible.length + " chat" + (visible.length === 1 ? "" : "s"))}"
             >
-              <span class="text-base16-700 font-bold font-mono text-sm whitespace-nowrap">${escHtml(p.name)}</span>
+              <span class="text-base16-700 font-bold font-mono text-sm truncate">${escHtml(p.name)}</span>
+              ${archivedNote}
             </button>
-            ${delBtn || '<span class="md:hidden" aria-hidden="true"></span>'}
+            ${delBtn}
           </div>
-          ${chipsHtml}
+          ${isCollapsed ? "" : `<div class="flex flex-col gap-0.5 pl-1">${rowsHtml}</div>`}
         </div>
       `;
     })
-    // Visual divider between projects so it's obvious which chips
-    // belong to which group when many projects are visible.
-    .join('<span class="flex-none self-stretch w-px bg-base16-300/60" aria-hidden="true"></span>');
+    .join("");
 
   $agentList.innerHTML = sections;
 
   $agentList.querySelectorAll("[data-agent-id]").forEach((btn) => {
     btn.addEventListener("click", () => selectAgent(btn.dataset.agentId));
   });
-  $agentList.querySelectorAll("[data-project-select]").forEach((btn) => {
+  $agentList.querySelectorAll("[data-agent-archive]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
-      // If the user clicked the arrow, toggle collapse instead of selecting.
-      if (e.target.dataset.projectToggle) {
-        toggleProjectCollapsed(e.target.dataset.projectToggle);
-        return;
-      }
+      e.stopPropagation();
+      const id = btn.dataset.agentArchive;
+      const nextArchived = btn.dataset.archived !== "1";
+      setAgentArchived(id, nextArchived);
+    });
+  });
+  $agentList.querySelectorAll("[data-project-toggle]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleProjectCollapsed(btn.dataset.projectToggle);
+    });
+  });
+  $agentList.querySelectorAll("[data-project-select]").forEach((btn) => {
+    btn.addEventListener("click", () => {
       selectProject(btn.dataset.projectSelect);
     });
   });
@@ -1574,6 +1614,33 @@ function renderAgentList() {
       deleteProject(btn.dataset.projectDelete);
     });
   });
+}
+
+/** Toggle a chat's archived flag via the server. Optimistically updates
+ *  the local record so the UI reacts immediately; the WS `agent_updated`
+ *  broadcast keeps other tabs in sync. */
+async function setAgentArchived(id, archived) {
+  const agent = agents.find((a) => a.id === id);
+  if (agent) agent.archived = archived;
+  renderAgentList();
+  try {
+    const res = await fetch(`/api/agents/${id}/archive`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ archived }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "Failed to update archive state");
+      // Revert optimistic change on failure.
+      if (agent) agent.archived = !archived;
+      renderAgentList();
+    }
+  } catch (err) {
+    if (agent) agent.archived = !archived;
+    renderAgentList();
+    alert("Failed to update archive state: " + err.message);
+  }
 }
 
 function toggleProjectCollapsed(name) {
@@ -1682,6 +1749,7 @@ function renderAgentHeader() {
   // code that touches their textContent stays a no-op rather than a
   // crash; we just don't visually render the values anywhere.
   if (!agent) {
+    if ($agentTitle) $agentTitle.textContent = "";
     $agentInfo.textContent = "";
     $agentStats.textContent = "";
     // Hide every action pill when no agent is selected.
@@ -1694,6 +1762,9 @@ function renderAgentHeader() {
     $thinkingBtn.classList.add("hidden");
     return;
   }
+
+  // Header title: currently-selected chat name (with project).
+  if ($agentTitle) $agentTitle.textContent = agent.name;
 
   // Re-show the always-applicable pills now that we have an agent.
   // (stop/resume/delete still toggle below based on agent state.)
@@ -3108,6 +3179,26 @@ $input.addEventListener("blur", () => {
   }, 150);
 });
 $newProjectBtn.addEventListener("click", openProjectModal);
+
+// "show archived" toggle in the sidebar. Flips visibility of archived
+// chats and persists the preference. The button label reflects state.
+const $showArchivedBtn = document.getElementById("show-archived-btn");
+function applyShowArchivedStyle() {
+  if (!$showArchivedBtn) return;
+  $showArchivedBtn.textContent = showArchived ? "hide archived" : "show archived";
+  $showArchivedBtn.classList.toggle("bg-base16-blue/20", showArchived);
+  $showArchivedBtn.classList.toggle("text-base16-blue", showArchived);
+}
+if ($showArchivedBtn) {
+  applyShowArchivedStyle();
+  $showArchivedBtn.addEventListener("click", () => {
+    showArchived = !showArchived;
+    localStorage.setItem("pirouette-show-archived", showArchived ? "1" : "0");
+    applyShowArchivedStyle();
+    renderAgentList();
+  });
+}
+
 $projModalCancel.addEventListener("click", closeProjectModal);
 $projModalCreate.addEventListener("click", createProject);
 $projModal.addEventListener("click", (e) => {
