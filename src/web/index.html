@@ -157,13 +157,14 @@
         scrollbar-color: rgb(var(--color-base16-300)) transparent;
       }
 
-      /* Smooth message transitions */
+      /* Message rows appear instantly -- no fade-in. The earlier
+         `fadeIn` animation (opacity + translateY over 0.15s) caused a
+         lot of flashing as new prompt/assistant/tool rows streamed in,
+         so `.message-enter` is intentionally a no-op now. The class is
+         kept on the rows (see transcript.js) as a stable hook in case a
+         subtler transition is wanted later. */
       .message-enter {
-        animation: fadeIn 0.15s ease-out;
-      }
-      @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(4px); }
-        to { opacity: 1; transform: translateY(0); }
+        animation: none;
       }
 
       /* Web-font fallback: JetBrains Mono (no Nerd Font glyphs, just
