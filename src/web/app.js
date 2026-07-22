@@ -1314,18 +1314,23 @@ function handleAgentEvent(agentId, event) {
   }
 }
 
-/** Update the contents of a live streaming bubble in place using
- *  append-only DOM mutations — we never call `innerHTML = ...` here.
- *  Instead we keep the existing text node + cursor span in the DOM and
- *  just insert new text right before the cursor. That avoids the flash
- *  caused by tearing down and rebuilding every child of the bubble on
- *  every delta (the previous implementation re-ran marked + DOMPurify +
- *  highlight.js per chunk).
+/** Update the contents of a live streaming bubble in place.
  *
- *  Both `kind = "text"` and `kind = "thinking"` are now plain-text
- *  streaming. Markdown is applied once when `message_complete` swaps the
- *  streaming bubble for a finalized one (see transcript.js renderMessage
- *  for the streaming branch and the reconciler in renderMessages).
+ *  Assistant text (`kind = "text"`) is rendered as markdown *while it
+ *  streams* via renderMarkdownPi — the same pi-tui renderer used for
+ *  finalized messages. On each delta we re-run the renderer over the
+ *  full accumulated text and swap the bubble's innerHTML in one shot,
+ *  appending a blinking cursor. This is what makes headings, lists,
+ *  code fences and tables appear incrementally instead of showing raw
+ *  markdown that flips to rendered output only at the very end.
+ *
+ *  The render is pure string work (marked lexer + our own line builder)
+ *  and the resulting node count is small, so a full innerHTML swap per
+ *  delta is cheap and doesn't flash the way the old marked + DOMPurify +
+ *  highlight.js pipeline did.
+ *
+ *  Thinking (`kind = "thinking"`) stays plain-text append-only — it's an
+ *  auto-scrolling muted box where markdown structure adds no value.
  *
  *  If the element doesn't exist yet (first delta of a turn), fall back
  *  to a single full render that creates it. */
@@ -1336,34 +1341,42 @@ function updateStreamingElement(elementId, text, kind) {
     return;
   }
 
-  // Append-only fast path: the new full text is the previous text plus
-  // some suffix. Insert just the suffix as a text node before the cursor
-  // span. This is the common case during normal streaming.
-  const last = el.__pirStreamText ?? "";
-  if (text.startsWith(last) && text.length > last.length) {
-    const suffix = text.slice(last.length);
-    const cursorSpan = el.querySelector(".streaming-cursor, .animate-pulse");
-    const node = document.createTextNode(suffix);
-    if (cursorSpan) {
-      el.insertBefore(node, cursorSpan);
-    } else {
-      el.appendChild(node);
+  if (kind === "text") {
+    // Streaming markdown: re-render the whole accumulated text and swap
+    // it in with a trailing cursor. Guard on unchanged text so repeat
+    // events don't do needless work.
+    const last = el.__pirStreamText ?? "";
+    if (text === last) return;
+    const cols = measureBubbleWidthCols();
+    const rendered = renderMarkdownPi(text, cols);
+    el.innerHTML =
+      rendered +
+      '<span class="animate-pulse text-base16-green streaming-cursor">\u258a</span>';
+    el.__pirStreamText = text;
+  } else {
+    // Thinking: append-only fast path. The new full text is the previous
+    // text plus some suffix; insert just the suffix before the cursor.
+    const last = el.__pirStreamText ?? "";
+    if (text.startsWith(last) && text.length > last.length) {
+      const suffix = text.slice(last.length);
+      const cursorSpan = el.querySelector(".streaming-cursor, .animate-pulse");
+      const node = document.createTextNode(suffix);
+      if (cursorSpan) {
+        el.insertBefore(node, cursorSpan);
+      } else {
+        el.appendChild(node);
+      }
+      el.__pirStreamText = text;
+    } else if (text !== last) {
+      // Replacement (server resent text out of order, or initial paint).
+      el.textContent = ""; // wipe, then rebuild
+      el.appendChild(document.createTextNode(text));
+      const cursor = document.createElement("span");
+      cursor.className = "animate-pulse text-base16-500 streaming-cursor";
+      cursor.textContent = "▊";
+      el.appendChild(cursor);
+      el.__pirStreamText = text;
     }
-    el.__pirStreamText = text;
-  } else if (text !== last) {
-    // Replacement (e.g. server resent text out of order, or initial paint).
-    // One-time rewrite is acceptable here — happens at most once per turn.
-    const cursorClass =
-      kind === "thinking"
-        ? "animate-pulse text-base16-500 streaming-cursor"
-        : "animate-pulse text-base16-green streaming-cursor";
-    el.textContent = ""; // wipe, then rebuild
-    el.appendChild(document.createTextNode(text));
-    const cursor = document.createElement("span");
-    cursor.className = cursorClass;
-    cursor.textContent = "▊";
-    el.appendChild(cursor);
-    el.__pirStreamText = text;
   }
 
   if (kind === "thinking") {

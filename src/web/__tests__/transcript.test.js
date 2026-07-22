@@ -377,6 +377,32 @@ describe("renderMessage", () => {
     expect(html).toContain("▊");
   });
 
+  it("streaming assistant renders markdown as it streams when widthCols is set", () => {
+    const html = renderMessage(
+      { role: "assistant", content: "# Heading\n\nsome **bold** text", ts: 0, streaming: true },
+      0,
+      undefined,
+      { widthCols: 80 },
+    );
+    // Uses the pi-tui markdown renderer (pi-md), not raw escaped text.
+    expect(html).toContain('id="streaming-body"');
+    expect(html).toContain('class="pi-md"');
+    expect(html).toContain("pi-heading");
+    expect(html).toContain("pi-strong");
+    // Still carries the blinking cursor.
+    expect(html).toContain("▊");
+  });
+
+  it("streaming assistant falls back to escaped text without widthCols", () => {
+    const html = renderMessage(
+      { role: "assistant", content: "<script>x</script>", ts: 0, streaming: true },
+      0,
+    );
+    expect(html).toContain('id="streaming-body"');
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).not.toContain('class="pi-md"');
+  });
+
   it("tool call uses smart header from describeToolCall", () => {
     const html = renderMessage(
       {
