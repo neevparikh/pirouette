@@ -33,6 +33,8 @@ import {
  *    - `branchName` defaults to null (unknown for old agents)
  *    - `parentAgentId` defaults to null (top-level agent) for records
  *      saved before forking existed
+ *    - `archived` defaults to false for records saved before archiving
+ *      existed
  */
 function migrateAgent(
   agent: Partial<AgentConfig> & { id: string; name: string; projectName?: string | null },
@@ -52,6 +54,9 @@ function migrateAgent(
     usage: agent.usage ?? emptyUsage(),
     errorMessage: agent.errorMessage ?? null,
     parentAgentId: agent.parentAgentId ?? null,
+    // Whether the user has archived this agent. Archived agents are
+    // hidden from the default dashboard listing but not deleted.
+    archived: agent.archived ?? false,
   };
 }
 

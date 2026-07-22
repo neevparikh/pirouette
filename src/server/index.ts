@@ -850,6 +850,37 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
         return;
       }
 
+      // Archive / unarchive an agent. Archived agents stay on disk and
+      // remain fully functional; the dashboard just hides them from the
+      // default listing so long-running / finished chats can be tucked
+      // away. Body: { archived: boolean } (defaults to true).
+      if (method === "POST" && sub === "/archive") {
+        try {
+          const rawBody = await readBody(req).catch(() => "");
+          let archived = true;
+          if (rawBody) {
+            try {
+              const parsed = JSON.parse(rawBody);
+              if (typeof parsed.archived === "boolean") archived = parsed.archived;
+            } catch {
+              /* ignore bad body; default to archiving */
+            }
+          }
+          agentManager.setArchived(agentId, archived);
+          const updated = agentManager.getAgent(agentId);
+          if (updated) {
+            broadcast({
+              kind: "agent_updated",
+              agentId,
+              agent: { ...updated, running: agentManager.isRunning(agentId) },
+            });
+          }
+          json(res, 200, { archived });
+        } catch (err) {
+          error(res, 500, err instanceof Error ? err.message : String(err));
+        }
+        return;
+      }
       if (method === "DELETE" && sub === "") {
         try {
           const qp = url.searchParams;

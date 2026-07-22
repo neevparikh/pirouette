@@ -27,6 +27,10 @@ export interface AgentConfig {
    *  so the sidebar can show fork relationships (`agentA → forked-from-agentB`).
    *  Null for top-level agents created via `pru launch` or @-mention. */
   parentAgentId?: string | null;
+  /** Whether the user has archived this agent. Archived agents remain
+   *  fully functional and on disk; the dashboard hides them from the
+   *  default sidebar listing unless "show archived" is toggled on. */
+  archived?: boolean;
 }
 
 export interface AgentUsage {
@@ -121,6 +125,9 @@ export type WsEnvelope =
   | { kind: "agent_state_change"; agentId: string; state: AgentState }
   | { kind: "agents_list"; agents: AgentConfig[] }
   | { kind: "agent_created"; agent: AgentConfig }
+  /** Metadata-only update to an existing agent (e.g. archive/unarchive).
+   *  The client merges `agent` into its local record. */
+  | { kind: "agent_updated"; agentId: string; agent: AgentConfig & { running?: boolean } }
   | { kind: "agent_removed"; agentId: string }
   | { kind: "agent_session_reset"; agentId: string }
   | { kind: "projects_list"; projects: ProjectConfig[] }
