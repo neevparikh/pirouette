@@ -894,13 +894,6 @@
            the bg-tint strips run the full container width. -->
       <div id="messages" class="flex-1 overflow-y-auto px-0 py-2"></div>
 
-      <!-- Mobile menu button moved INTO the input-bar's textarea row
-           (see below) so it baselines naturally with the message text
-           and the send button. The element below is a no-op stub kept
-           so the `closeAllDrawers` / `openSidebar` JS that references
-           `#mobile-menu-btn` keeps working even when the inline button
-           is removed from the DOM. v0.13.14. -->
-
       <!-- Shared backdrop for both mobile drawers. Hidden on desktop
            via CSS; toggled by app.js when either drawer opens. -->
       <div id="mobile-backdrop" class="hidden" aria-hidden="true"></div>
@@ -965,14 +958,10 @@
         <div id="attachment-strip" class="hidden mb-2 flex flex-wrap gap-2"></div>
 
         <div class="flex items-end gap-3">
-          <!-- v0.13.14: inline mobile menu button. Sits as the first
-               item in the textarea row so it baselines with the
-               textarea content. `md:hidden` keeps it mobile-only. -->
-          <button
-            id="mobile-menu-btn"
-            class="md:hidden flex-none text-base font-mono font-normal text-base16-500 hover:text-base16-700 active:text-base16-700 cursor-pointer leading-tight"
-            aria-label="open agents menu"
-          >☰</button>
+          <!-- The mobile menu (hamburger) button lives in the header now
+               (it opens the chat sidebar drawer); the old inline copy that
+               sat here was removed because duplicate ids meant only the
+               header one received the click handler. -->
           <textarea
             id="message-input"
             class="flex-1 bg-transparent text-base16-700 border-0 outline-none focus:outline-none resize-none text-sm py-0.5 placeholder-base16-500"

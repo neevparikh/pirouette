@@ -1462,7 +1462,7 @@ function renderAgentRow(a, _depth = 0) {
         ${needsAnswer ? '<span class="text-base16-yellow text-xs pulse-dot flex-none">?</span>' : ""}
       </button>
       <button
-        class="flex-none px-1.5 py-1 text-xs text-base16-500 hover:text-base16-orange cursor-pointer opacity-0 group-hover:opacity-100 focus:opacity-100"
+        class="flex-none px-1.5 py-1 text-xs text-base16-500 hover:text-base16-orange cursor-pointer md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
         data-agent-archive="${a.id}"
         data-archived="${a.archived ? "1" : "0"}"
         title="${archiveLabel} this chat"

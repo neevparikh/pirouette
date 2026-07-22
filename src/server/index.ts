@@ -856,6 +856,10 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
       // away. Body: { archived: boolean } (defaults to true).
       if (method === "POST" && sub === "/archive") {
         try {
+          if (!agentManager.getAgent(agentId)) {
+            error(res, 404, "Agent not found");
+            return;
+          }
           const rawBody = await readBody(req).catch(() => "");
           let archived = true;
           if (rawBody) {
