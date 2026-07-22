@@ -81,10 +81,16 @@ describe("buildLogsCommand", () => {
     expect(command).not.toContain("pirouette.log");
   });
 
-  it("--tmux captures the pirouette pane", () => {
+  it("--journal reads the systemd journal", () => {
+    const { command } = host.buildLogsCommand({ journal: true, lines: "10" });
+    expect(command).toContain("journalctl -u pirouette");
+    expect(command).toContain("-n 10");
+  });
+
+  it("--tmux is a deprecated alias for --journal", () => {
     const { command } = host.buildLogsCommand({ tmux: true });
-    expect(command).toContain("tmux capture-pane");
-    expect(command).toContain("-t pirouette");
+    expect(command).toContain("journalctl -u pirouette");
+    expect(command).not.toContain("tmux capture-pane");
   });
 
   it("rejects a bad --lines value", () => {

@@ -1,8 +1,8 @@
 /** Host — the single runtime model: pirouette runs on an SSH-reachable host
  *  the user already manages (a METR devpod, a long-running VM, a dev
  *  container, ...). Pirouette doesn't own the host's lifecycle; it SSHes in,
- *  runs a bootstrap script (install + tmux server, optionally a persistent-
- *  home migration), and manages the pirouette server from there.
+ *  runs a bootstrap script (install + systemd service, optionally a
+ *  persistent-home migration), and manages the pirouette server from there.
  *
  *  `getHost(name?)` resolves the targeted host from config (honouring the
  *  global `--host` flag) and returns a `Host` bound to its effective config.
@@ -36,6 +36,11 @@ import {
 export interface LogsOptions {
   follow?: boolean;
   lines?: string;
+  /** Read the systemd journal (`journalctl -u pirouette`) instead of the
+   *  server log file. */
+  journal?: boolean;
+  /** Deprecated alias for {@link LogsOptions.journal} -- the server no
+   *  longer runs in a tmux session. */
   tmux?: boolean;
   entrypoint?: boolean;
 }
@@ -254,9 +259,9 @@ export class Host {
       console.log(`host "${this.name}" has no recorded state; nothing to stop.`);
       return;
     }
-    console.log(`stopping pirouette tmux session on ${this.cfg.ssh_alias}...`);
+    console.log(`stopping pirouette service on ${this.cfg.ssh_alias}...`);
     try {
-      await runSsh(`tmux kill-session -t pirouette 2>/dev/null || true`, {
+      await runSsh(`sudo systemctl stop pirouette 2>/dev/null || true`, {
         target: this.target(),
       });
       console.log("  done.");
@@ -293,9 +298,13 @@ export class Host {
     }
 
     try {
-      await runSsh(`tmux kill-session -t pirouette 2>/dev/null || true`, {
-        target: this.target(),
-      });
+      // Stop + disable the service (best effort). destroy() may also nuke
+      // the persistent state below; either way we don't want systemd
+      // respawning the server mid-teardown.
+      await runSsh(
+        `sudo systemctl disable --now pirouette 2>/dev/null || true`,
+        { target: this.target() },
+      );
     } catch {
       /* best effort */
     }
@@ -338,21 +347,21 @@ export class Host {
       return lines;
     }
 
-    // One round-trip: is tmux running, does the data dir exist, and the
-    // tailscale FQDN (if the bootstrap wrote one).
+    // One round-trip: is the systemd service active, does the data dir
+    // exist, and the tailscale FQDN (if the bootstrap wrote one).
     const probe =
-      `tmux has-session -t pirouette 2>/dev/null && echo TMUX_RUNNING || echo TMUX_STOPPED; ` +
+      `systemctl is-active pirouette 2>/dev/null | grep -q '^active$' && echo SERVICE_ACTIVE || echo SERVICE_INACTIVE; ` +
       `if [ -d ${shellQuote(c.data_dir)} ]; then echo DATA_DIR_OK; else echo DATA_DIR_MISSING; fi; ` +
       `echo TS_FQDN="$(cat ${shellQuote(c.data_dir + "/tailscale-fqdn")} 2>/dev/null || echo none)"`;
     try {
       const { stdout } = await runSsh(probe, { target: this.target(), timeoutMs: 15_000 });
       const out = stdout.trim().split("\n").map((l) => l.trim());
-      const tmuxRunning = out.includes("TMUX_RUNNING");
+      const serviceActive = out.includes("SERVICE_ACTIVE");
       const dataDirOk = out.includes("DATA_DIR_OK");
       const tsLine = out.find((l) => l.startsWith("TS_FQDN="));
       const tsFqdn = tsLine ? tsLine.slice("TS_FQDN=".length) : "none";
       lines.push(`  data dir   ${dataDirOk ? "\u2705 present" : "\u26a0 missing"} (${c.data_dir})`);
-      lines.push(`  tmux       ${tmuxRunning ? "\u2705 running" : "\u26a0 stopped"}`);
+      lines.push(`  service    ${serviceActive ? "\u2705 active" : "\u26a0 inactive"}`);
       if (tsFqdn !== "none" && tsFqdn !== "") {
         lines.push(`  tailscale  \u2705 https://${tsFqdn}`);
       }
@@ -378,8 +387,11 @@ export class Host {
     let command: string;
     if (opts.entrypoint) {
       command = `tail -n ${lines} ${follow} ${bootstrapLog} 2>/dev/null || echo '(bootstrap log not ready yet)'`;
-    } else if (opts.tmux) {
-      command = `tmux capture-pane -p -S -${lines} -t pirouette 2>/dev/null || echo '(pirouette tmux session not running)'`;
+    } else if (opts.journal || opts.tmux) {
+      // `--journal` (and its deprecated `--tmux` alias) reads the systemd
+      // journal for the service. The server no longer runs in tmux; the
+      // journal is the closest equivalent to the old "live pane".
+      command = `journalctl -u pirouette -n ${lines} ${follow ? "-f" : "--no-pager"} 2>/dev/null || echo '(no journal for pirouette; is the service installed?)'`;
     } else {
       command = `[ -f ${pirouetteLog} ] && tail -n ${lines} ${follow} ${pirouetteLog} || (echo '(pirouette.log not ready; showing bootstrap log)' && tail -n ${lines} ${follow} ${bootstrapLog})`;
     }
@@ -450,40 +462,19 @@ export class Host {
 
   // ---- helpers ----------------------------------------------------------
 
-  /** Tear down + relaunch the pirouette tmux session so a new binary takes
-   *  effect. Mirrors `scripts/pirouette-bootstrap.sh`'s server-start: forwards
-   *  default model / thinking level, the merged allowed_hosts (config +
-   *  tailscale FQDN if known), and the configured bind_host. */
+  /** Restart the pirouette systemd service so a freshly-installed binary
+   *  takes effect. The service's environment (data dir, port, bind host,
+   *  default model / thinking level, merged allowed_hosts incl. the
+   *  tailscale FQDN) is baked into the unit at `pru setup` time by
+   *  `scripts/pirouette-bootstrap.sh`, so a plain `systemctl restart` is
+   *  all that's needed here -- no env plumbing.
+   *
+   *  Note: this does NOT pick up changes to model / allowed_hosts / etc.
+   *  made in config after the last setup; run `pru setup` for that (it
+   *  re-renders the unit). A binary upgrade (`pru sync`) only needs the
+   *  process to relaunch, which this does. */
   private async restartServer(): Promise<void> {
-    const c = this.cfg;
-    const envPairs: string[] = [
-      `PIROUETTE_DATA_DIR=${shellQuote(c.data_dir)}`,
-      `PIROUETTE_PORT=${c.port}`,
-      `PIROUETTE_HOST=${shellQuote(c.bind_host)}`,
-    ];
-    if (c.default_model) envPairs.push(`PIROUETTE_DEFAULT_MODEL=${shellQuote(c.default_model)}`);
-    if (c.default_thinking_level) {
-      envPairs.push(`PIROUETTE_DEFAULT_THINKING_LEVEL=${shellQuote(c.default_thinking_level)}`);
-    }
-
-    const allowedHosts = new Set<string>(c.allowed_hosts);
-    const fqdn = await this.readTailscaleFqdn();
-    if (fqdn) allowedHosts.add(fqdn);
-    if (allowedHosts.size > 0) {
-      envPairs.push(`PIROUETTE_ALLOWED_HOSTS=${shellQuote([...allowedHosts].join(","))}`);
-    }
-
-    // Build the inner server command, then nest-quote it twice: once so it's
-    // a single argument to `tmux new-session`, once so the whole thing is a
-    // single argument to `bash -lc`. shellQuote handles embedded single
-    // quotes (the per-value quoting in envPairs) at each level, so values
-    // containing spaces survive (a previous version wrapped the command in a
-    // bare '...' which truncated spaced values at the first word).
-    const logPath = `${c.data_dir}/logs/pirouette.log`;
-    const inner = `${envPairs.join(" ")} pirouette server 2>&1 | tee -a ${shellQuote(logPath)}`;
-    const tmuxCmd = `tmux new-session -d -s pirouette ${shellQuote(inner)}`;
-    await runSsh(`tmux kill-session -t pirouette 2>/dev/null || true`, { target: this.target() });
-    await runSsh(`bash -lc ${shellQuote(tmuxCmd)}`, { target: this.target() });
+    await runSsh(`sudo systemctl restart pirouette`, { target: this.target() });
   }
 
   /** Read the tailscale FQDN the bootstrap writes after `tailscale serve`.

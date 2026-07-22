@@ -2,7 +2,9 @@
  *
  *  Sources:
  *    --server   (default)  tail $PIROUETTE_DATA_DIR/logs/pirouette.log
- *    --tmux                capture the live tmux pane (latest state, no history)
+ *    --journal             the systemd journal (journalctl -u pirouette)
+ *                          (--tmux is a deprecated alias; the server no
+ *                          longer runs in a tmux session)
  *    --entrypoint          the bootstrap log (yadm, npm install, server start)
  *
  *  Use `-f` / `--follow` to stream.
