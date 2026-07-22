@@ -308,17 +308,29 @@ export function renderMessage(msg, idx, expandedItems, opts) {
 
   if (msg.role === "assistant") {
     if (msg.streaming) {
-      // Streaming row: flat pi-cli layout (no bubble). Renders plain
-      // text -- NOT markdown -- for the reasons in the original
-      // comment: half-formed markdown flickers, and rebuilding the
-      // DOM on every delta causes flash. app.js's
-      // updateStreamingElement() inserts new text before the cursor
-      // span instead of rewriting innerHTML, so streaming stays
-      // smooth. message_complete swaps to the pi-md branch above
-      // for the final paint.
+      // Streaming row: flat pi-cli layout (no bubble). The text is run
+      // through the SAME pi-tui markdown renderer used for finalized
+      // messages, so headings, lists, code fences, tables and inline
+      // styling appear *as the tokens stream in* rather than showing
+      // raw markdown that flips to rendered output at the very end.
+      //
+      // app.js's updateStreamingElement() re-runs renderMarkdownPi on
+      // each delta and swaps the bubble's innerHTML in one shot (cheap
+      // — the render is pure string work and the DOM node count is
+      // small). A trailing blinking cursor is appended after the
+      // rendered markdown. When no width is available (tests / preview)
+      // we fall back to escaped plain text.
+      const streamBody =
+        opts && opts.widthCols
+          ? renderMarkdownPi(msg.content, opts.widthCols)
+          : escHtml(msg.content);
+      const streamClass =
+        opts && opts.widthCols
+          ? "pi-md"
+          : "whitespace-pre-wrap text-base16-600 font-mono";
       return `
         <div class="message-enter pi-row pi-row-assistant px-4 py-1.5" data-msg-key="${wrapKey}">
-          <pre id="streaming-body" class="whitespace-pre-wrap text-base16-600 font-mono">${escHtml(msg.content)}<span class="animate-pulse text-base16-green streaming-cursor">▊</span></pre>
+          <pre id="streaming-body" class="${streamClass}">${streamBody}<span class="animate-pulse text-base16-green streaming-cursor">▊</span></pre>
         </div>`;
     }
     // `rawAssistant` toggle (owned by app.js, localStorage-backed) --

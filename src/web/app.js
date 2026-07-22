@@ -18,6 +18,7 @@ import {
   reduceEvent,
   renderTranscriptBlocks,
 } from "./transcript.js";
+import { renderMarkdownPi } from "./pi-markdown.js";
 import { VimMode } from "./vim.js";
 
 // --- state ---
@@ -1314,18 +1315,23 @@ function handleAgentEvent(agentId, event) {
   }
 }
 
-/** Update the contents of a live streaming bubble in place using
- *  append-only DOM mutations — we never call `innerHTML = ...` here.
- *  Instead we keep the existing text node + cursor span in the DOM and
- *  just insert new text right before the cursor. That avoids the flash
- *  caused by tearing down and rebuilding every child of the bubble on
- *  every delta (the previous implementation re-ran marked + DOMPurify +
- *  highlight.js per chunk).
+/** Update the contents of a live streaming bubble in place.
  *
- *  Both `kind = "text"` and `kind = "thinking"` are now plain-text
- *  streaming. Markdown is applied once when `message_complete` swaps the
- *  streaming bubble for a finalized one (see transcript.js renderMessage
- *  for the streaming branch and the reconciler in renderMessages).
+ *  Assistant text (`kind = "text"`) is rendered as markdown *while it
+ *  streams* via renderMarkdownPi — the same pi-tui renderer used for
+ *  finalized messages. On each delta we re-run the renderer over the
+ *  full accumulated text and swap the bubble's innerHTML in one shot,
+ *  appending a blinking cursor. This is what makes headings, lists,
+ *  code fences and tables appear incrementally instead of showing raw
+ *  markdown that flips to rendered output only at the very end.
+ *
+ *  The render is pure string work (marked lexer + our own line builder)
+ *  and the resulting node count is small, so a full innerHTML swap per
+ *  delta is cheap and doesn't flash the way the old marked + DOMPurify +
+ *  highlight.js pipeline did.
+ *
+ *  Thinking (`kind = "thinking"`) stays plain-text append-only — it's an
+ *  auto-scrolling muted box where markdown structure adds no value.
  *
  *  If the element doesn't exist yet (first delta of a turn), fall back
  *  to a single full render that creates it. */
@@ -1336,46 +1342,75 @@ function updateStreamingElement(elementId, text, kind) {
     return;
   }
 
-  // Append-only fast path: the new full text is the previous text plus
-  // some suffix. Insert just the suffix as a text node before the cursor
-  // span. This is the common case during normal streaming.
-  const last = el.__pirStreamText ?? "";
-  if (text.startsWith(last) && text.length > last.length) {
-    const suffix = text.slice(last.length);
-    const cursorSpan = el.querySelector(".streaming-cursor, .animate-pulse");
-    const node = document.createTextNode(suffix);
-    if (cursorSpan) {
-      el.insertBefore(node, cursorSpan);
-    } else {
-      el.appendChild(node);
+  // Snapshot scroll state BEFORE mutating the DOM. A single markdown
+  // re-render can add many lines at once (a paragraph reflows, a table
+  // or code block appears), so measuring "near the bottom" after the
+  // swap would see the freshly-added content as a large gap and wrongly
+  // conclude the user had scrolled away — detaching auto-scroll after a
+  // line or two. Capturing the pre-mutation state keeps the follow
+  // behavior stable across big incremental jumps.
+  const $m = document.getElementById("messages");
+  const wasNearBottom = $m
+    ? $m.scrollHeight - $m.scrollTop - $m.clientHeight < 200
+    : false;
+
+  if (kind === "text") {
+    // Streaming markdown: re-render the whole accumulated text and swap
+    // it in with a trailing cursor. Guard on unchanged text so repeat
+    // events don't do needless work.
+    const last = el.__pirStreamText ?? "";
+    if (text === last) return;
+    const cursor =
+      '<span class="animate-pulse text-base16-green streaming-cursor">\u258a</span>';
+    // The markdown render is the live streaming hot path; if it ever
+    // throws (bad partial token, missing global, etc.) we must NOT let
+    // the exception bubble up — that would kill this and every
+    // subsequent delta, leaving the bubble frozen until the turn ends.
+    // Fall back to escaped plain text so streaming keeps flowing.
+    let rendered;
+    try {
+      rendered = renderMarkdownPi(text, measureBubbleWidthCols());
+    } catch (err) {
+      console.error("streaming markdown render failed; falling back:", err);
+      rendered = escHtml(text);
     }
+    el.innerHTML = rendered + cursor;
     el.__pirStreamText = text;
-  } else if (text !== last) {
-    // Replacement (e.g. server resent text out of order, or initial paint).
-    // One-time rewrite is acceptable here — happens at most once per turn.
-    const cursorClass =
-      kind === "thinking"
-        ? "animate-pulse text-base16-500 streaming-cursor"
-        : "animate-pulse text-base16-green streaming-cursor";
-    el.textContent = ""; // wipe, then rebuild
-    el.appendChild(document.createTextNode(text));
-    const cursor = document.createElement("span");
-    cursor.className = cursorClass;
-    cursor.textContent = "▊";
-    el.appendChild(cursor);
-    el.__pirStreamText = text;
+  } else {
+    // Thinking: append-only fast path. The new full text is the previous
+    // text plus some suffix; insert just the suffix before the cursor.
+    const last = el.__pirStreamText ?? "";
+    if (text.startsWith(last) && text.length > last.length) {
+      const suffix = text.slice(last.length);
+      const cursorSpan = el.querySelector(".streaming-cursor, .animate-pulse");
+      const node = document.createTextNode(suffix);
+      if (cursorSpan) {
+        el.insertBefore(node, cursorSpan);
+      } else {
+        el.appendChild(node);
+      }
+      el.__pirStreamText = text;
+    } else if (text !== last) {
+      // Replacement (server resent text out of order, or initial paint).
+      el.textContent = ""; // wipe, then rebuild
+      el.appendChild(document.createTextNode(text));
+      const cursor = document.createElement("span");
+      cursor.className = "animate-pulse text-base16-500 streaming-cursor";
+      cursor.textContent = "▊";
+      el.appendChild(cursor);
+      el.__pirStreamText = text;
+    }
   }
 
   if (kind === "thinking") {
     el.scrollTop = el.scrollHeight;
   }
 
-  // Outer scroll follow: only if the user is already near the bottom of
-  // the messages list. Avoids yanking scroll if they scrolled up to read.
-  const $m = document.getElementById("messages");
-  if ($m) {
-    const nearBottom = $m.scrollHeight - $m.scrollTop - $m.clientHeight < 200;
-    if (nearBottom) $m.scrollTop = $m.scrollHeight;
+  // Outer scroll follow: only if the user was already near the bottom of
+  // the messages list before this update. Avoids yanking scroll if they
+  // scrolled up to read.
+  if ($m && wasNearBottom) {
+    $m.scrollTop = $m.scrollHeight;
   }
 }
 
