@@ -32,15 +32,17 @@ Type=simple
 User=<USER>
 Group=<GROUP>
 WorkingDirectory=<HOME>
-Environment=HOME=<HOME>
-Environment=PATH=<HOME>/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-Environment=PIROUETTE_DATA_DIR=<DATA_DIR>
-Environment=PIROUETTE_PORT=<PORT>
-Environment=PIROUETTE_HOST=<BIND_HOST>
+# Assignments are double-quoted: systemd splits unquoted Environment=
+# values on whitespace, so a path/value with a space would truncate.
+Environment="HOME=<HOME>"
+Environment="PATH=<HOME>/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PIROUETTE_DATA_DIR=<DATA_DIR>"
+Environment="PIROUETTE_PORT=<PORT>"
+Environment="PIROUETTE_HOST=<BIND_HOST>"
 # Optional, omitted when unset:
-# Environment=PIROUETTE_DEFAULT_MODEL=<MODEL>
-# Environment=PIROUETTE_DEFAULT_THINKING_LEVEL=<LEVEL>
-# Environment=PIROUETTE_ALLOWED_HOSTS=<HOSTS>
+# Environment="PIROUETTE_DEFAULT_MODEL=<MODEL>"
+# Environment="PIROUETTE_DEFAULT_THINKING_LEVEL=<LEVEL>"
+# Environment="PIROUETTE_ALLOWED_HOSTS=<HOSTS>"
 ExecStart=<NODE_BIN> <PIROUETTE_BIN> server
 Restart=always
 RestartSec=2

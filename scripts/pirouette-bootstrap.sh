@@ -252,9 +252,13 @@ fi
 
 # ---- 6. Install pirouette --------------------------------------------------
 HAVE="$(pirouette --version 2>/dev/null || true)"
+# Tracked so install_service knows a fresh binary needs a service restart
+# even when the rendered unit is unchanged.
+PIROUETTE_JUST_INSTALLED=0
 if [ -z "$HAVE" ] || [ "${PIROUETTE_FORCE_REINSTALL:-0}" = "1" ]; then
     log "installing $PIROUETTE_PACKAGE into $NPM_PREFIX"
     npm install -g "$PIROUETTE_PACKAGE" 2>&1 | tail -5
+    PIROUETTE_JUST_INSTALLED=1
 else
     log "pirouette $HAVE already installed at $(command -v pirouette)"
 fi
@@ -287,13 +291,16 @@ NODE_BIN="$(command -v node || echo /usr/bin/node)"
 
 build_service_env_lines() {
     local extra_allowed_hosts="${1:-}"
-    printf 'Environment=PIROUETTE_DATA_DIR=%s\n' "$PIROUETTE_DATA_DIR"
-    printf 'Environment=PIROUETTE_PORT=%s\n' "$PIROUETTE_PORT"
-    printf 'Environment=PIROUETTE_HOST=%s\n' "$PIROUETTE_BIND_HOST"
+    # Each assignment is double-quoted: systemd splits unquoted
+    # Environment= values on whitespace, so a path/value with a space
+    # would silently truncate.
+    printf 'Environment="PIROUETTE_DATA_DIR=%s"\n' "$PIROUETTE_DATA_DIR"
+    printf 'Environment="PIROUETTE_PORT=%s"\n' "$PIROUETTE_PORT"
+    printf 'Environment="PIROUETTE_HOST=%s"\n' "$PIROUETTE_BIND_HOST"
     [ -n "${PIROUETTE_DEFAULT_MODEL:-}" ] && \
-        printf 'Environment=PIROUETTE_DEFAULT_MODEL=%s\n' "$PIROUETTE_DEFAULT_MODEL"
+        printf 'Environment="PIROUETTE_DEFAULT_MODEL=%s"\n' "$PIROUETTE_DEFAULT_MODEL"
     [ -n "${PIROUETTE_DEFAULT_THINKING_LEVEL:-}" ] && \
-        printf 'Environment=PIROUETTE_DEFAULT_THINKING_LEVEL=%s\n' "$PIROUETTE_DEFAULT_THINKING_LEVEL"
+        printf 'Environment="PIROUETTE_DEFAULT_THINKING_LEVEL=%s"\n' "$PIROUETTE_DEFAULT_THINKING_LEVEL"
     # Merge config-level allowed_hosts with any extra entries the caller
     # supplies (e.g. the tailscale FQDN). Server parses this comma-separated.
     local hosts="${PIROUETTE_ALLOWED_HOSTS:-}"
@@ -304,7 +311,7 @@ build_service_env_lines() {
             hosts="$extra_allowed_hosts"
         fi
     fi
-    [ -n "$hosts" ] && printf 'Environment=PIROUETTE_ALLOWED_HOSTS=%s\n' "$hosts"
+    [ -n "$hosts" ] && printf 'Environment="PIROUETTE_ALLOWED_HOSTS=%s"\n' "$hosts"
 }
 
 # Render the full unit file to stdout. Logs still append to
@@ -323,8 +330,8 @@ Type=simple
 User=$(id -un)
 Group=$(id -gn)
 WorkingDirectory=$HOME
-Environment=HOME=$HOME
-Environment=PATH=$NPM_PREFIX/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment="HOME=$HOME"
+Environment="PATH=$NPM_PREFIX/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 $(build_service_env_lines "$extra_allowed_hosts")
 ExecStart=$NODE_BIN $PIROUETTE_BIN server
 Restart=always
@@ -342,24 +349,40 @@ UNIT
 # disk, so re-running the bootstrap doesn't needlessly bounce the server.
 install_service() {
     local extra_allowed_hosts="${1:-}"
-    local desired new_hash cur_hash
+    local desired new_hash cur_hash changed=0
     desired="$(render_service_unit "$extra_allowed_hosts")"
-    new_hash="$(printf '%s' "$desired" | sha256sum | cut -d' ' -f1)"
+    # Hash with the same trailing newline the file is written with, or
+    # the comparison never matches and every run rewrites the unit.
+    new_hash="$(printf '%s\n' "$desired" | sha256sum | cut -d' ' -f1)"
     cur_hash="$(sudo sha256sum "$SERVICE_UNIT_PATH" 2>/dev/null | cut -d' ' -f1 || true)"
     if [ "$new_hash" != "$cur_hash" ]; then
         log "writing systemd unit $SERVICE_UNIT_PATH"
         printf '%s\n' "$desired" | sudo tee "$SERVICE_UNIT_PATH" >/dev/null
         sudo systemctl daemon-reload
+        changed=1
     fi
     sudo systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
-    # `restart` (not `start`) so a unit change actually takes effect, and
-    # so a stale "active (exited)" one-shot from an older bootstrap is
-    # replaced by the supervised process.
-    log "starting systemd service '$SERVICE_NAME' (binding $PIROUETTE_BIND_HOST:$PIROUETTE_PORT)"
-    sudo systemctl restart "$SERVICE_NAME"
+    # Restart only when something calls for it: the unit changed, the
+    # binary was (re)installed this run, or the service isn't running.
+    # `restart` (not `start`) so a unit / binary change takes effect.
+    # Re-running the bootstrap with nothing changed must NOT bounce the
+    # server (it would kill in-flight agent turns).
+    if [ "$changed" = 1 ] || [ "$PIROUETTE_JUST_INSTALLED" = 1 ] || \
+       ! systemctl is-active --quiet "$SERVICE_NAME"; then
+        log "starting systemd service '$SERVICE_NAME' (binding $PIROUETTE_BIND_HOST:$PIROUETTE_PORT)"
+        sudo systemctl restart "$SERVICE_NAME"
+    else
+        log "systemd service '$SERVICE_NAME' already running; unit unchanged"
+    fi
 }
 
-install_service
+# Preserve a previously-applied tailscale FQDN in the allowlist (the
+# tailscale block below applies/updates it and records it in the
+# `tailscale-fqdn-active` sentinel). Without this, a re-run would render
+# the unit WITHOUT the FQDN here, drop it from PIROUETTE_ALLOWED_HOSTS,
+# and the tailscale block would skip re-adding it because its sentinel
+# still matches — breaking tailnet access until the FQDN changes.
+install_service "$(cat "$PIROUETTE_DATA_DIR/tailscale-fqdn-active" 2>/dev/null || true)"
 
 # ---- 8. Tailscale (optional) ----------------------------------------------
 # Bridges the loopback-bound pirouette server onto the tailnet so any
