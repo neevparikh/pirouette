@@ -1401,9 +1401,12 @@ function renderAgentRow(a, _depth = 0) {
   const stateLabel =
     a.state === "cloning" ? "cloning"
     : a.state === "error" ? `error: ${(a.errorMessage || "").slice(0, 40)}`
+    // "shutdown" must win over any stale activity: an agent aborted
+    // mid-tool won't emit tool_execution_end, so `activity` can linger
+    // and otherwise show "▶ <tool>" instead of "restarting".
+    : a.state === "shutdown" ? "restarting"
     : activity ? `▶ ${activity.tool}`
     : a.state === "waiting_input" ? "your turn"
-    : a.state === "shutdown" ? "restarting"
     : a.state;
   const titleParts = [
     a.name,
