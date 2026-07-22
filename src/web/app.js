@@ -18,6 +18,7 @@ import {
   reduceEvent,
   renderTranscriptBlocks,
 } from "./transcript.js";
+import { renderMarkdownPi } from "./pi-markdown.js";
 import { VimMode } from "./vim.js";
 
 // --- state ---
@@ -1347,11 +1348,21 @@ function updateStreamingElement(elementId, text, kind) {
     // events don't do needless work.
     const last = el.__pirStreamText ?? "";
     if (text === last) return;
-    const cols = measureBubbleWidthCols();
-    const rendered = renderMarkdownPi(text, cols);
-    el.innerHTML =
-      rendered +
+    const cursor =
       '<span class="animate-pulse text-base16-green streaming-cursor">\u258a</span>';
+    // The markdown render is the live streaming hot path; if it ever
+    // throws (bad partial token, missing global, etc.) we must NOT let
+    // the exception bubble up — that would kill this and every
+    // subsequent delta, leaving the bubble frozen until the turn ends.
+    // Fall back to escaped plain text so streaming keeps flowing.
+    let rendered;
+    try {
+      rendered = renderMarkdownPi(text, measureBubbleWidthCols());
+    } catch (err) {
+      console.error("streaming markdown render failed; falling back:", err);
+      rendered = escHtml(text);
+    }
+    el.innerHTML = rendered + cursor;
     el.__pirStreamText = text;
   } else {
     // Thinking: append-only fast path. The new full text is the previous
