@@ -201,9 +201,21 @@ export async function createWorktree(opts: {
   const hasRemote = await git(opts.repoPath, ["rev-parse", "--verify", baseRef], { timeoutMs: 5000 });
   if (hasRemote.code !== 0) baseRef = "HEAD";
 
-  const r = await git(opts.repoPath, ["worktree", "add", "-b", branch, worktreePath, baseRef], {
-    timeoutMs: 30_000,
-  });
+  // `--no-track` is important: when baseRef is a remote-tracking branch
+  // (`origin/<base>`), git would otherwise set up upstream tracking for the
+  // new branch, which writes `branch.<name>.{remote,merge}` into the repo's
+  // shared `.git/config`. All of a project's worktrees share one `.git/config`,
+  // so concurrent creates (and a create racing other agents' git ops) contend
+  // on the single config lock; an interrupted write can even leave a stale
+  // `.git/config.lock` that fails every subsequent create with "could not lock
+  // config file .git/config: File exists". Agent branches never pull from the
+  // base, so they don't need tracking — skipping it avoids the config write
+  // (and the lock) entirely.
+  const r = await git(
+    opts.repoPath,
+    ["worktree", "add", "--no-track", "-b", branch, worktreePath, baseRef],
+    { timeoutMs: 30_000 },
+  );
   if (r.code !== 0) {
     throw new Error(`git worktree add failed: ${r.stderr.trim() || "unknown error"}`);
   }
