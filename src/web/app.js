@@ -1342,6 +1342,18 @@ function updateStreamingElement(elementId, text, kind) {
     return;
   }
 
+  // Snapshot scroll state BEFORE mutating the DOM. A single markdown
+  // re-render can add many lines at once (a paragraph reflows, a table
+  // or code block appears), so measuring "near the bottom" after the
+  // swap would see the freshly-added content as a large gap and wrongly
+  // conclude the user had scrolled away — detaching auto-scroll after a
+  // line or two. Capturing the pre-mutation state keeps the follow
+  // behavior stable across big incremental jumps.
+  const $m = document.getElementById("messages");
+  const wasNearBottom = $m
+    ? $m.scrollHeight - $m.scrollTop - $m.clientHeight < 200
+    : false;
+
   if (kind === "text") {
     // Streaming markdown: re-render the whole accumulated text and swap
     // it in with a trailing cursor. Guard on unchanged text so repeat
@@ -1394,12 +1406,11 @@ function updateStreamingElement(elementId, text, kind) {
     el.scrollTop = el.scrollHeight;
   }
 
-  // Outer scroll follow: only if the user is already near the bottom of
-  // the messages list. Avoids yanking scroll if they scrolled up to read.
-  const $m = document.getElementById("messages");
-  if ($m) {
-    const nearBottom = $m.scrollHeight - $m.scrollTop - $m.clientHeight < 200;
-    if (nearBottom) $m.scrollTop = $m.scrollHeight;
+  // Outer scroll follow: only if the user was already near the bottom of
+  // the messages list before this update. Avoids yanking scroll if they
+  // scrolled up to read.
+  if ($m && wasNearBottom) {
+    $m.scrollTop = $m.scrollHeight;
   }
 }
 
