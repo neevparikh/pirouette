@@ -1372,6 +1372,7 @@ function statusColor(state) {
     case "idle":
       return "bg-base16-yellow";
     case "stopped":
+    case "shutdown": // stopped by server shutdown; auto-resumes on restart
       return "bg-base16-400";
     case "error":
       return "bg-base16-red";
@@ -1402,6 +1403,7 @@ function renderAgentRow(a, _depth = 0) {
     : a.state === "error" ? `error: ${(a.errorMessage || "").slice(0, 40)}`
     : activity ? `▶ ${activity.tool}`
     : a.state === "waiting_input" ? "your turn"
+    : a.state === "shutdown" ? "restarting"
     : a.state;
   const titleParts = [
     a.name,
@@ -1734,9 +1736,12 @@ function renderAgentHeader() {
   }
   $agentStats.innerHTML = renderInfoParts(rightParts);
 
-  const running = agent.state !== "stopped";
+  const running = agent.state !== "stopped" && agent.state !== "shutdown";
   $stopBtn.classList.toggle("hidden", !running);
-  $resumeBtn.classList.toggle("hidden", agent.state !== "stopped" && agent.state !== "error");
+  $resumeBtn.classList.toggle(
+    "hidden",
+    agent.state !== "stopped" && agent.state !== "shutdown" && agent.state !== "error",
+  );
   $deleteBtn.classList.remove("hidden");
 
   // Send-mode toggle visibility tracks the agent's state. Done here (rather
