@@ -1,0 +1,51 @@
+# Canonical pirouette systemd unit (reference / single source of truth).
+#
+# `scripts/pirouette-bootstrap.sh` renders this unit dynamically during
+# `pru setup`, substituting the PIROUETTE_* values it computes (data dir,
+# port, bind host, default model, allowed hosts) and the resolved node +
+# pirouette binary paths. This file documents the canonical shape of the
+# unit; the `<PLACEHOLDER>` tokens are what the bootstrap fills in.
+#
+# Manual install (if not using `pru setup`):
+#   1. copy to /etc/systemd/system/pirouette.service
+#   2. replace every <PLACEHOLDER>
+#   3. sudo systemctl daemon-reload
+#   4. sudo systemctl enable --now pirouette
+#
+# Properties:
+#   - Restart=always so the server survives crashes AND host reboots
+#     (the old bootstrap launched it in a tmux session with no
+#     supervisor, so a crash left the server dead until manual restart).
+#   - logs append to $DATA/logs/pirouette.log so `pru logs` (a file tail)
+#     is unchanged.
+#   - bind stays 127.0.0.1; the `tailscale serve` bridge (if enabled)
+#     persists on its own and only forwards to 127.0.0.1:PORT.
+
+[Unit]
+Description=pirouette server (pi coding agents)
+Documentation=https://github.com/neevparikh/pirouette
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=<USER>
+Group=<GROUP>
+WorkingDirectory=<HOME>
+Environment=HOME=<HOME>
+Environment=PATH=<HOME>/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PIROUETTE_DATA_DIR=<DATA_DIR>
+Environment=PIROUETTE_PORT=<PORT>
+Environment=PIROUETTE_HOST=<BIND_HOST>
+# Optional, omitted when unset:
+# Environment=PIROUETTE_DEFAULT_MODEL=<MODEL>
+# Environment=PIROUETTE_DEFAULT_THINKING_LEVEL=<LEVEL>
+# Environment=PIROUETTE_ALLOWED_HOSTS=<HOSTS>
+ExecStart=<NODE_BIN> <PIROUETTE_BIN> server
+Restart=always
+RestartSec=2
+StandardOutput=append:<DATA_DIR>/logs/pirouette.log
+StandardError=append:<DATA_DIR>/logs/pirouette.log
+
+[Install]
+WantedBy=multi-user.target

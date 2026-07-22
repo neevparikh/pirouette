@@ -259,27 +259,41 @@ else
     log "pirouette $HAVE already installed at $(command -v pirouette)"
 fi
 
-# ---- 7. Start the server in tmux ------------------------------------------
-# Idempotent: only spawn if not already running. Bind $PIROUETTE_BIND_HOST
-# (default 127.0.0.1 loopback -- access from laptop via SSH tunnel).
+# ---- 7. Install + start the systemd service -------------------------------
+# The server runs under systemd (Restart=always) so it survives crashes
+# and host reboots -- a plain `tmux new-session` had no supervisor, so
+# when the server died inside tmux nothing revived it. Bind
+# $PIROUETTE_BIND_HOST (default 127.0.0.1 loopback -- access from laptop
+# via SSH tunnel or the tailscale bridge).
 #
-# The tmux command forwards a curated set of env vars that the laptop's
-# host module plumbs through (default model / thinking level,
-# config-level allowed_hosts). Empty / unset vars are omitted rather
-# than passed as empty strings because the server falls back to
-# config.toml / defaults via nullish-coalesce -- an explicit empty
-# string would override the fallback to literal "".
+# The unit forwards a curated set of env vars that the laptop's host
+# module plumbs through (default model / thinking level, config-level
+# allowed_hosts). Empty / unset vars are omitted rather than written as
+# empty strings because the server falls back to config.toml / defaults
+# via nullish-coalesce -- an explicit empty string would override the
+# fallback to literal "".
 #
-# Kept as a function so the tailscale block (which restarts the session
-# with an additional allowed-hosts entry for the tailnet FQDN) can
-# reuse the exact same env-construction logic.
-build_server_env() {
+# Kept as a function so the tailscale block (which rewrites the unit
+# with an additional allowed-hosts entry for the tailnet FQDN) can reuse
+# the exact same env-construction logic. Emits one `Environment=KEY=val`
+# line per set var (systemd does NOT do shell-style quoting, so values
+# are written verbatim -- no surrounding quotes).
+SERVICE_NAME="pirouette"
+SERVICE_UNIT_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
+# Resolve the pirouette bin + node absolute paths for ExecStart (systemd
+# has no shell PATH lookup for the command itself unless absolute).
+PIROUETTE_BIN="$(command -v pirouette || echo "$NPM_PREFIX/bin/pirouette")"
+NODE_BIN="$(command -v node || echo /usr/bin/node)"
+
+build_service_env_lines() {
     local extra_allowed_hosts="${1:-}"
-    local env_str=""
+    printf 'Environment=PIROUETTE_DATA_DIR=%s\n' "$PIROUETTE_DATA_DIR"
+    printf 'Environment=PIROUETTE_PORT=%s\n' "$PIROUETTE_PORT"
+    printf 'Environment=PIROUETTE_HOST=%s\n' "$PIROUETTE_BIND_HOST"
     [ -n "${PIROUETTE_DEFAULT_MODEL:-}" ] && \
-        env_str="$env_str PIROUETTE_DEFAULT_MODEL='$PIROUETTE_DEFAULT_MODEL'"
+        printf 'Environment=PIROUETTE_DEFAULT_MODEL=%s\n' "$PIROUETTE_DEFAULT_MODEL"
     [ -n "${PIROUETTE_DEFAULT_THINKING_LEVEL:-}" ] && \
-        env_str="$env_str PIROUETTE_DEFAULT_THINKING_LEVEL='$PIROUETTE_DEFAULT_THINKING_LEVEL'"
+        printf 'Environment=PIROUETTE_DEFAULT_THINKING_LEVEL=%s\n' "$PIROUETTE_DEFAULT_THINKING_LEVEL"
     # Merge config-level allowed_hosts with any extra entries the caller
     # supplies (e.g. the tailscale FQDN). Server parses this comma-separated.
     local hosts="${PIROUETTE_ALLOWED_HOSTS:-}"
@@ -290,19 +304,62 @@ build_server_env() {
             hosts="$extra_allowed_hosts"
         fi
     fi
-    [ -n "$hosts" ] && env_str="$env_str PIROUETTE_ALLOWED_HOSTS='$hosts'"
-    echo "$env_str"
+    [ -n "$hosts" ] && printf 'Environment=PIROUETTE_ALLOWED_HOSTS=%s\n' "$hosts"
 }
 
-SESSION_NAME="pirouette"
-if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
-    log "tmux session '$SESSION_NAME' already running; not restarting"
-else
-    log "starting tmux session '$SESSION_NAME' (binding $PIROUETTE_BIND_HOST:$PIROUETTE_PORT)"
-    server_env="$(build_server_env)"
-    tmux new-session -d -s "$SESSION_NAME" \
-        "PIROUETTE_DATA_DIR='$PIROUETTE_DATA_DIR' PIROUETTE_PORT='$PIROUETTE_PORT' PIROUETTE_HOST='$PIROUETTE_BIND_HOST' $server_env pirouette server 2>&1 | tee -a '$PIROUETTE_DATA_DIR/logs/pirouette.log'"
-fi
+# Render the full unit file to stdout. Logs still append to
+# $DATA/logs/pirouette.log so `pru logs` (file tail) is unchanged.
+render_service_unit() {
+    local extra_allowed_hosts="${1:-}"
+    cat <<UNIT
+[Unit]
+Description=pirouette server (pi coding agents)
+Documentation=https://github.com/neevparikh/pirouette
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$(id -un)
+Group=$(id -gn)
+WorkingDirectory=$HOME
+Environment=HOME=$HOME
+Environment=PATH=$NPM_PREFIX/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+$(build_service_env_lines "$extra_allowed_hosts")
+ExecStart=$NODE_BIN $PIROUETTE_BIN server
+Restart=always
+RestartSec=2
+StandardOutput=append:$PIROUETTE_DATA_DIR/logs/pirouette.log
+StandardError=append:$PIROUETTE_DATA_DIR/logs/pirouette.log
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+}
+
+# Install the unit if missing or changed, then (re)start. Idempotent:
+# only rewrites + restarts when the rendered unit differs from what's on
+# disk, so re-running the bootstrap doesn't needlessly bounce the server.
+install_service() {
+    local extra_allowed_hosts="${1:-}"
+    local desired new_hash cur_hash
+    desired="$(render_service_unit "$extra_allowed_hosts")"
+    new_hash="$(printf '%s' "$desired" | sha256sum | cut -d' ' -f1)"
+    cur_hash="$(sudo sha256sum "$SERVICE_UNIT_PATH" 2>/dev/null | cut -d' ' -f1 || true)"
+    if [ "$new_hash" != "$cur_hash" ]; then
+        log "writing systemd unit $SERVICE_UNIT_PATH"
+        printf '%s\n' "$desired" | sudo tee "$SERVICE_UNIT_PATH" >/dev/null
+        sudo systemctl daemon-reload
+    fi
+    sudo systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
+    # `restart` (not `start`) so a unit change actually takes effect, and
+    # so a stale "active (exited)" one-shot from an older bootstrap is
+    # replaced by the supervised process.
+    log "starting systemd service '$SERVICE_NAME' (binding $PIROUETTE_BIND_HOST:$PIROUETTE_PORT)"
+    sudo systemctl restart "$SERVICE_NAME"
+}
+
+install_service
 
 # ---- 8. Tailscale (optional) ----------------------------------------------
 # Bridges the loopback-bound pirouette server onto the tailnet so any
@@ -410,23 +467,21 @@ if [ "${PIROUETTE_TS_ENABLED:-0}" = "1" ]; then
         log "dashboard URL: https://$ts_fqdn"
         echo "$ts_fqdn" > "$PIROUETTE_DATA_DIR/tailscale-fqdn"
 
-        # Restart the pirouette tmux session with the tailscale FQDN in
+        # Rewrite the pirouette systemd unit with the tailscale FQDN in
         # PIROUETTE_ALLOWED_HOSTS so the server's Host-header allowlist
         # accepts requests addressed to that hostname. (Loopback addresses
         # are always allowed automatically; only the new non-loopback FQDN
         # needs to be allow-listed.) Idempotent via a sentinel file: only
-        # restart when the running session's FQDN differs from the
-        # tailscale-current one.
+        # rewrite + restart when the active FQDN differs from the
+        # tailscale-current one. (install_service is itself idempotent on
+        # the unit contents too, so this is belt-and-suspenders.)
         sentinel="$PIROUETTE_DATA_DIR/tailscale-fqdn-active"
         prev_fqdn="$(cat "$sentinel" 2>/dev/null || true)"
         if [ "$prev_fqdn" != "$ts_fqdn" ]; then
-            log "restarting pirouette server (adding $ts_fqdn to allowed_hosts)"
-            tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
-            # build_server_env merges PIROUETTE_ALLOWED_HOSTS from config
+            log "restarting pirouette service (adding $ts_fqdn to allowed_hosts)"
+            # install_service merges PIROUETTE_ALLOWED_HOSTS from config
             # with the tailscale FQDN so we don't drop existing entries.
-            server_env="$(build_server_env "$ts_fqdn")"
-            tmux new-session -d -s "$SESSION_NAME" \
-                "PIROUETTE_DATA_DIR='$PIROUETTE_DATA_DIR' PIROUETTE_PORT='$PIROUETTE_PORT' PIROUETTE_HOST='$PIROUETTE_BIND_HOST' $server_env pirouette server 2>&1 | tee -a '$PIROUETTE_DATA_DIR/logs/pirouette.log'"
+            install_service "$ts_fqdn"
             echo "$ts_fqdn" > "$sentinel"
         fi
     fi

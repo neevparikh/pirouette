@@ -3,8 +3,8 @@
  *  Thin wrapper over `runServer()`; the server reads pirouette config and
  *  env vars directly, so there's nothing to bridge here.
  *
- *  Also used by the host bootstrap (inside tmux) to serve the web UI +
- *  REST/WebSocket API.
+ *  Also used by the host bootstrap (as the systemd service's ExecStart) to
+ *  serve the web UI + REST/WebSocket API.
  */
 
 import { runServer } from "../../server/index.js";

@@ -177,7 +177,7 @@ program
 
 program
   .command("teardown")
-  .description("Stop the pirouette server on the host (kills the tmux session; state preserved)")
+  .description("Stop the pirouette server on the host (stops the systemd service; state preserved)")
   .action(teardown);
 
 program
@@ -192,7 +192,9 @@ program
   .description("Tail pirouette server logs from the host (default: server log)")
   .option("-f, --follow", "Stream continuously (like tail -f)")
   .option("-n, --lines <n>", "Number of lines to show", "200")
-  .option("--tmux", "Show the current pirouette tmux pane")
+  .option("--journal", "Show the systemd journal (journalctl -u pirouette) instead of the log file")
+  // Deprecated alias for --journal (the server no longer runs in tmux).
+  .option("--tmux", "Deprecated alias for --journal", false)
   .option("--entrypoint", "Show the host bootstrap log")
   .action(logs);
 
