@@ -1565,9 +1565,16 @@ function renderAgentList() {
         !showArchived && archivedCount > 0
           ? `<span class="text-[10px] text-base16-500 whitespace-nowrap">(${archivedCount} archived)</span>`
           : "";
+      // The selected project is where a new `@name` chat will be created,
+      // so make it unmistakable: a solid left accent bar, a stronger tinted
+      // background, an accent-colored name, and an explicit "new chats here"
+      // badge. Everything else stays quiet so the selection stands out.
+      const selectedBadge = isSelected
+        ? `<span class="flex-none text-[9px] uppercase tracking-wide font-semibold text-base16-cyan bg-base16-cyan/15 rounded px-1 py-px whitespace-nowrap" title="new @name chats are created here">new chats here</span>`
+        : "";
       return `
         <div class="flex flex-col gap-0.5">
-          <div class="flex items-center gap-1 px-1 py-1 rounded ${isSelected ? "bg-base16-cyan/8" : "hover:bg-base16-300/20"}">
+          <div class="flex items-center gap-1 pr-1 py-1 rounded ${isSelected ? "bg-base16-cyan/15 border-l-2 border-base16-cyan pl-0.5" : "border-l-2 border-transparent pl-0.5 hover:bg-base16-300/20"}">
             <button
               class="flex-none text-base16-500 hover:text-base16-700 text-xs cursor-pointer w-4"
               data-project-toggle="${escHtml(p.name)}"
@@ -1578,9 +1585,10 @@ function renderAgentList() {
               data-project-select="${escHtml(p.name)}"
               title="${escHtml(subtitle + " · " + visible.length + " chat" + (visible.length === 1 ? "" : "s"))}"
             >
-              <span class="text-base16-700 font-bold font-mono text-sm truncate">${escHtml(p.name)}</span>
+              <span class="${isSelected ? "text-base16-cyan" : "text-base16-700"} font-bold font-mono text-sm truncate">${escHtml(p.name)}</span>
               ${archivedNote}
             </button>
+            ${selectedBadge}
             ${delBtn}
           </div>
           ${isCollapsed ? "" : `<div class="flex flex-col gap-0.5 pl-1">${rowsHtml}</div>`}
