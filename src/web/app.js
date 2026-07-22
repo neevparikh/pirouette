@@ -1392,6 +1392,7 @@ function statusColor(state) {
     case "idle":
       return "bg-base16-yellow";
     case "stopped":
+    case "shutdown": // stopped by server shutdown; auto-resumes on restart
       return "bg-base16-400";
     case "error":
       return "bg-base16-red";
@@ -1420,6 +1421,10 @@ function renderAgentRow(a, _depth = 0) {
   const stateLabel =
     a.state === "cloning" ? "cloning"
     : a.state === "error" ? `error: ${(a.errorMessage || "").slice(0, 40)}`
+    // "shutdown" must win over any stale activity: an agent aborted
+    // mid-tool won't emit tool_execution_end, so `activity` can linger
+    // and otherwise show "▶ <tool>" instead of "restarting".
+    : a.state === "shutdown" ? "restarting"
     : activity ? `▶ ${activity.tool}`
     : a.state === "waiting_input" ? "your turn"
     : a.state;
@@ -1805,9 +1810,12 @@ function renderAgentHeader() {
   }
   $agentStats.innerHTML = renderInfoParts(rightParts);
 
-  const running = agent.state !== "stopped";
+  const running = agent.state !== "stopped" && agent.state !== "shutdown";
   $stopBtn.classList.toggle("hidden", !running);
-  $resumeBtn.classList.toggle("hidden", agent.state !== "stopped" && agent.state !== "error");
+  $resumeBtn.classList.toggle(
+    "hidden",
+    agent.state !== "stopped" && agent.state !== "shutdown" && agent.state !== "error",
+  );
   $deleteBtn.classList.remove("hidden");
 
   // Send-mode toggle visibility tracks the agent's state. Done here (rather

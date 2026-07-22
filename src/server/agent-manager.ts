@@ -1172,7 +1172,10 @@ export class AgentManager {
     }
   }
 
-  /** Resume all agents that were previously running. */
+  /** Resume agents on server startup. Skips only agents the *user*
+   *  stopped (state "stopped"). Agents stopped by the previous server
+   *  shutdown carry state "shutdown" and are resumed, as is anything
+   *  else ("running", "idle", ... — e.g. left behind by a crash). */
   async resumeAll(): Promise<void> {
     // Ensure extensions are loaded up-front so the model registry is populated.
     await this.ensureResourceLoader();
@@ -1336,8 +1339,13 @@ export class AgentManager {
     }
   }
 
-  /** Stop an agent gracefully. */
-  async stopAgent(id: string): Promise<void> {
+  /** Stop an agent gracefully.
+   *
+   *  `finalState` distinguishes *why* the agent stopped:
+   *    - "stopped" (default): user-initiated. Stays down across restarts.
+   *    - "shutdown": server-initiated (see shutdown()). resumeAll()
+   *      restarts these agents on the next startup. */
+  async stopAgent(id: string, finalState: "stopped" | "shutdown" = "stopped"): Promise<void> {
     // Trigger pi's abort BEFORE taking the lock.
     //
     // sendMessage no longer holds the lock across `await session.prompt()`
@@ -1370,7 +1378,7 @@ export class AgentManager {
       // SDK's canUseTool Promise unblocks (degrading to the cancel
       // sentinel) instead of hanging on a session that's gone.
       this.cancelAllUIRequestsForAgent(id, "agent stopped");
-      this.setAgentState(id, "stopped");
+      this.setAgentState(id, finalState);
     });
   }
 
@@ -1467,11 +1475,14 @@ export class AgentManager {
     });
   }
 
-  /** Shut down all agents (for server shutdown). */
+  /** Shut down all agents (for server shutdown). Persists state
+   *  "shutdown" (not "stopped") so resumeAll() knows to bring these
+   *  agents back on the next startup — a user-stopped agent is
+   *  indistinguishable from a shutdown-stopped one otherwise. */
   async shutdown(): Promise<void> {
     const ids = [...this.handles.keys()];
     for (const id of ids) {
-      await this.stopAgent(id);
+      await this.stopAgent(id, "shutdown");
     }
     await this.stateManager.flush();
   }

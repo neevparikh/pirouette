@@ -69,8 +69,13 @@ export type AgentState =
   | "idle"
   /** Agent finished its last turn and is waiting for the user to reply. */
   | "waiting_input"
-  /** Agent was manually stopped. */
+  /** Agent was manually stopped by the user. Stays down across server
+   *  restarts until explicitly resumed. */
   | "stopped"
+  /** Agent was stopped by a graceful server shutdown, NOT by the user.
+   *  resumeAll() restarts agents in this state on the next server startup
+   *  (unlike "stopped", which stays down). */
+  | "shutdown"
   /** Fatal error during startup or in-flight (see `errorMessage`). */
   | "error";
 
