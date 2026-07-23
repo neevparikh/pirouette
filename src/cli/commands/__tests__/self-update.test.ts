@@ -5,7 +5,12 @@
  *  wrong means either a no-op update or installing the wrong package. */
 import { describe, expect, it } from "vitest";
 
-import { packageName, resolvePackageSpec } from "../self-update.js";
+import {
+  packageName,
+  parseGitSpec,
+  resolveInstallPlan,
+  resolvePackageSpec,
+} from "../self-update.js";
 
 describe("packageName", () => {
   it("strips a version tag from a scoped package", () => {
@@ -78,5 +83,116 @@ describe("resolvePackageSpec", () => {
     expect(
       resolvePackageSpec({}, { PIROUETTE_PACKAGE: "   " }, () => "  "),
     ).toBe("@neevparikh/pirouette@latest");
+  });
+});
+
+describe("parseGitSpec", () => {
+  it("expands github: shorthand to an https clone URL", () => {
+    expect(parseGitSpec("github:neevparikh/pirouette")).toEqual({
+      url: "https://github.com/neevparikh/pirouette.git",
+      ref: undefined,
+    });
+  });
+
+  it("captures a #ref fragment", () => {
+    expect(parseGitSpec("github:neevparikh/pirouette#feat/x")).toEqual({
+      url: "https://github.com/neevparikh/pirouette.git",
+      ref: "feat/x",
+    });
+  });
+
+  it("strips the git+ transport prefix", () => {
+    expect(parseGitSpec("git+https://example.com/x.git#v1")).toEqual({
+      url: "https://example.com/x.git",
+      ref: "v1",
+    });
+  });
+
+  it("accepts an ssh git URL", () => {
+    expect(parseGitSpec("git@github.com:owner/repo.git")).toEqual({
+      url: "git@github.com:owner/repo.git",
+      ref: undefined,
+    });
+  });
+
+  it("accepts a bare https github URL", () => {
+    expect(parseGitSpec("https://github.com/owner/repo")).toEqual({
+      url: "https://github.com/owner/repo",
+      ref: undefined,
+    });
+  });
+
+  it("returns null for plain npm specs", () => {
+    expect(parseGitSpec("@neevparikh/pirouette@1.2.3")).toBeNull();
+    expect(parseGitSpec("pirouette")).toBeNull();
+    expect(parseGitSpec("")).toBeNull();
+  });
+});
+
+describe("resolveInstallPlan", () => {
+  const noSentinel = () => undefined;
+  const gitUrl = () => "https://github.com/neevparikh/pirouette.git";
+
+  it("defaults to npm mode with the resolved spec", () => {
+    expect(resolveInstallPlan({}, {}, noSentinel, gitUrl)).toEqual({
+      mode: "npm",
+      spec: "@neevparikh/pirouette@latest",
+    });
+  });
+
+  it("--from-git (bare) builds the default repo's default branch", () => {
+    expect(resolveInstallPlan({ fromGit: true }, {}, noSentinel, gitUrl)).toEqual({
+      mode: "git",
+      url: "https://github.com/neevparikh/pirouette.git",
+      ref: undefined,
+    });
+  });
+
+  it("--from-git <ref> builds that ref", () => {
+    expect(
+      resolveInstallPlan({ fromGit: "main" }, {}, noSentinel, gitUrl),
+    ).toEqual({ mode: "git", url: gitUrl(), ref: "main" });
+  });
+
+  it("--ref overrides the --from-git value", () => {
+    expect(
+      resolveInstallPlan({ fromGit: "main", ref: "abc123" }, {}, noSentinel, gitUrl),
+    ).toEqual({ mode: "git", url: gitUrl(), ref: "abc123" });
+  });
+
+  it("a git-ish --package auto-selects git mode", () => {
+    expect(
+      resolveInstallPlan(
+        { package: "github:neevparikh/pirouette#dev" },
+        {},
+        noSentinel,
+        gitUrl,
+      ),
+    ).toEqual({
+      mode: "git",
+      url: "https://github.com/neevparikh/pirouette.git",
+      ref: "dev",
+    });
+  });
+
+  it("--ref overrides a #ref embedded in --package", () => {
+    expect(
+      resolveInstallPlan(
+        { package: "github:neevparikh/pirouette#dev", ref: "v2" },
+        {},
+        noSentinel,
+        gitUrl,
+      ),
+    ).toEqual({
+      mode: "git",
+      url: "https://github.com/neevparikh/pirouette.git",
+      ref: "v2",
+    });
+  });
+
+  it("a non-git --package stays npm mode", () => {
+    expect(
+      resolveInstallPlan({ package: "@acme/fork@2.0.0" }, {}, noSentinel, gitUrl),
+    ).toEqual({ mode: "npm", spec: "@acme/fork@2.0.0" });
   });
 });
