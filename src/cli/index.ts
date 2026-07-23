@@ -22,6 +22,7 @@ import { teardown } from "./commands/teardown.js";
 import { destroy } from "./commands/destroy.js";
 import { logs } from "./commands/logs.js";
 import { sync } from "./commands/sync.js";
+import { selfUpdate } from "./commands/self-update.js";
 import { tunnel } from "./commands/tunnel.js";
 
 /** Read pirouette's version straight from package.json so the CLI's
@@ -197,6 +198,21 @@ program
   .option("--tmux", "Deprecated alias for --journal", false)
   .option("--entrypoint", "Show the host bootstrap log")
   .action(logs);
+
+program
+  .command("self-update")
+  .description(
+    "Update THIS pirouette instance from the inside (safe for agents). " +
+      "Runs the npm install + service restart in a detached systemd unit so " +
+      "the restart doesn't kill the command that triggered it.",
+  )
+  .option("--package <spec>", "Full npm spec to install (e.g. @neevparikh/pirouette@1.2.3)")
+  .option("--target <version>", "Version or dist-tag to install (default: latest)")
+  .option("--service <name>", "systemd service to restart (default: pirouette)")
+  .option("--unit <name>", "Transient systemd unit name for the worker (default: pirouette-self-update)")
+  .option("--settle <seconds>", "Seconds the worker waits before starting (default: 2)")
+  .option("--foreground", "Run the updater in this process (debug only; the restart will kill it)")
+  .action(selfUpdate);
 
 program
   .command("sync")
