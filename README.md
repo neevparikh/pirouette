@@ -299,6 +299,17 @@ repo is the root project — gets the dev deps via `npm ci`.)
 > state before systemd `SIGKILL`s any leftover children. This is what makes
 > resume-after-restart reliable.
 
+**Resuming the *work*, not just the session.** A restart aborts whatever turn
+an agent was in the middle of (its running command is killed). Restoring the
+session brings back full history but pi does not re-run the aborted turn, so
+without help the agent would silently stall at `waiting_input`. On boot,
+`resumeAll()` detects agents that were mid-turn (recorded at graceful shutdown,
+or inferred from a crash's leftover `running` state) and injects a short
+"continue where you left off" turn so they actually resume working. Agents that
+had *finished* and were waiting for you are left alone. Disable with
+`PIROUETTE_RESUME_AUTOCONTINUE=0`, or customise the nudge with
+`PIROUETTE_RESUME_CONTINUE_MESSAGE`.
+
 ### Config
 
 | command | purpose |
