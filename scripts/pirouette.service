@@ -20,6 +20,16 @@
 #     is unchanged.
 #   - bind stays 127.0.0.1; the `tailscale serve` bridge (if enabled)
 #     persists on its own and only forwards to 127.0.0.1:PORT.
+#   - KillMode=mixed so a `systemctl stop/restart` sends SIGTERM to the
+#     MAIN server process only (not the whole cgroup at once). That lets
+#     the server run its graceful shutdown() -- persist each running
+#     agent as "shutdown" state and flush -- before systemd SIGKILLs any
+#     leftover child processes. With the default control-group KillMode,
+#     every agent bash subprocess got SIGTERM simultaneously, racing the
+#     server's own shutdown bookkeeping. TimeoutStopSec bounds how long
+#     systemd waits for that graceful exit before the SIGKILL sweep.
+#   - PIROUETTE_PACKAGE is forwarded so the server (and any agent that
+#     shells out to `pru self-update`) knows which npm package to reinstall.
 
 [Unit]
 Description=pirouette server (pi coding agents)
@@ -43,9 +53,15 @@ Environment="PIROUETTE_HOST=<BIND_HOST>"
 # Environment="PIROUETTE_DEFAULT_MODEL=<MODEL>"
 # Environment="PIROUETTE_DEFAULT_THINKING_LEVEL=<LEVEL>"
 # Environment="PIROUETTE_ALLOWED_HOSTS=<HOSTS>"
+# Environment="PIROUETTE_PACKAGE=<PACKAGE>"
 ExecStart=<NODE_BIN> <PIROUETTE_BIN> server
 Restart=always
 RestartSec=2
+# Graceful-shutdown window: SIGTERM the main process only, give it time
+# to persist agent state, then SIGKILL whatever is left in the cgroup.
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
 StandardOutput=append:<DATA_DIR>/logs/pirouette.log
 StandardError=append:<DATA_DIR>/logs/pirouette.log
 

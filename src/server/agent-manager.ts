@@ -45,6 +45,30 @@ import {
   type WsEnvelope,
 } from "./types.js";
 
+/** Race a promise against a timeout. Resolves with the promise's value if
+ *  it settles in time; rejects with a timeout error otherwise. Used to
+ *  bound per-agent teardown during shutdown so one stuck operation can't
+ *  hold the whole process past systemd's TimeoutStopSec. The underlying
+ *  promise is left to settle on its own (we're tearing down anyway). */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${ms}ms`));
+    }, ms);
+    if (typeof timer.unref === "function") timer.unref();
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 /** Pull image content blocks out of a pi message's content array, formatted
  *  for the dashboard. Pi stores images as `{ type: "image", data, mimeType }`
  *  (base64 data); the dashboard wants a ready-to-use `data:<mime>;base64,...`
@@ -1478,13 +1502,54 @@ export class AgentManager {
   /** Shut down all agents (for server shutdown). Persists state
    *  "shutdown" (not "stopped") so resumeAll() knows to bring these
    *  agents back on the next startup — a user-stopped agent is
-   *  indistinguishable from a shutdown-stopped one otherwise. */
+   *  indistinguishable from a shutdown-stopped one otherwise.
+   *
+   *  Ordering matters for crash-safety. Under systemd (KillMode=mixed)
+   *  we get a bounded window between SIGTERM and the SIGKILL sweep. So:
+   *
+   *    1. Mark every running agent "shutdown" and FLUSH immediately.
+   *       Even if the graceful teardown below hangs and systemd SIGKILLs
+   *       us mid-flight, the on-disk state already says "shutdown", so
+   *       the next server's resumeAll() brings these agents back.
+   *    2. THEN best-effort tear down each live pi session, bounded per
+   *       agent so one stuck `session.abort()` can't wedge the whole
+   *       shutdown (and blow past the unit's TimeoutStopSec).
+   */
   async shutdown(): Promise<void> {
     const ids = [...this.handles.keys()];
+
+    // 1. Persist intent first, then flush, so resume survives even a
+    //    hard kill after this point.
     for (const id of ids) {
-      await this.stopAgent(id, "shutdown");
+      this.stateManager.updateAgentState(id, { state: "shutdown" });
+      const handle = this.handles.get(id);
+      if (handle) handle.config.state = "shutdown";
     }
-    await this.stateManager.flush();
+    try {
+      await this.stateManager.flush();
+    } catch (err) {
+      console.error(`[agent-manager] shutdown: initial state flush failed: ${err}`);
+    }
+
+    // 2. Graceful teardown, bounded per agent.
+    for (const id of ids) {
+      try {
+        await withTimeout(
+          this.stopAgent(id, "shutdown"),
+          5000,
+          `stopAgent(${id})`,
+        );
+      } catch (err) {
+        console.error(
+          `[agent-manager] shutdown: ${id} did not tear down cleanly: ${err}`,
+        );
+      }
+    }
+    try {
+      await this.stateManager.flush();
+    } catch (err) {
+      console.error(`[agent-manager] shutdown: final state flush failed: ${err}`);
+    }
   }
 
   // --- internal ---

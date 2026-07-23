@@ -263,6 +263,10 @@ else
     log "pirouette $HAVE already installed at $(command -v pirouette)"
 fi
 
+# Record the package spec so `pru self-update` can reinstall the same
+# package later even if PIROUETTE_PACKAGE isn't in its environment.
+printf '%s\n' "$PIROUETTE_PACKAGE" > "$PIROUETTE_DATA_DIR/npm-package" 2>/dev/null || true
+
 # ---- 7. Install + start the systemd service -------------------------------
 # The server runs under systemd (Restart=always) so it survives crashes
 # and host reboots -- a plain `tmux new-session` had no supervisor, so
@@ -297,6 +301,9 @@ build_service_env_lines() {
     printf 'Environment="PIROUETTE_DATA_DIR=%s"\n' "$PIROUETTE_DATA_DIR"
     printf 'Environment="PIROUETTE_PORT=%s"\n' "$PIROUETTE_PORT"
     printf 'Environment="PIROUETTE_HOST=%s"\n' "$PIROUETTE_BIND_HOST"
+    # Forward the package spec so an agent that runs `pru self-update`
+    # (or the server itself) knows which npm package to reinstall.
+    printf 'Environment="PIROUETTE_PACKAGE=%s"\n' "$PIROUETTE_PACKAGE"
     [ -n "${PIROUETTE_DEFAULT_MODEL:-}" ] && \
         printf 'Environment="PIROUETTE_DEFAULT_MODEL=%s"\n' "$PIROUETTE_DEFAULT_MODEL"
     [ -n "${PIROUETTE_DEFAULT_THINKING_LEVEL:-}" ] && \
@@ -336,6 +343,13 @@ $(build_service_env_lines "$extra_allowed_hosts")
 ExecStart=$NODE_BIN $PIROUETTE_BIN server
 Restart=always
 RestartSec=2
+# KillMode=mixed: SIGTERM the main server process only on stop/restart so
+# it can run its graceful shutdown (persist each running agent as
+# "shutdown" state + flush) before systemd SIGKILLs any leftover child
+# processes. TimeoutStopSec bounds the wait for that graceful exit.
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
 StandardOutput=append:$PIROUETTE_DATA_DIR/logs/pirouette.log
 StandardError=append:$PIROUETTE_DATA_DIR/logs/pirouette.log
 

@@ -1179,12 +1179,27 @@ const isMain =
 if (isMain) {
   runServer()
     .then(({ shutdown }) => {
-      const onExit = async () => {
-        await shutdown();
-        process.exit(0);
+      // Mirror the production entry point (src/cli/commands/server.ts):
+      // guard against double signals and enforce a hard exit deadline so a
+      // wedged shutdown can't hang the process.
+      let shuttingDown = false;
+      const onExit = async (signal: string) => {
+        if (shuttingDown) return;
+        shuttingDown = true;
+        console.log(`\n[pirouette] received ${signal}, shutting down...`);
+        const forceExit = setTimeout(() => process.exit(0), 25_000);
+        if (typeof forceExit.unref === "function") forceExit.unref();
+        try {
+          await shutdown();
+        } catch (err) {
+          console.error("[pirouette] error during shutdown:", err);
+        } finally {
+          clearTimeout(forceExit);
+          process.exit(0);
+        }
       };
-      process.on("SIGINT", onExit);
-      process.on("SIGTERM", onExit);
+      process.on("SIGINT", () => onExit("SIGINT"));
+      process.on("SIGTERM", () => onExit("SIGTERM"));
     })
     .catch((err) => {
       console.error("[pirouette] fatal:", err);

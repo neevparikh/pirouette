@@ -245,6 +245,43 @@ All host commands accept the global `--host <name>` selector.
 | `pru sync` | Rebuild locally → install on host → restart server |
 | `pru sync --npm` | Upgrade the host from the npm registry |
 | `pru sync --secrets` | Re-push laptop auth state (`auth.json` etc.) without redeploying |
+| `pru self-update` | Update pirouette **from inside the host** (safe for agents — see below) |
+
+### Self-update (agents updating their own host)
+
+`pru sync --npm` runs from your laptop over SSH. But an **agent** running
+*inside* pirouette can't safely update its own instance that way: an agent's
+shell commands are child processes of the `pirouette.service` systemd cgroup,
+so the naive
+
+```sh
+npm install -g @neevparikh/pirouette@latest && sudo systemctl restart pirouette
+```
+
+self-destructs — restarting the service kills the whole cgroup, including the
+very command doing the restart. Any follow-on step never runs.
+
+`pru self-update` fixes this. It launches the install-and-restart work into a
+**detached systemd transient unit** (`sudo systemd-run`), i.e. its own cgroup
+outside `pirouette.service`, then returns immediately:
+
+```sh
+pru self-update                 # reinstall the configured package @latest + restart
+pru self-update --target 1.2.3  # pin a specific version
+pru self-update --package @scope/fork@next
+```
+
+Because the worker lives in a separate cgroup, the service restart doesn't kill
+it. The old server exits gracefully (persisting every running agent as
+`shutdown` state), and the new server's `resumeAll()` brings those agents back
+with their conversations intact — including the agent that kicked off the
+update. Follow progress with `journalctl -u pirouette-self-update -f` or
+`pru logs` after the restart.
+
+> The systemd unit uses `KillMode=mixed`, so on stop/restart only the main
+> server process gets `SIGTERM` first — giving it a window to persist agent
+> state before systemd `SIGKILL`s any leftover children. This is what makes
+> resume-after-restart reliable.
 
 ### Config
 
