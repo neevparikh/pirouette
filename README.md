@@ -266,9 +266,16 @@ very command doing the restart. Any follow-on step never runs.
 outside `pirouette.service`, then returns immediately:
 
 ```sh
+# npm mode (default): installs the published tarball — no build on the host
 pru self-update                 # reinstall the configured package @latest + restart
 pru self-update --target 1.2.3  # pin a specific version
 pru self-update --package @scope/fork@next
+
+# git mode: build + install an unreleased commit straight from GitHub
+pru self-update --from-git              # build the repo's default branch
+pru self-update --from-git my-branch    # build a branch / tag
+pru self-update --ref <sha>             # build a specific commit
+pru self-update --package github:owner/repo#branch
 ```
 
 Because the worker lives in a separate cgroup, the service restart doesn't kill
@@ -277,6 +284,15 @@ it. The old server exits gracefully (persisting every running agent as
 with their conversations intact — including the agent that kicked off the
 update. Follow progress with `journalctl -u pirouette-self-update -f` or
 `pru logs` after the restart.
+
+**npm vs git mode.** npm mode installs the published tarball, which already
+ships a prebuilt `dist/` — nothing is compiled on the host. Git mode is for
+installing code that isn't published yet: it clones the repo, runs `npm ci &&
+npm run build && npm pack`, and installs the resulting tarball. (It can't just
+`npm install -g <git-ref>`, because npm doesn't install a package's
+`devDependencies` when running its `prepare` script for a git dependency, so
+the build toolchain would be missing. Building in a fresh clone — where the
+repo is the root project — gets the dev deps via `npm ci`.)
 
 > The systemd unit uses `KillMode=mixed`, so on stop/restart only the main
 > server process gets `SIGTERM` first — giving it a window to persist agent

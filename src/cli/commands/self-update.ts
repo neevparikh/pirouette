@@ -19,7 +19,7 @@
  *  process tree. It launches `scripts/pirouette-self-update.sh` into its
  *  own systemd transient unit (`sudo systemd-run`), i.e. a separate
  *  cgroup that is NOT a child of pirouette.service. That worker survives
- *  the restart, installs the new package, and bounces the service. The
+ *  the restart, installs the new build, and bounces the service. The
  *  agent's `pru self-update` call, meanwhile, returns immediately.
  *
  *  After the restart, the new server's `resumeAll()` brings every agent
@@ -27,8 +27,22 @@
  *  old server's graceful exit), so the agent that kicked off the update
  *  simply resumes with its conversation intact.
  *
+ *  Two install sources:
+ *    - npm (default): `npm install -g <spec>` from the registry. The
+ *      published tarball ships prebuilt `dist/`, so nothing is compiled on
+ *      the host. This is the normal path once a version is published.
+ *    - git (`--from-git`, or a git-ish `--package`): clone the repo, run
+ *      `npm ci` + `npm run build` + `npm pack`, then install the tarball.
+ *      This exists because `npm install -g <git-ref>` does NOT install a
+ *      package's devDependencies when running its `prepare` script, so the
+ *      build tooling (esbuild/tsc/...) is missing and the build fails. A
+ *      fresh clone treated as the *root* project DOES get devDependencies
+ *      via `npm ci`, so building there works. Lets agents self-update to
+ *      an unreleased commit straight from GitHub.
+ *
  *  This is a LOCAL command: it acts on the machine it runs on (the host).
- *  To update a remote host from your laptop, use `pru sync --npm`.
+ *  To update a remote host from your laptop, use `pru sync` / `pru sync
+ *  --npm`.
  */
 
 import { execFileSync } from "node:child_process";
@@ -37,12 +51,21 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export interface SelfUpdateOptions {
-  /** Full npm spec to install, e.g. "@neevparikh/pirouette@1.2.3". Wins
-   *  over --target. */
+  /** Full npm spec to install, e.g. "@neevparikh/pirouette@1.2.3". A
+   *  git-ish value (github:owner/repo, git+https://..., ...) auto-selects
+   *  the git build mode. Wins over --target. */
   package?: string;
-  /** Version / dist-tag to install for the resolved package name, e.g.
+  /** Version / dist-tag to install for the resolved npm package name, e.g.
    *  "latest" or "1.2.3". Combined with the detected package name. */
   target?: string;
+  /** Build + install from a git clone. Value is an optional git ref
+   *  (branch / tag / sha); with no value it builds the repo's default
+   *  branch. The repo URL comes from the installed package.json
+   *  `repository.url` unless a git URL is given via --package. */
+  fromGit?: string | boolean;
+  /** Git ref (branch/tag/sha) to build. Applies in git mode; overrides a
+   *  ref embedded in --package or --from-git. */
+  ref?: string;
   /** systemd unit name for the transient worker (default
    *  "pirouette-self-update"). */
   unit?: string;
@@ -60,6 +83,7 @@ export interface SelfUpdateOptions {
 const DEFAULT_PACKAGE = "@neevparikh/pirouette";
 const DEFAULT_UNIT = "pirouette-self-update";
 const DEFAULT_SERVICE = "pirouette";
+const FALLBACK_GIT_URL = "https://github.com/neevparikh/pirouette.git";
 
 /** Strip a version/dist-tag suffix from an npm spec, keeping any leading
  *  scope. "@scope/name@1.2.3" -> "@scope/name"; "name@latest" -> "name";
@@ -68,6 +92,82 @@ export function packageName(spec: string): string {
   const at = spec.lastIndexOf("@");
   // at <= 0 means either no "@" at all, or only the scope "@" at index 0.
   return at <= 0 ? spec : spec.slice(0, at);
+}
+
+export interface GitSource {
+  url: string;
+  ref?: string;
+}
+
+/** Recognise and normalise a git dependency spec into a clone URL (+ ref).
+ *  Returns null for plain npm specs. Handles:
+ *    - github:owner/repo[#ref]      -> https://github.com/owner/repo.git
+ *    - git+https://host/x.git[#ref] -> https://host/x.git
+ *    - https://host/x.git[#ref]     -> as-is
+ *    - git@host:owner/repo.git[#ref]-> as-is (ssh)
+ *  A `#ref` fragment becomes `ref`. */
+export function parseGitSpec(spec: string): GitSource | null {
+  const trimmed = spec.trim();
+  if (!trimmed) return null;
+
+  const hash = trimmed.indexOf("#");
+  const base = hash >= 0 ? trimmed.slice(0, hash) : trimmed;
+  const ref = hash >= 0 ? trimmed.slice(hash + 1) || undefined : undefined;
+
+  // github:owner/repo shorthand.
+  const gh = /^github:(.+?)\/(.+)$/i.exec(base);
+  if (gh) {
+    const repo = gh[2].replace(/\.git$/i, "");
+    return { url: `https://github.com/${gh[1]}/${repo}.git`, ref };
+  }
+
+  // git+<url> — strip the npm "git+" transport prefix.
+  if (/^git\+/i.test(base)) {
+    return { url: base.replace(/^git\+/i, ""), ref };
+  }
+
+  // ssh form: git@host:owner/repo(.git)
+  if (/^[^@\s]+@[^:\s]+:.+/.test(base) && /\.git$/i.test(base)) {
+    return { url: base, ref };
+  }
+
+  // http(s) URL that is clearly a git repo.
+  if (/^https?:\/\/.+/i.test(base) && (/\.git$/i.test(base) || /github\.com|gitlab\.com|bitbucket\.org/i.test(base))) {
+    return { url: base, ref };
+  }
+
+  return null;
+}
+
+export type InstallPlan =
+  | { mode: "npm"; spec: string }
+  | { mode: "git"; url: string; ref?: string };
+
+/** Decide what to install and from where. Precedence:
+ *    1. --from-git         -> git build of the default repo (ref from the
+ *       flag value or --ref).
+ *    2. git-ish --package  -> git build of that URL (ref from #frag or
+ *       --ref).
+ *    3. otherwise          -> npm install of the resolved spec. */
+export function resolveInstallPlan(
+  opts: Pick<SelfUpdateOptions, "package" | "target" | "fromGit" | "ref">,
+  env: NodeJS.ProcessEnv,
+  readSentinel: () => string | undefined,
+  defaultGitUrl: () => string,
+): InstallPlan {
+  if (opts.fromGit !== undefined && opts.fromGit !== false) {
+    const refFromFlag = typeof opts.fromGit === "string" ? opts.fromGit.trim() : "";
+    return {
+      mode: "git",
+      url: defaultGitUrl(),
+      ref: opts.ref?.trim() || refFromFlag || undefined,
+    };
+  }
+  if (opts.package) {
+    const git = parseGitSpec(opts.package);
+    if (git) return { mode: "git", url: git.url, ref: opts.ref?.trim() || git.ref };
+  }
+  return { mode: "npm", spec: resolvePackageSpec(opts, env, readSentinel) };
 }
 
 /** Resolve the npm spec to install from the CLI flags, environment, and
@@ -97,8 +197,31 @@ export function resolvePackageSpec(
  *  the package root is three directories up, and `scripts/` ships with
  *  the package (see package.json "files"). */
 function resolveWorkerScript(): string {
+  return path.resolve(packageRoot(), "scripts", "pirouette-self-update.sh");
+}
+
+/** The installed package's root directory (three up from this module in
+ *  both the src and dist layouts). */
+function packageRoot(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(here, "..", "..", "..", "scripts", "pirouette-self-update.sh");
+  return path.resolve(here, "..", "..", "..");
+}
+
+/** Clone URL for --from-git: the installed package.json `repository.url`,
+ *  normalised for `git clone` (drop any "git+" prefix). Falls back to the
+ *  public GitHub URL if package.json can't be read. */
+function defaultGitUrl(): string {
+  try {
+    const pkg = JSON.parse(
+      readFileSync(path.join(packageRoot(), "package.json"), "utf8"),
+    ) as { repository?: string | { url?: string } };
+    const raw =
+      typeof pkg.repository === "string" ? pkg.repository : pkg.repository?.url;
+    if (raw) return raw.replace(/^git\+/i, "");
+  } catch {
+    // fall through to the hard-coded default
+  }
+  return FALLBACK_GIT_URL;
 }
 
 function readPackageSentinel(dataDir: string | undefined): string | undefined {
@@ -123,10 +246,34 @@ function hasSystemdRun(): boolean {
   }
 }
 
+/** Human summary of what an install plan will do. */
+function describePlan(plan: InstallPlan): string {
+  return plan.mode === "git"
+    ? `git build of ${plan.url}${plan.ref ? ` @ ${plan.ref}` : " (default branch)"}`
+    : `npm install ${plan.spec}`;
+}
+
+/** The worker-script env vars implied by an install plan. The worker
+ *  branches on PIROUETTE_UPDATE_GIT_URL: present -> git build mode. */
+function planEnv(plan: InstallPlan): Record<string, string> {
+  if (plan.mode === "git") {
+    return {
+      PIROUETTE_UPDATE_GIT_URL: plan.url,
+      ...(plan.ref ? { PIROUETTE_UPDATE_GIT_REF: plan.ref } : {}),
+    };
+  }
+  return { PIROUETTE_PACKAGE: plan.spec };
+}
+
 export async function selfUpdate(opts: SelfUpdateOptions): Promise<void> {
   const env = process.env;
   const dataDir = env.PIROUETTE_DATA_DIR;
-  const spec = resolvePackageSpec(opts, env, () => readPackageSentinel(dataDir));
+  const plan = resolveInstallPlan(
+    opts,
+    env,
+    () => readPackageSentinel(dataDir),
+    defaultGitUrl,
+  );
   const service = opts.service || DEFAULT_SERVICE;
   const unit = opts.unit || DEFAULT_UNIT;
   const settle = opts.settle ?? "2";
@@ -139,7 +286,7 @@ export async function selfUpdate(opts: SelfUpdateOptions): Promise<void> {
   }
 
   const workerEnv = {
-    PIROUETTE_PACKAGE: spec,
+    ...planEnv(plan),
     PIROUETTE_SERVICE_NAME: service,
     PIROUETTE_UPDATE_SETTLE: settle,
     ...(dataDir ? { PIROUETTE_DATA_DIR: dataDir } : {}),
@@ -149,7 +296,7 @@ export async function selfUpdate(opts: SelfUpdateOptions): Promise<void> {
   // killed by the restart if invoked from inside an agent — it exists for
   // manual debugging on a host shell.
   if (opts.foreground) {
-    console.log(`[self-update] running worker in foreground: ${spec}`);
+    console.log(`[self-update] running worker in foreground: ${describePlan(plan)}`);
     execFileSync("bash", [script], {
       stdio: "inherit",
       env: { ...env, ...workerEnv },
@@ -161,7 +308,7 @@ export async function selfUpdate(opts: SelfUpdateOptions): Promise<void> {
     throw new Error(
       "`systemd-run` not found. `pru self-update` runs on a pirouette host " +
         "with systemd. To update a remote host from your laptop, use " +
-        "`pru sync --npm` instead. (For a manual run on this machine, try " +
+        "`pru sync` instead. (For a manual run on this machine, try " +
         "`pru self-update --foreground`.)",
     );
   }
@@ -193,15 +340,12 @@ export async function selfUpdate(opts: SelfUpdateOptions): Promise<void> {
     `--gid=${gid}`,
     `--setenv=HOME=${home}`,
     `--setenv=PATH=${pathEnv}`,
-    `--setenv=PIROUETTE_PACKAGE=${spec}`,
-    `--setenv=PIROUETTE_SERVICE_NAME=${service}`,
-    `--setenv=PIROUETTE_UPDATE_SETTLE=${settle}`,
-    ...(dataDir ? [`--setenv=PIROUETTE_DATA_DIR=${dataDir}`] : []),
+    ...Object.entries(workerEnv).map(([k, v]) => `--setenv=${k}=${v}`),
     "bash",
     script,
   ];
 
-  console.log(`[self-update] launching detached updater for ${spec}`);
+  console.log(`[self-update] launching detached updater: ${describePlan(plan)}`);
   try {
     execFileSync("sudo", args, { stdio: "inherit" });
   } catch (err) {
@@ -215,7 +359,7 @@ export async function selfUpdate(opts: SelfUpdateOptions): Promise<void> {
 
   console.log(
     `[self-update] update kicked off in a detached systemd unit ('${unit}').\n` +
-      `  It will reinstall ${spec}, restart '${service}', and this server\n` +
+      `  It will ${describePlan(plan)}, restart '${service}', and this server\n` +
       `  will resume all running agents on boot. This command's process may\n` +
       `  be torn down by the restart — that's expected and safe.\n` +
       `  Follow progress:  journalctl -u ${unit} -f\n` +

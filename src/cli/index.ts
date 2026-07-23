@@ -206,8 +206,10 @@ program
       "Runs the npm install + service restart in a detached systemd unit so " +
       "the restart doesn't kill the command that triggered it.",
   )
-  .option("--package <spec>", "Full npm spec to install (e.g. @neevparikh/pirouette@1.2.3)")
-  .option("--target <version>", "Version or dist-tag to install (default: latest)")
+  .option("--package <spec>", "npm spec to install, or a git spec (github:owner/repo[#ref], git+https://...) to build from source")
+  .option("--target <version>", "Version or dist-tag to install (npm mode; default: latest)")
+  .option("--from-git [ref]", "Build + install from a git clone of this repo at [ref] (default branch if omitted)")
+  .option("--ref <ref>", "Git ref (branch/tag/sha) to build (git mode)")
   .option("--service <name>", "systemd service to restart (default: pirouette)")
   .option("--unit <name>", "Transient systemd unit name for the worker (default: pirouette-self-update)")
   .option("--settle <seconds>", "Seconds the worker waits before starting (default: 2)")
