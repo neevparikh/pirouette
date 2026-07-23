@@ -31,6 +31,12 @@ export interface AgentConfig {
    *  fully functional and on disk; the dashboard hides them from the
    *  default sidebar listing unless "show archived" is toggled on. */
   archived?: boolean;
+  /** Set true by graceful shutdown when the agent was actively `running`
+   *  (mid-turn) at the moment the server went down. resumeAll() reads it
+   *  to auto-continue the interrupted turn on the next boot, then clears
+   *  it. Without this, a server restart aborts the agent's in-flight
+   *  command and the agent silently stalls at `waiting_input`. */
+  interruptedTurn?: boolean;
 }
 
 export interface AgentUsage {

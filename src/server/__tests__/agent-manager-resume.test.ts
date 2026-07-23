@@ -69,6 +69,17 @@ function stubResume(manager: AgentManager): string[] {
   return resumed;
 }
 
+/** Stub autoContinueAfterResume so we can assert *which* agents get nudged
+ *  to continue their interrupted turn, without a real pi session. */
+function stubAutoContinue(manager: AgentManager): string[] {
+  const continued: string[] = [];
+  (manager as unknown as { autoContinueAfterResume(id: string): void }).autoContinueAfterResume =
+    (id: string) => {
+      continued.push(id);
+    };
+  return continued;
+}
+
 /** Register a fake running-session handle so stopAgent()/shutdown() find
  *  something to tear down (the real handle wraps a live pi session). */
 function addFakeHandle(manager: AgentManager, config: AgentConfig): void {
@@ -139,6 +150,52 @@ describe("AgentManager shutdown/restart cycle", () => {
     expect(resumed).toEqual(["good"]);
     expect(stateManager.getAgent("bad")?.state).toBe("error");
     expect(stateManager.getAgent("good")?.state).toBe("shutdown");
+  });
+
+  it("shutdown() flags a mid-turn ('running') agent as interruptedTurn", async () => {
+    const running = makeAgent("a", "running");
+    const waiting = makeAgent("b", "waiting_input");
+    const { manager, stateManager } = await makeManager([running, waiting]);
+    addFakeHandle(manager, running);
+    addFakeHandle(manager, waiting);
+    await manager.shutdown();
+    expect(stateManager.getAgent("a")?.interruptedTurn).toBe(true);
+    expect(stateManager.getAgent("b")?.interruptedTurn).toBe(false);
+  });
+
+  it("resumeAll() auto-continues only the interrupted agents, and clears the flag", async () => {
+    const midTurn = makeAgent("mid", "shutdown");
+    midTurn.interruptedTurn = true;
+    const finished = makeAgent("done", "shutdown");
+    finished.interruptedTurn = false;
+    const { manager, stateManager } = await makeManager([midTurn, finished]);
+    stubResume(manager);
+    const continued = stubAutoContinue(manager);
+    await manager.resumeAll();
+    expect(continued).toEqual(["mid"]);
+    // Flag is cleared so a later boot doesn't re-nudge.
+    expect(stateManager.getAgent("mid")?.interruptedTurn).toBe(false);
+  });
+
+  it("resumeAll() auto-continues an agent left 'running' by a crash", async () => {
+    // No interruptedTurn flag (shutdown never ran); the live "running"
+    // state is the only signal.
+    const crashed = makeAgent("crashed", "running");
+    const { manager } = await makeManager([crashed]);
+    stubResume(manager);
+    const continued = stubAutoContinue(manager);
+    await manager.resumeAll();
+    expect(continued).toEqual(["crashed"]);
+  });
+
+  it("resumeAll() does NOT auto-continue an agent that was waiting for input", async () => {
+    const waiting = makeAgent("w", "shutdown");
+    waiting.interruptedTurn = false;
+    const { manager } = await makeManager([waiting]);
+    stubResume(manager);
+    const continued = stubAutoContinue(manager);
+    await manager.resumeAll();
+    expect(continued).toEqual([]);
   });
 
   it("full cycle: shutdown() then resumeAll() brings the same agents back", async () => {

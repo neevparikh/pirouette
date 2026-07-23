@@ -45,6 +45,15 @@ import {
   type WsEnvelope,
 } from "./types.js";
 
+/** Default nudge injected as a user turn when auto-continuing an agent whose
+ *  turn was interrupted by a server restart. Overridable via
+ *  PIROUETTE_RESUME_CONTINUE_MESSAGE. Kept explicit about *why* it appeared
+ *  so the agent (and a human reading the transcript) understands the jump. */
+const DEFAULT_RESUME_CONTINUE_MESSAGE =
+  "[pirouette] The server restarted and interrupted your previous turn " +
+  "(a command or response was aborted mid-execution). Review the state of " +
+  "your work and continue from where you left off.";
+
 /** Race a promise against a timeout. Resolves with the promise's value if
  *  it settles in time; rejects with a timeout error otherwise. Used to
  *  bound per-agent teardown during shutdown so one stuck operation can't
@@ -1206,13 +1215,72 @@ export class AgentManager {
     const agents = this.stateManager.getAgents();
     for (const config of agents) {
       if (config.state === "stopped") continue;
+      // Was the agent mid-turn when the server went down? Two signals:
+      //   - graceful shutdown recorded `interruptedTurn` (state is now
+      //     "shutdown"), or
+      //   - a crash left the live "running" state on disk.
+      // Snapshot BEFORE resumeAgent(), which overwrites state.
+      const wasMidTurn = config.interruptedTurn === true || config.state === "running";
       try {
         await this.resumeAgent(config.id);
       } catch (err) {
         console.error(`[agent-manager] failed to resume agent ${config.name}: ${err}`);
         this.stateManager.updateAgentState(config.id, { state: "error" });
+        continue;
+      }
+      // Clear the flag regardless so we never re-nudge on a later boot,
+      // then auto-continue the interrupted turn (fire-and-forget).
+      if (config.interruptedTurn) {
+        this.stateManager.updateAgentState(config.id, { interruptedTurn: false });
+      }
+      if (wasMidTurn) {
+        this.autoContinueAfterResume(config.id);
       }
     }
+  }
+
+  /** Re-kick an agent whose turn was interrupted by a server restart.
+   *
+   *  A resumed session is restored with full history but pi does NOT
+   *  re-run the aborted turn -- the agent lands in `waiting_input` and
+   *  stalls. This injects a short user turn telling it to continue, so a
+   *  seamless update actually *resumes the work*, not just the session.
+   *
+   *  Fire-and-forget by design: we dispatch the prompt but do NOT await
+   *  the turn, so resumeAll() doesn't serialize on every agent's work.
+   *  Opt out with PIROUETTE_RESUME_AUTOCONTINUE=0 (agents then just sit at
+   *  waiting_input, the pre-feature behaviour). */
+  private autoContinueAfterResume(id: string): void {
+    if (process.env.PIROUETTE_RESUME_AUTOCONTINUE === "0") {
+      console.log(`[agent-manager] auto-continue disabled; ${id} left at waiting_input`);
+      return;
+    }
+    const handle = this.handles.get(id);
+    if (!handle) return;
+    // Nothing to continue if the session has no history (shouldn't happen
+    // for a mid-turn agent, but guard anyway).
+    if (handle.session.messages.length === 0) return;
+
+    const message =
+      process.env.PIROUETTE_RESUME_CONTINUE_MESSAGE?.trim() ||
+      DEFAULT_RESUME_CONTINUE_MESSAGE;
+    console.log(
+      `[agent-manager] auto-continuing interrupted turn for ${handle.config.name} (${id})`,
+    );
+    this.setAgentState(id, "running");
+    handle.session
+      .prompt(message)
+      .then(() => console.log(`[agent-manager] auto-continue turn finished for ${id}`))
+      .catch((err) => {
+        console.error(`[agent-manager] auto-continue failed for ${id}: ${err}`);
+        const cfg = this.stateManager.getAgent(id);
+        if (cfg) {
+          this.markError(
+            cfg,
+            `auto-continue after resume failed: ${err instanceof Error ? err.message : err}`,
+          );
+        }
+      });
   }
 
   /** Resume a specific agent by id. */
@@ -1519,9 +1587,17 @@ export class AgentManager {
     const ids = [...this.handles.keys()];
 
     // 1. Persist intent first, then flush, so resume survives even a
-    //    hard kill after this point.
+    //    hard kill after this point. Capture whether each agent was
+    //    actively mid-turn (`running`) so resumeAll() can auto-continue
+    //    exactly those -- an agent that had finished and was waiting for
+    //    the user must NOT be nudged.
     for (const id of ids) {
-      this.stateManager.updateAgentState(id, { state: "shutdown" });
+      const cfg = this.stateManager.getAgent(id);
+      const wasRunning = cfg?.state === "running";
+      this.stateManager.updateAgentState(id, {
+        state: "shutdown",
+        interruptedTurn: wasRunning,
+      });
       const handle = this.handles.get(id);
       if (handle) handle.config.state = "shutdown";
     }
