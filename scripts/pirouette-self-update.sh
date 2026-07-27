@@ -39,8 +39,12 @@
 #                             over PIROUETTE_PACKAGE when set.
 #   PIROUETTE_UPDATE_GIT_REF  branch/tag/sha to build (git mode; optional,
 #                             defaults to the repo's default branch).
-#   PIROUETTE_DATA_DIR        where to append the self-update log
-#                             (optional; falls back to $HOME/logs).
+#   PIROUETTE_DATA_DIR        where to append the self-update log and where
+#                             the state file lives (optional; the log falls
+#                             back to $HOME/logs).
+#   PIROUETTE_UPDATE_STATE_BACKUPS
+#                             how many pre-update state snapshots to keep
+#                             (default: 10; 0 disables snapshotting).
 #   PIROUETTE_SERVICE_NAME    systemd unit to restart (default: pirouette).
 #   PIROUETTE_UPDATE_SETTLE   seconds to wait before starting, so the
 #                             launching agent command can return cleanly
@@ -101,6 +105,57 @@ fail() {
 }
 
 # --- rollback safety net ---------------------------------------------------
+
+# Snapshot the agent state file before we touch anything.
+#
+# This is the cheapest possible insurance against the worst thing an update
+# can do. On 2026-07-27 a rollback to 0.14.2 -- a build that predates the
+# `archived` and `interruptedTurn` fields -- loaded and re-saved the state
+# file, and because `migrateAgent()` rebuilds each record field by field,
+# every field the old build didn't know about was silently dropped: 64
+# archived flags gone, across 70 agents. Nothing detected it, because the
+# rewritten file was perfectly valid JSON; the existing `.broken-<ts>`
+# quarantine only fires on a PARSE failure. The set had to be reconstructed
+# by hand from API output that happened to still be in a chat log.
+#
+# A copy costs milliseconds and a few KB. Take it every time.
+#
+# Caveat worth knowing: this captures the state as of just before the
+# install, so it misses whatever the old server writes during its graceful
+# shutdown (notably the mid-turn `interruptedTurn` flags). It is a
+# disaster-recovery net for schema-destroying rewrites, not a point-in-time
+# backup.
+snapshot_state_file() {
+    local keep="${PIROUETTE_UPDATE_STATE_BACKUPS:-10}"
+    [ "$keep" -gt 0 ] 2>/dev/null || { log "state snapshots disabled"; return 0; }
+    [ -n "${PIROUETTE_DATA_DIR:-}" ] || { log "WARN: PIROUETTE_DATA_DIR unset; no state snapshot"; return 0; }
+
+    local state="$PIROUETTE_DATA_DIR/state/pirouette-state.json"
+    if [ ! -f "$state" ]; then
+        log "WARN: no state file at $state; nothing to snapshot"
+        return 0
+    fi
+
+    local from dest
+    from="$(pirouette --version 2>/dev/null || echo unknown)"
+    dest="$state.pre-update-${from}-$(date -u +%Y%m%dT%H%M%SZ)"
+    if cp -p "$state" "$dest" 2>/dev/null; then
+        log "state snapshot: $dest ($(wc -c < "$dest" 2>/dev/null || echo '?') bytes)"
+    else
+        # Not fatal, but say it loudly: we are about to swap the binary that
+        # owns this file with no way back to its current contents.
+        log "WARN: could not snapshot $state -- proceeding WITHOUT a state backup"
+        return 0
+    fi
+
+    # Keep the newest $keep snapshots; drop the rest.
+    local old
+    old="$(ls -1t "$state".pre-update-* 2>/dev/null | tail -n +$((keep + 1)))"
+    if [ -n "$old" ]; then
+        printf '%s\n' "$old" | while read -r f; do rm -f "$f"; done
+        log "pruned $(printf '%s\n' "$old" | wc -l) old state snapshot(s), keeping $keep"
+    fi
+}
 
 # Pack the *currently installed* global package so we can put it back if
 # the new build doesn't come up. The installed tree already contains a
@@ -263,8 +318,9 @@ if [ "$SETTLE" -gt 0 ] 2>/dev/null; then
     sleep "$SETTLE"
 fi
 
-# 1. Snapshot the current install so a bad build can be undone, then
-#    install (source chosen above).
+# 1. Snapshot the agent state file and the current install so both the data
+#    and the binary can be put back, then install (source chosen above).
+snapshot_state_file
 if [ "$HEALTH_TIMEOUT" -gt 0 ] 2>/dev/null; then
     snapshot_current_install
 fi

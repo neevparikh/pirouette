@@ -7,6 +7,23 @@ follow [SemVer](https://semver.org).
 
 ## Unreleased — self-update actually brings the agents back
 
+### Added
+
+- **`pru self-update` refuses to move the host backwards.** In npm mode it
+  resolves the target version up front and stops if it is older than what's
+  running — `--force` is the only way through, whether or not the version was
+  pinned. Motivated by a real incident on this project's own host:
+  `self-update --package @neevparikh/pirouette@0.14.2` against a box running
+  0.16.1 rolled the fleet back across a state-schema boundary and destroyed 64
+  `archived` flags. A target that resolves to the version already installed is
+  now a no-op that prints and exits instead of restarting every agent.
+- **The updater snapshots the state file before it installs anything**, to
+  `state/pirouette-state.json.pre-update-<version>-<ts>`, keeping the last 10
+  (`PIROUETTE_UPDATE_STATE_BACKUPS`). The existing `.broken-<ts>` quarantine
+  only fires on a parse failure, and the damage above produced perfectly valid
+  JSON with fields missing — nothing detected it and there was no backup to
+  restore from.
+
 ### Fixed
 
 - **`interruptedTurn` was deleted on every load, so auto-continue never fired

@@ -93,6 +93,9 @@ export interface SelfUpdateOptions {
    *  transient unit. Mostly for debugging — an agent that uses this will
    *  get killed by the restart, which is the whole thing we're avoiding. */
   foreground?: boolean;
+  /** Skip the "don't move backwards" guard: install the resolved version
+   *  even if it is older than, or identical to, what's running. */
+  force?: boolean;
 }
 
 const DEFAULT_PACKAGE = "@neevparikh/pirouette";
@@ -107,6 +110,152 @@ export function packageName(spec: string): string {
   const at = spec.lastIndexOf("@");
   // at <= 0 means either no "@" at all, or only the scope "@" at index 0.
   return at <= 0 ? spec : spec.slice(0, at);
+}
+
+/** The version / dist-tag part of an npm spec, or undefined if it's a bare
+ *  name. "@scope/name@1.2.3" -> "1.2.3"; "name@latest" -> "latest". */
+export function specVersion(spec: string): string | undefined {
+  const at = spec.lastIndexOf("@");
+  if (at <= 0) return undefined;
+  return spec.slice(at + 1) || undefined;
+}
+
+/** True if `v` looks like a concrete semver version rather than a dist-tag
+ *  ("1.2.3", "1.2.3-rc.1" vs "latest", "next"). Naming an exact version is
+ *  explicit intent, so the downgrade guard steps out of the way for it. */
+export function isExactVersion(v: string | undefined): boolean {
+  return !!v && /^\d+\.\d+\.\d+(?:[-+].*)?$/.test(v.trim());
+}
+
+/** Compare two semver-ish versions: -1 if a < b, 0 if equal, 1 if a > b.
+ *
+ *  Hand-rolled because pirouette ships four runtime dependencies and this
+ *  is not worth a fifth. Covers what we actually compare -- released
+ *  versions and the occasional prerelease -- per semver rules: numeric
+ *  fields compare numerically, a prerelease sorts BEFORE its release, and
+ *  build metadata (+foo) is ignored. */
+export function compareVersions(a: string, b: string): number {
+  const parse = (v: string) => {
+    const clean = v.trim().replace(/^v/i, "").split("+", 1)[0];
+    const dash = clean.indexOf("-");
+    const main = dash >= 0 ? clean.slice(0, dash) : clean;
+    const pre = dash >= 0 ? clean.slice(dash + 1) : "";
+    return {
+      nums: main.split(".").map((n) => Number.parseInt(n, 10) || 0),
+      pre: pre ? pre.split(".") : [],
+    };
+  };
+  const pa = parse(a);
+  const pb = parse(b);
+
+  for (let i = 0; i < Math.max(pa.nums.length, pb.nums.length); i++) {
+    const d = (pa.nums[i] ?? 0) - (pb.nums[i] ?? 0);
+    if (d !== 0) return d > 0 ? 1 : -1;
+  }
+
+  // 1.0.0-rc.1 < 1.0.0
+  if (pa.pre.length === 0 && pb.pre.length > 0) return 1;
+  if (pa.pre.length > 0 && pb.pre.length === 0) return -1;
+
+  for (let i = 0; i < Math.max(pa.pre.length, pb.pre.length); i++) {
+    const x = pa.pre[i];
+    const y = pb.pre[i];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    const xn = /^\d+$/.test(x);
+    const yn = /^\d+$/.test(y);
+    if (xn && yn) {
+      const d = Number(x) - Number(y);
+      if (d !== 0) return d > 0 ? 1 : -1;
+    } else if (xn !== yn) {
+      return xn ? -1 : 1; // numeric identifiers sort below alphanumeric
+    } else if (x !== y) {
+      return x > y ? 1 : -1;
+    }
+  }
+  return 0;
+}
+
+export type VersionVerdict =
+  | { action: "proceed" }
+  | { action: "up-to-date"; message: string }
+  | { action: "refuse"; message: string };
+
+/** Decide whether an npm-mode install should actually happen.
+ *
+ *  This exists because of a real foot-gun: the npm dist-tag can be *behind*
+ *  what's running. On our own host, `latest` was 0.14.2 while the box ran
+ *  0.16.1 (built from git) -- so a bare `pru self-update` would have
+ *  silently rolled the whole fleet back two minor versions, restarting
+ *  every agent to do it.
+ *
+ *  Rules:
+ *    - target newer than installed  -> proceed.
+ *    - target identical             -> nothing to do. Notably we do NOT
+ *      restart: an update command that's a no-op should be a no-op, not a
+ *      fleet-wide interruption. (A pinned exact version is allowed through
+ *      as a deliberate reinstall/repair.)
+ *    - target older                 -> refuse. `--force` is the ONLY way
+ *      through, whether or not the version was pinned.
+ *    - anything unknown (no installed version, registry lookup failed,
+ *      unparseable) -> proceed. A flaky lookup must not be able to block
+ *      updates; the guard is a safety net, not a gate.
+ *
+ *  Pinning an exact version deliberately does NOT unlock a downgrade. An
+ *  earlier draft of this function treated `--package pkg@1.2.3` as
+ *  "explicit intent, let it through", and that is precisely the command
+ *  that rolled this project's own host from 0.16.1 back to 0.14.2 and
+ *  destroyed 64 `archived` flags. Naming a version says which build you
+ *  want; it says nothing about having understood that the fleet is about
+ *  to move backwards across a state-schema boundary. Those are different
+ *  decisions and they need different evidence. */
+export function judgeVersionChange(opts: {
+  installed?: string;
+  target?: string;
+  /** The user named an exact version rather than a dist-tag. */
+  pinned: boolean;
+  force: boolean;
+  /** For the message: what we're installing, e.g. "@scope/pkg@latest". */
+  spec: string;
+}): VersionVerdict {
+  const { installed, target, pinned, force, spec } = opts;
+  if (force || !installed || !target) return { action: "proceed" };
+
+  const cmp = compareVersions(target, installed);
+  if (cmp > 0) return { action: "proceed" };
+
+  if (cmp === 0) {
+    if (pinned) return { action: "proceed" };
+    return {
+      action: "up-to-date",
+      message:
+        `Already on ${installed} — ${spec} resolves to the same version.\n` +
+        `  Nothing to do: no install, no restart, agents left alone.\n` +
+        `  Reinstall anyway with:  pru self-update --force`,
+    };
+  }
+
+  return {
+    action: "refuse",
+    message:
+      `Refusing to self-update: ${spec} resolves to ${target}, but this host ` +
+      `is running ${installed} — that's a downgrade.\n` +
+      `  (A published release behind the running code is normal when the host ` +
+      `was installed from git.)\n` +
+      `\n` +
+      `  Moving a live fleet backwards restarts every agent, and an older ` +
+      `build can silently drop\n` +
+      `  state fields it doesn't know about — that is how 64 archived flags ` +
+      `were destroyed here once.\n` +
+      `\n` +
+      `  For unreleased code, build from git instead:\n` +
+      `      pru self-update --from-git\n` +
+      `\n` +
+      `  If you genuinely mean to roll back, say so explicitly — and back up ` +
+      `the state file first:\n` +
+      `      cp <data-dir>/state/pirouette-state.json{,.bak}\n` +
+      `      pru self-update --package ${packageName(spec)}@${target} --force`,
+  };
 }
 
 export interface GitSource {
@@ -250,6 +399,40 @@ function readPackageSentinel(dataDir: string | undefined): string | undefined {
   }
 }
 
+/** Version of the pirouette that's running right now (from the installed
+ *  package.json). Undefined if it can't be read — the guard then stands
+ *  down rather than blocking the update. */
+function installedVersion(): string | undefined {
+  try {
+    const pkg = JSON.parse(
+      readFileSync(path.join(packageRoot(), "package.json"), "utf8"),
+    ) as { version?: string };
+    return pkg.version?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Ask the registry what a spec actually resolves to. Returns undefined on
+ *  any failure (offline, private registry, unpublished package) — callers
+ *  treat "unknown" as "proceed". */
+export function resolveRegistryVersion(spec: string): string | undefined {
+  try {
+    const out = execFileSync("npm", ["view", spec, "version"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 30_000,
+    });
+    // `npm view` can print multiple lines for a range; take the last, which
+    // is the highest match.
+    const lines = out.trim().split(/\s+/).filter(Boolean);
+    const last = lines[lines.length - 1];
+    return last ? last.replace(/^.*'(.+)'$/, "$1") : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** True if `systemd-run` is on PATH — our signal that we're on a real
  *  systemd host where the detached-worker trick works. */
 function hasSystemdRun(): boolean {
@@ -293,6 +476,35 @@ export async function selfUpdate(opts: SelfUpdateOptions): Promise<void> {
   const unit = opts.unit || DEFAULT_UNIT;
   const settle = opts.settle ?? "2";
   const script = resolveWorkerScript();
+
+  // Don't move backwards. Only npm mode can be judged up front: a git ref
+  // has no version until it's built, and asking for one is the whole point
+  // of --from-git.
+  if (plan.mode === "npm") {
+    const installed = installedVersion();
+    const target = resolveRegistryVersion(plan.spec);
+    const verdict = judgeVersionChange({
+      installed,
+      target,
+      pinned: isExactVersion(specVersion(plan.spec)),
+      force: !!opts.force,
+      spec: plan.spec,
+    });
+    if (verdict.action === "up-to-date") {
+      console.log(`[self-update] ${verdict.message}`);
+      return;
+    }
+    if (verdict.action === "refuse") {
+      throw new Error(verdict.message);
+    }
+    if (installed && target) {
+      console.log(
+        installed === target
+          ? `[self-update] reinstalling ${installed} (same version, explicitly requested)`
+          : `[self-update] ${installed} -> ${target}`,
+      );
+    }
+  }
 
   if (!existsSync(script)) {
     throw new Error(
