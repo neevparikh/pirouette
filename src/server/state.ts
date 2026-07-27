@@ -57,6 +57,17 @@ function migrateAgent(
     // Whether the user has archived this agent. Archived agents are
     // hidden from the default dashboard listing but not deleted.
     archived: agent.archived ?? false,
+    // Set by graceful shutdown when the agent was mid-turn. THIS MUST
+    // SURVIVE A RELOAD: it is written to disk by one process and read by
+    // the next one, which is the entire point. Leaving it out here (as
+    // this function originally did) silently deleted the flag on every
+    // load, so resumeAll() never saw a single interrupted agent and the
+    // auto-continue feature was a no-op across real restarts.
+    //
+    // If you add a field to AgentConfig, add it here too — migrateAgent
+    // rebuilds the record field by field, so anything missing is dropped.
+    // `state.test.ts` has a round-trip test that fails if you forget.
+    interruptedTurn: agent.interruptedTurn ?? false,
   };
 }
 

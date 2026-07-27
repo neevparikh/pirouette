@@ -9,6 +9,25 @@ follow [SemVer](https://semver.org).
 
 ### Fixed
 
+- **`interruptedTurn` was deleted on every load, so auto-continue never fired
+  in production.** `migrateAgent()` rebuilds each agent record field by field
+  and the flag wasn't in the list — so the one piece of state whose entire job
+  is to survive a restart was dropped between the shutdown that wrote it and
+  the `resumeAll()` that reads it. Every unit test passed because they
+  `putAgent()` in memory and never round-trip through disk. Confirmed against
+  a live restart: four agents were correctly flagged mid-turn, and not one
+  `auto-continuing` line appeared. Now preserved, with a round-trip test that
+  deep-compares a fully-populated record so the next dropped field fails loudly.
+- **`pru self-update` blocked until the restart killed it.** `systemd-run`
+  waits for `Type=oneshot` jobs by default, so the "launch and return
+  immediately" contract (and the settle delay built around it) never held —
+  the agent's tool call hung for the whole install and was then SIGKILLed,
+  the exact failure this command exists to avoid. Passes `--no-block` now,
+  plus `TimeoutStartSec=1800` so a slow git build isn't killed by systemd's
+  90s default.
+- An auto-continue that bails because the session has no history now says so
+  in the log instead of returning silently.
+
 - **`pru self-update` no longer strands agents.** The restart is intentionally
   disruptive (it kills every in-flight bash command), but agents are now put
   back to work instead of silently parking at `waiting_input`:

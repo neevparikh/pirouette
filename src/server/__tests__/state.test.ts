@@ -193,6 +193,89 @@ describe("StateManager round-trip (save + reload)", () => {
     expect(sm2.getProject(DEFAULT_PROJECT_NAME)?.name).toBe(DEFAULT_PROJECT_NAME);
   });
 
+  it("preserves EVERY AgentConfig field across save + load", async () => {
+    // Regression: migrateAgent() rebuilds each record field by field, and
+    // `interruptedTurn` was missing from the list -- so the flag graceful
+    // shutdown writes for a mid-turn agent was silently deleted on the
+    // next load(). resumeAll() then saw no interrupted agents and the
+    // whole auto-continue-after-restart feature was a no-op in
+    // production, while unit tests (which putAgent() in memory and never
+    // round-trip through disk) stayed green.
+    //
+    // Deep-comparing a fully-populated record catches the next dropped
+    // field automatically, whatever it is.
+    const full: AgentConfig = {
+      ...makeAgent("ffffffff", "full"),
+      projectName: "someproject",
+      branchName: "agent/full",
+      state: "shutdown",
+      model: "hawk/claude-opus-5",
+      thinkingLevel: "high",
+      usage: {
+        costUsd: 1.5,
+        totalTokens: 100,
+        inputTokens: 40,
+        outputTokens: 30,
+        cacheReadTokens: 20,
+        cacheWriteTokens: 10,
+        turns: 3,
+      },
+      errorMessage: "boom",
+      parentAgentId: "deadbeef",
+      archived: true,
+      interruptedTurn: true,
+    };
+
+    const sm1 = new StateManager(stateDir);
+    await sm1.load();
+    sm1.putAgent(full);
+    await sm1.flush();
+
+    const sm2 = new StateManager(stateDir);
+    await sm2.load();
+    expect(sm2.getAgent("ffffffff")).toEqual(full);
+  });
+
+  it("keeps interruptedTurn so the next boot can auto-continue the turn", async () => {
+    // The narrow version of the above, spelled out: this is the exact
+    // handoff between one server's shutdown() and the next one's
+    // resumeAll().
+    const midTurn: AgentConfig = {
+      ...makeAgent("aaaabbbb", "mid-turn"),
+      state: "shutdown",
+      interruptedTurn: true,
+    };
+    const finished: AgentConfig = {
+      ...makeAgent("ccccdddd", "finished"),
+      state: "shutdown",
+      interruptedTurn: false,
+    };
+
+    const sm1 = new StateManager(stateDir);
+    await sm1.load();
+    sm1.putAgent(midTurn);
+    sm1.putAgent(finished);
+    await sm1.flush();
+
+    const sm2 = new StateManager(stateDir);
+    await sm2.load();
+    expect(sm2.getAgent("aaaabbbb")?.interruptedTurn).toBe(true);
+    expect(sm2.getAgent("ccccdddd")?.interruptedTurn).toBe(false);
+  });
+
+  it("defaults interruptedTurn to false for records written before it existed", async () => {
+    writeFileSync(
+      path.join(stateDir, "pirouette-state.json"),
+      JSON.stringify({
+        agents: { old12345: { id: "old12345", name: "legacy", state: "shutdown" } },
+        projects: {},
+      }),
+    );
+    const sm = new StateManager(stateDir);
+    await sm.load();
+    expect(sm.getAgent("old12345")?.interruptedTurn).toBe(false);
+  });
+
   it("flush() is a no-op when nothing is dirty", async () => {
     const sm = new StateManager(stateDir);
     await sm.load();

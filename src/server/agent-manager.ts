@@ -1423,8 +1423,11 @@ export class AgentManager {
         return;
       }
       // Nothing to continue if the session has no history (shouldn't happen
-      // for a mid-turn agent, but guard anyway).
+      // for a mid-turn agent, but guard anyway). Logged: a silent bail here
+      // is indistinguishable from "the feature didn't run" when you're
+      // reading logs after a restart, which cost real debugging time.
       if (handle.session.messages.length === 0) {
+        console.log(`[agent-manager] auto-continue for ${id} skipped: session has no history`);
         this.clearInterruptedTurn(id);
         return;
       }

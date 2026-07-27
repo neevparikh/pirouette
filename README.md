@@ -333,7 +333,9 @@ The details that make this hold up in practice:
   installed package (`npm pack`) before installing, polls `/api/health` after
   the restart, and if the new build never answers within
   `PIROUETTE_UPDATE_HEALTH_TIMEOUT` seconds (default 90) it reinstalls the
-  snapshot and restarts again. A self-update that can't come up is the one
+  snapshot and restarts again. (`/api/health` only answers *after*
+  `resumeAll()` finishes, so the timeout has to cover the resume too — measured
+  at ~2 s for 24 agents on a real host, so the default has plenty of room.) A self-update that can't come up is the one
   failure mode where *no* agent resumes, so it is undone automatically. Set the
   timeout to `0` to disable both the check and the rollback.
 

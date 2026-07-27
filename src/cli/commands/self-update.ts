@@ -374,7 +374,19 @@ export async function selfUpdate(opts: SelfUpdateOptions): Promise<void> {
     "systemd-run",
     `--unit=${unit}`,
     "--collect",
+    // --no-block is load-bearing, not a nicety. With Type=oneshot,
+    // `systemd-run` WAITS for the job to finish by default -- so this
+    // command would sit here for the whole install and then get SIGKILLed
+    // by the service restart, which is precisely the "agent command dies
+    // mid-flight" failure this feature exists to avoid (and it contradicts
+    // the "returns immediately" contract the settle delay is built around).
+    // A unit-name collision is still reported synchronously, so the
+    // "an update is already in progress" error below still works.
+    "--no-block",
     "--property=Type=oneshot",
+    // The worker outlives this process by design; give it room for a slow
+    // registry / git build instead of systemd's 90s default.
+    "--property=TimeoutStartSec=1800",
     `--uid=${uid}`,
     `--gid=${gid}`,
     `--setenv=HOME=${home}`,
