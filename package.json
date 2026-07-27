@@ -1,6 +1,6 @@
 {
   "name": "@neevparikh/pirouette",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "description": "Long-lived pi coding agents on hosts you already have, with a web dashboard and a CLI.",
   "license": "MIT",
   "type": "module",
@@ -27,6 +27,7 @@
     "vendor": "node scripts/vendor.mjs",
     "clean": "rm -rf dist",
     "themes": "node scripts/generate-themes.mjs",
+    "prepare": "[ -d node_modules/typescript ] && npm run build || true",
     "prepublishOnly": "npm run clean && npm run typecheck && npm test && npm run build",
     "dev": "npm run vendor && tsx src/cli/index.ts server",
     "pru": "tsx src/cli/index.ts",
@@ -42,13 +43,13 @@
     "spike:stream:reset": "tsx src/spikes/event-streaming.ts reset"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.80.9",
+    "@earendil-works/pi-coding-agent": "^0.82.1",
     "commander": "^13.1.0",
     "smol-toml": "^1.6.1",
     "ws": "^8.18.3"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.80.9",
+    "@earendil-works/pi-ai": "^0.82.1",
     "@types/jsdom": "^28.0.1",
     "@types/ws": "^8.18.1",
     "dompurify": "^3.4.1",
