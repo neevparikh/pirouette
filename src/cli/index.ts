@@ -13,6 +13,7 @@ import { open } from "./commands/open.js";
 import { ssh } from "./commands/ssh.js";
 import { send } from "./commands/send.js";
 import { stop } from "./commands/stop.js";
+import { interrupt } from "./commands/interrupt.js";
 import { rm } from "./commands/rm.js";
 import { server } from "./commands/server.js";
 import { configShow, configPath, configEdit } from "./commands/config.js";
@@ -94,6 +95,12 @@ program
   .command("send <agent> <message>")
   .description("Send a message to an agent")
   .action(send);
+
+program
+  .command("interrupt <agent>")
+  .alias("esc")
+  .description("Cancel an agent's current turn (session stays alive) — same as Escape in the dashboard")
+  .action(interrupt);
 
 program
   .command("stop <agent>")

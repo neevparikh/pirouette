@@ -222,12 +222,27 @@ overridden per host under `[hosts.<name>.dotfiles]`.
 | `pru launch <name>` | Create a new pi agent (`--project`, `--model`, `--thinking` optional) |
 | `pru list` | List all agents and their state |
 | `pru send <agent> <msg>` | Send a message to an agent |
+| `pru interrupt <agent>` | Cancel the agent's current turn; the session stays alive |
 | `pru stop <agent>` | Stop an agent (keeps its state) |
 | `pru rm <agent>` | Remove an agent; `--all` also deletes its worktree + session files |
 | `pru status` | Show host + server health |
 
 You can also create agents from the web UI by typing `@<newname> message`
 in the input bar.
+
+**Interrupting a turn.** Just like pi's TUI, <kbd>Esc</kbd> in the dashboard
+aborts whatever the selected agent is doing right now — the in-flight LLM
+call, a running tool, a compaction, a `!bash` run — without tearing the
+session down. Any queued steering / follow-up messages are dropped and put
+back in the composer so you can edit and resend them. The header's
+`interrupt esc` pill and `/interrupt` do the same thing, as does
+`pru interrupt <agent>`. Use `stop` (not Escape) when you want the agent
+actually shut down; `resume` brings it back.
+
+Escape yields to anything with a better claim on the key first: an open
+modal, the `@mention` / `/command` autocomplete, a mobile drawer or picker,
+and — with vim mode on — leaving insert mode. From normal mode a second
+Escape interrupts.
 
 ### Host
 

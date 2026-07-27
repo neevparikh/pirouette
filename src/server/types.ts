@@ -288,6 +288,25 @@ export interface SendMessageRequest {
   images?: InboundImage[];
 }
 
+/** What an interrupt actually cancelled. Mirrors the things pi's TUI
+ *  binds Escape to, in priority order. */
+export type InterruptTarget = "turn" | "compaction" | "bash";
+
+/** Result of POST /api/agents/:id/interrupt. */
+export interface InterruptResult {
+  /** True if anything was actually in flight and got cancelled. */
+  interrupted: boolean;
+  /** Which in-flight operations were cancelled (possibly several). */
+  cancelled: InterruptTarget[];
+  /** Queued steering / follow-up messages that were dropped as part of the
+   *  interrupt. The dashboard restores these into the composer, matching
+   *  pi's TUI (Escape puts queued text back in the editor). */
+  cleared: { steering: string[]; followUp: string[] };
+  /** False when `session.abort()` didn't reach idle within the timeout.
+   *  The abort signal is still fired; we just stopped waiting. */
+  settled: boolean;
+}
+
 /** A chat message formatted for the frontend. */
 export interface ChatMessage {
   role: "user" | "assistant" | "thinking" | "tool" | "tool_result" | "system";
