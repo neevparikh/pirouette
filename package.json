@@ -27,7 +27,6 @@
     "vendor": "node scripts/vendor.mjs",
     "clean": "rm -rf dist",
     "themes": "node scripts/generate-themes.mjs",
-    "prepare": "[ -d node_modules/typescript ] && npm run build || true",
     "prepublishOnly": "npm run clean && npm run typecheck && npm test && npm run build",
     "dev": "npm run vendor && tsx src/cli/index.ts server",
     "pru": "tsx src/cli/index.ts",
