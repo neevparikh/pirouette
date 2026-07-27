@@ -166,6 +166,14 @@ function normalizeEvent(event: AgentSessionEvent): NormalizedEvent {
         parentId: event.entry.parentId,
         timestamp: event.entry.timestamp,
       };
+    case "summarization_retry_scheduled":
+      return { type: event.type, attempt: event.attempt, maxAttempts: event.maxAttempts, delayMs: event.delayMs, errorMessage: event.errorMessage };
+    case "summarization_retry_attempt_start":
+      return { type: event.type, source: event.source, ...(event.source === "compaction" ? { reason: event.reason } : {}) };
+    case "summarization_retry_finished":
+      return { type: event.type };
+    case "bash_execution_update":
+      return { type: event.type, id: event.id, delta: event.delta };
     default: {
       const _exhaustive: never = event;
       return { type: (_exhaustive as { type: string }).type };
