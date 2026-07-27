@@ -26,6 +26,7 @@ import { setupWorktreeDataTools } from "./worktree-setup.js";
 import { ProjectManager } from "./project-manager.js";
 import { StateManager } from "./state.js";
 import { normalizeEvent } from "./normalize.js";
+import { consumeRestartNotice, type RestartNotice } from "./restart-notice.js";
 import {
   createPirouetteUIContext,
   type PendingUIRequest,
@@ -53,6 +54,42 @@ const DEFAULT_RESUME_CONTINUE_MESSAGE =
   "[pirouette] The server restarted and interrupted your previous turn " +
   "(a command or response was aborted mid-execution). Review the state of " +
   "your work and continue from where you left off.";
+
+/** Nudge for the agent that ran `pru self-update`. Its turn had usually
+ *  already ended by the time the installer restarted the server, so the
+ *  "your turn was interrupted" wording would be wrong — but it still needs
+ *  waking up, otherwise the agent that asked for the update is the one
+ *  agent that never comes back. Overridable via
+ *  PIROUETTE_SELF_UPDATE_RESUME_MESSAGE. */
+const DEFAULT_SELF_UPDATE_RESUME_MESSAGE =
+  "[pirouette] The self-update you started has finished and the server " +
+  "restarted, which aborted any commands that were still running. You are " +
+  "now on the new build. Re-check anything that was in flight and continue " +
+  "from where you left off.";
+
+/** Backoff before each background attempt to resume an agent whose initial
+ *  resume failed (transient auth/network hiccups right after a restart). */
+const RESUME_RETRY_DELAYS_MS = [15_000, 60_000, 180_000];
+
+/** Delay *before* each post-restart nudge attempt. The first is immediate;
+ *  later ones give a still-waking provider stack time to settle. */
+const NUDGE_ATTEMPT_DELAYS_MS = [0, 10_000, 45_000];
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    if (typeof timer.unref === "function") timer.unref();
+  });
+}
+
+/** The message handed to the agent that triggered a self-update, with the
+ *  install plan appended when we know it. */
+function selfUpdateResumeMessage(notice?: RestartNotice): string {
+  const base =
+    process.env.PIROUETTE_SELF_UPDATE_RESUME_MESSAGE?.trim() ||
+    DEFAULT_SELF_UPDATE_RESUME_MESSAGE;
+  return notice?.plan ? `${base} (installed: ${notice.plan})` : base;
+}
 
 /** Race a promise against a timeout. Resolves with the promise's value if
  *  it settles in time; rejects with a timeout error otherwise. Used to
@@ -1208,10 +1245,24 @@ export class AgentManager {
   /** Resume agents on server startup. Skips only agents the *user*
    *  stopped (state "stopped"). Agents stopped by the previous server
    *  shutdown carry state "shutdown" and are resumed, as is anything
-   *  else ("running", "idle", ... — e.g. left behind by a crash). */
+   *  else ("running", "idle", ... — e.g. left behind by a crash).
+   *
+   *  Two nudges get dispatched from here so a restart (notably
+   *  `pru self-update`) doesn't leave a wall of parked agents:
+   *
+   *    - agents that were mid-turn get "your turn was interrupted,
+   *      continue" (see autoContinueAfterResume),
+   *    - the agent that *triggered* a self-update gets "the update landed"
+   *      even though its turn had already ended while the installer ran
+   *      (see the restart notice module).
+   *
+   *  A resume that fails (transient provider/token errors are common in
+   *  the first seconds after a restart) is retried in the background
+   *  instead of parking the agent in "error" forever. */
   async resumeAll(): Promise<void> {
     // Ensure extensions are loaded up-front so the model registry is populated.
     await this.ensureResourceLoader();
+    const notice = this.takeRestartNotice();
     const agents = this.stateManager.getAgents();
     for (const config of agents) {
       if (config.state === "stopped") continue;
@@ -1221,66 +1272,211 @@ export class AgentManager {
       //   - a crash left the live "running" state on disk.
       // Snapshot BEFORE resumeAgent(), which overwrites state.
       const wasMidTurn = config.interruptedTurn === true || config.state === "running";
+      // Did this agent ask for the update we just came back from? Match on
+      // the session dir, which is 1:1 with an agent.
+      const isUpdateInitiator =
+        !!notice?.sessionDir &&
+        path.resolve(notice.sessionDir) === path.resolve(config.sessionDir);
       try {
         await this.resumeAgent(config.id);
       } catch (err) {
         console.error(`[agent-manager] failed to resume agent ${config.name}: ${err}`);
-        this.stateManager.updateAgentState(config.id, { state: "error" });
+        this.markError(
+          config,
+          `resume failed: ${err instanceof Error ? err.message : err}`,
+        );
+        this.scheduleResumeRetry(config.id, {
+          wasMidTurn,
+          updateNotice: isUpdateInitiator ? notice : undefined,
+          attempt: 1,
+        });
         continue;
       }
-      // Clear the flag regardless so we never re-nudge on a later boot,
-      // then auto-continue the interrupted turn (fire-and-forget).
-      if (config.interruptedTurn) {
-        this.stateManager.updateAgentState(config.id, { interruptedTurn: false });
-      }
       if (wasMidTurn) {
+        // NB: `interruptedTurn` is intentionally NOT cleared here. It is
+        // cleared once the nudge has actually been delivered, so a boot
+        // that dies (or a nudge that can't be dispatched) retries on the
+        // next boot instead of silently dropping the agent's work.
         this.autoContinueAfterResume(config.id);
+      } else {
+        if (config.interruptedTurn) {
+          this.stateManager.updateAgentState(config.id, { interruptedTurn: false });
+        }
+        if (isUpdateInitiator) {
+          this.autoContinueAfterResume(config.id, {
+            message: selfUpdateResumeMessage(notice ?? undefined),
+            reason: "self-update",
+          });
+        }
       }
     }
   }
 
-  /** Re-kick an agent whose turn was interrupted by a server restart.
+  /** Read (and delete) the note `pru self-update` leaves behind naming the
+   *  agent that triggered the update. Best-effort: never throws, and a
+   *  stale note (failed update that never restarted us) is ignored. */
+  private takeRestartNotice(): RestartNotice | null {
+    try {
+      const notice = consumeRestartNotice(this.dataDir);
+      if (notice) {
+        console.log(
+          `[agent-manager] self-update notice found (requested ${notice.requestedAt}` +
+            `${notice.sessionDir ? `, initiator session ${notice.sessionDir}` : ", no initiating agent"})`,
+        );
+      }
+      return notice;
+    } catch (err) {
+      console.error(`[agent-manager] failed to read self-update notice: ${err}`);
+      return null;
+    }
+  }
+
+  /** Retry a failed resume in the background with a widening backoff.
+   *
+   *  A restart can land while the machine is still settling (auth token
+   *  refresh, network, a slow model registry). Before this, a single
+   *  failure parked the agent in "error" until a human noticed. */
+  private scheduleResumeRetry(
+    id: string,
+    opts: { wasMidTurn: boolean; updateNotice?: RestartNotice | null; attempt: number },
+  ): void {
+    const delay = RESUME_RETRY_DELAYS_MS[opts.attempt - 1];
+    if (delay === undefined) {
+      console.error(`[agent-manager] giving up resuming ${id} after ${opts.attempt - 1} retries`);
+      return;
+    }
+    const timer = setTimeout(() => {
+      void (async () => {
+        // The user may have stopped/removed the agent in the meantime.
+        const cfg = this.stateManager.getAgent(id);
+        if (!cfg || cfg.state === "stopped") return;
+        if (this.handles.has(id)) return; // came back some other way
+        console.log(`[agent-manager] retrying resume for ${id} (attempt ${opts.attempt})`);
+        try {
+          await this.resumeAgent(id);
+        } catch (err) {
+          console.error(`[agent-manager] resume retry ${opts.attempt} failed for ${id}: ${err}`);
+          this.scheduleResumeRetry(id, { ...opts, attempt: opts.attempt + 1 });
+          return;
+        }
+        this.stateManager.updateAgentState(id, { errorMessage: null });
+        if (opts.wasMidTurn) {
+          this.autoContinueAfterResume(id);
+        } else if (opts.updateNotice) {
+          this.autoContinueAfterResume(id, {
+            message: selfUpdateResumeMessage(opts.updateNotice),
+            reason: "self-update",
+          });
+        }
+      })();
+    }, delay);
+    if (typeof timer.unref === "function") timer.unref();
+  }
+
+  /** Re-kick an agent after a restart.
    *
    *  A resumed session is restored with full history but pi does NOT
    *  re-run the aborted turn -- the agent lands in `waiting_input` and
    *  stalls. This injects a short user turn telling it to continue, so a
-   *  seamless update actually *resumes the work*, not just the session.
+   *  restart (self-update, reboot, crash) actually *resumes the work*,
+   *  not just the session.
    *
-   *  Fire-and-forget by design: we dispatch the prompt but do NOT await
-   *  the turn, so resumeAll() doesn't serialize on every agent's work.
+   *  Fire-and-forget by design: we kick off delivery but do NOT await the
+   *  turn, so resumeAll() doesn't serialize on every agent's work.
    *  Opt out with PIROUETTE_RESUME_AUTOCONTINUE=0 (agents then just sit at
    *  waiting_input, the pre-feature behaviour). */
-  private autoContinueAfterResume(id: string): void {
+  private autoContinueAfterResume(
+    id: string,
+    opts: { message?: string; reason?: string } = {},
+  ): void {
     if (process.env.PIROUETTE_RESUME_AUTOCONTINUE === "0") {
       console.log(`[agent-manager] auto-continue disabled; ${id} left at waiting_input`);
       return;
     }
-    const handle = this.handles.get(id);
-    if (!handle) return;
-    // Nothing to continue if the session has no history (shouldn't happen
-    // for a mid-turn agent, but guard anyway).
-    if (handle.session.messages.length === 0) return;
-
     const message =
+      opts.message ||
       process.env.PIROUETTE_RESUME_CONTINUE_MESSAGE?.trim() ||
       DEFAULT_RESUME_CONTINUE_MESSAGE;
-    console.log(
-      `[agent-manager] auto-continuing interrupted turn for ${handle.config.name} (${id})`,
-    );
-    this.setAgentState(id, "running");
-    handle.session
-      .prompt(message)
-      .then(() => console.log(`[agent-manager] auto-continue turn finished for ${id}`))
-      .catch((err) => {
-        console.error(`[agent-manager] auto-continue failed for ${id}: ${err}`);
-        const cfg = this.stateManager.getAgent(id);
-        if (cfg) {
-          this.markError(
-            cfg,
-            `auto-continue after resume failed: ${err instanceof Error ? err.message : err}`,
-          );
+    void this.deliverResumeNudge(id, message, opts.reason ?? "interrupted-turn");
+  }
+
+  /** Deliver a post-restart nudge, retrying transient dispatch failures.
+   *
+   *  Right after a restart the provider stack can still be waking up (auth
+   *  token refresh, model registry, network), and a single rejected
+   *  `prompt()` used to be fatal: the agent got marked "error" and never
+   *  continued its work. We retry a few times, and only clear
+   *  `interruptedTurn` once a turn was actually accepted -- if we never
+   *  manage it, the flag survives so the NEXT boot tries again.
+   *
+   *  Gives up immediately (without clearing the flag) when the agent is no
+   *  longer running or a human has taken over: a user stop or a manual
+   *  message means the nudge is unwanted. */
+  private async deliverResumeNudge(id: string, message: string, reason: string): Promise<void> {
+    for (let attempt = 0; attempt < NUDGE_ATTEMPT_DELAYS_MS.length; attempt++) {
+      const delay = NUDGE_ATTEMPT_DELAYS_MS[attempt];
+      if (delay > 0) await sleep(delay);
+
+      const handle = this.handles.get(id);
+      if (!handle) {
+        console.log(`[agent-manager] auto-continue for ${id} skipped: agent is not running`);
+        return;
+      }
+      // Nothing to continue if the session has no history (shouldn't happen
+      // for a mid-turn agent, but guard anyway).
+      if (handle.session.messages.length === 0) {
+        this.clearInterruptedTurn(id);
+        return;
+      }
+      // A human (or another client) got there first — don't pile on.
+      if (handle.session.isStreaming) {
+        console.log(`[agent-manager] auto-continue for ${id} skipped: already streaming`);
+        this.clearInterruptedTurn(id);
+        return;
+      }
+
+      console.log(
+        `[agent-manager] auto-continuing ${handle.config.name} (${id}), reason=${reason}` +
+          (attempt > 0 ? `, retry ${attempt}` : ""),
+      );
+      this.setAgentState(id, "running");
+      try {
+        await handle.session.prompt(message);
+        console.log(`[agent-manager] auto-continue turn finished for ${id}`);
+        this.clearInterruptedTurn(id);
+        return;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[agent-manager] auto-continue attempt ${attempt + 1} failed for ${id}: ${msg}`);
+        // An abort means someone deliberately stopped this turn (user hit
+        // stop, or we're shutting down again). Don't fight them.
+        if (/abort/i.test(msg)) {
+          this.clearInterruptedTurn(id);
+          return;
         }
-      });
+        const cfg = this.stateManager.getAgent(id);
+        const isLast = attempt === NUDGE_ATTEMPT_DELAYS_MS.length - 1;
+        if (isLast && cfg) {
+          // Leave the agent usable (waiting_input, not "error") and keep
+          // interruptedTurn set so the next boot retries the nudge.
+          this.stateManager.updateAgentState(id, {
+            errorMessage: `auto-continue after resume failed: ${msg}`,
+            interruptedTurn: true,
+          });
+        }
+        // Don't leave the dashboard showing "running" while we wait out
+        // the backoff (or after giving up).
+        this.setAgentState(id, "waiting_input");
+      }
+    }
+  }
+
+  /** Mark an agent's interrupted turn as dealt with (persisted so a later
+   *  boot doesn't re-nudge). */
+  private clearInterruptedTurn(id: string): void {
+    const cfg = this.stateManager.getAgent(id);
+    if (!cfg || cfg.interruptedTurn !== true) return;
+    this.stateManager.updateAgentState(id, { interruptedTurn: false });
   }
 
   /** Resume a specific agent by id. */
@@ -1593,12 +1789,18 @@ export class AgentManager {
     //    the user must NOT be nudged.
     for (const id of ids) {
       const cfg = this.stateManager.getAgent(id);
-      const wasRunning = cfg?.state === "running";
+      const handle = this.handles.get(id);
+      // Two independent signals, because either can lag: the persisted
+      // state machine (driven by agent_start/agent_end events) and pi's
+      // own live streaming flag. If EITHER says mid-turn, we resume the
+      // work on the next boot -- a spurious nudge is far cheaper than an
+      // agent that silently drops what it was doing.
+      const wasRunning =
+        cfg?.state === "running" || handle?.session.isStreaming === true;
       this.stateManager.updateAgentState(id, {
         state: "shutdown",
         interruptedTurn: wasRunning,
       });
-      const handle = this.handles.get(id);
       if (handle) handle.config.state = "shutdown";
     }
     try {

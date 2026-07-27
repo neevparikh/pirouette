@@ -310,6 +310,33 @@ had *finished* and were waiting for you are left alone. Disable with
 `PIROUETTE_RESUME_AUTOCONTINUE=0`, or customise the nudge with
 `PIROUETTE_RESUME_CONTINUE_MESSAGE`.
 
+The details that make this hold up in practice:
+
+- **The agent that ran `pru self-update` is woken too.** It is the one agent
+  the mid-turn rule misses: it prints "update kicked off", *ends its turn*, and
+  only then does the installer restart the service 30+ seconds later — so it
+  looks finished rather than interrupted. `pru self-update` therefore leaves a
+  one-shot "restart notice" in the data dir naming its own session; the next
+  server consumes it and nudges that agent with
+  `PIROUETTE_SELF_UPDATE_RESUME_MESSAGE` (default: "the update landed, carry
+  on"). A notice from an update that never restarted the service expires after
+  30 minutes.
+- **Nudges are retried.** Right after a restart the provider stack may still be
+  waking up (token refresh, model registry), and a rejected first `prompt()`
+  used to park the agent in `error` forever. Delivery is retried (immediately,
+  +10s, +45s) and the `interruptedTurn` flag is cleared only once a turn is
+  actually accepted — so if delivery never succeeds, the *next* boot tries
+  again instead of dropping the work.
+- **Failed resumes are retried** in the background (+15s, +60s, +180s) rather
+  than leaving the agent stuck in `error`.
+- **A broken build is rolled back.** The worker snapshots the currently
+  installed package (`npm pack`) before installing, polls `/api/health` after
+  the restart, and if the new build never answers within
+  `PIROUETTE_UPDATE_HEALTH_TIMEOUT` seconds (default 90) it reinstalls the
+  snapshot and restarts again. A self-update that can't come up is the one
+  failure mode where *no* agent resumes, so it is undone automatically. Set the
+  timeout to `0` to disable both the check and the rollback.
+
 ### Config
 
 | command | purpose |
@@ -327,6 +354,10 @@ had *finished* and were waiting for you are left alone. Disable with
 | `PIROUETTE_HOST` | `127.0.0.1` | Server bind host (set on the host by setup) |
 | `PIROUETTE_PORT` | `7777` | Server port |
 | `PIROUETTE_DATA_DIR` | `.pirouette/data` | Server data directory |
+| `PIROUETTE_RESUME_AUTOCONTINUE` | `1` | `0` leaves restart-interrupted agents parked at `waiting_input` |
+| `PIROUETTE_RESUME_CONTINUE_MESSAGE` | see above | Nudge sent to an agent whose turn a restart cut short |
+| `PIROUETTE_SELF_UPDATE_RESUME_MESSAGE` | see above | Nudge sent to the agent that ran `pru self-update` |
+| `PIROUETTE_UPDATE_HEALTH_TIMEOUT` | `90` | Seconds to wait for `/api/health` after a self-update before rolling back (`0` disables) |
 
 ## Authenticating tools inside the host
 

@@ -45,6 +45,18 @@
 #   PIROUETTE_UPDATE_SETTLE   seconds to wait before starting, so the
 #                             launching agent command can return cleanly
 #                             first (default: 2).
+#   PIROUETTE_PORT            port to health-check after the restart
+#                             (default: 7777).
+#   PIROUETTE_UPDATE_HEALTH_TIMEOUT
+#                             seconds to wait for the new server to answer
+#                             /api/health before rolling back (default: 90;
+#                             0 disables the health check + rollback).
+#
+# Rollback: before installing, we `npm pack` the currently-installed global
+# package into a tarball. If the new build never answers /api/health we
+# reinstall that tarball and restart again. The whole point of the feature
+# is that agents come back after an update; a broken build that leaves the
+# service crash-looping is the worst possible outcome, so we undo it.
 
 set -uo pipefail
 
@@ -53,6 +65,9 @@ PACKAGE="${PIROUETTE_PACKAGE:-}"
 GIT_URL="${PIROUETTE_UPDATE_GIT_URL:-}"
 GIT_REF="${PIROUETTE_UPDATE_GIT_REF:-}"
 SETTLE="${PIROUETTE_UPDATE_SETTLE:-2}"
+HEALTH_PORT="${PIROUETTE_PORT:-7777}"
+HEALTH_TIMEOUT="${PIROUETTE_UPDATE_HEALTH_TIMEOUT:-90}"
+BACKUP_TARBALL=""
 
 # Resolve a log destination that survives restarts and that `pru logs`
 # can surface. Prefer the data dir; fall back to $HOME/logs.
@@ -71,9 +86,103 @@ log() {
     printf '%s\n' "$line" >> "$LOG_FILE" 2>/dev/null || true
 }
 
+# Drop the rollback snapshot (a ~500KB tarball in TMPDIR). Called on every
+# exit path so a run that never needs it doesn't litter /tmp.
+cleanup_backup() {
+    [ -n "$BACKUP_TARBALL" ] || return 0
+    rm -rf "$(dirname "$BACKUP_TARBALL")" 2>/dev/null || true
+    BACKUP_TARBALL=""
+}
+
 fail() {
     log "ERROR: $*"
+    cleanup_backup
     exit 1
+}
+
+# --- rollback safety net ---------------------------------------------------
+
+# Pack the *currently installed* global package so we can put it back if
+# the new build doesn't come up. The installed tree already contains a
+# prebuilt dist/, and package.json "files" lists everything we ship, so a
+# plain `npm pack` of that directory round-trips fine (no build needed).
+# Where is the package currently installed? Try, in order: the `pirouette`
+# / `pru` bins on PATH (follow the symlink into
+# <prefix>/lib/node_modules/<pkg>/dist/... and walk up to package.json),
+# then the conventional global roots. PATH can be minimal inside a
+# transient unit, hence the fallbacks.
+installed_package_dir() {
+    local bin dir candidate
+    for bin in pirouette pru; do
+        candidate="$(command -v "$bin" 2>/dev/null)" || continue
+        [ -n "$candidate" ] || continue
+        candidate="$(readlink -f "$candidate" 2>/dev/null || echo "$candidate")"
+        dir="$(dirname "$candidate")"
+        while [ "$dir" != "/" ] && [ ! -f "$dir/package.json" ]; do
+            dir="$(dirname "$dir")"
+        done
+        if [ -f "$dir/package.json" ]; then
+            printf '%s\n' "$dir"
+            return 0
+        fi
+    done
+    for dir in "$(npm root -g 2>/dev/null)/@neevparikh/pirouette" \
+               "$HOME/.npm-global/lib/node_modules/@neevparikh/pirouette" \
+               "/usr/local/lib/node_modules/@neevparikh/pirouette"; do
+        if [ -f "$dir/package.json" ]; then
+            printf '%s\n' "$dir"
+            return 0
+        fi
+    done
+    return 1
+}
+
+snapshot_current_install() {
+    local dir
+    dir="$(installed_package_dir)" || dir=""
+    if [ -z "$dir" ]; then
+        log "WARN: no existing global install found; rollback disabled"
+        return 0
+    fi
+    local outdir tarball
+    outdir="$(mktemp -d "${TMPDIR:-/tmp}/pirouette-rollback.XXXXXX")" || return 0
+    # --ignore-scripts: we want a bit-for-bit snapshot of what is installed
+    # (dist/ is already built there), not a rebuild -- the global install
+    # has no devDependencies, so running `prepare` would fail.
+    tarball="$( cd "$dir" && npm pack --silent --ignore-scripts --pack-destination "$outdir" 2>/dev/null | tail -1 )"
+    if [ -n "$tarball" ] && [ -f "$outdir/$tarball" ]; then
+        BACKUP_TARBALL="$outdir/$tarball"
+        log "rollback snapshot: $BACKUP_TARBALL"
+    else
+        rm -rf "$outdir"
+        log "WARN: could not snapshot the current install; rollback disabled"
+    fi
+}
+
+# Poll the server's health endpoint. Returns 0 as soon as it answers.
+wait_for_health() {
+    local deadline=$(( SECONDS + HEALTH_TIMEOUT ))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        if curl -fsS --max-time 3 "http://127.0.0.1:${HEALTH_PORT}/api/health" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 2
+    done
+    return 1
+}
+
+rollback() {
+    [ -n "$BACKUP_TARBALL" ] || { log "ERROR: no rollback snapshot available; leaving the box on the new build"; return 1; }
+    log "ROLLING BACK to the previous build ($BACKUP_TARBALL)"
+    npm install -g "$BACKUP_TARBALL" 2>&1 | tail -20
+    [ "${PIPESTATUS[0]}" -eq 0 ] || { log "ERROR: rollback install failed"; return 1; }
+    sudo systemctl restart "$SERVICE_NAME" || { log "ERROR: rollback restart failed"; return 1; }
+    if wait_for_health; then
+        log "rollback complete; service healthy on the previous version ($(pirouette --version 2>/dev/null || echo unknown))"
+    else
+        log "ERROR: still unhealthy after rollback; check 'journalctl -u $SERVICE_NAME'"
+        return 1
+    fi
 }
 
 # --- install strategies ----------------------------------------------------
@@ -154,7 +263,11 @@ if [ "$SETTLE" -gt 0 ] 2>/dev/null; then
     sleep "$SETTLE"
 fi
 
-# 1. Install (source chosen above).
+# 1. Snapshot the current install so a bad build can be undone, then
+#    install (source chosen above).
+if [ "$HEALTH_TIMEOUT" -gt 0 ] 2>/dev/null; then
+    snapshot_current_install
+fi
 if [ -n "$GIT_URL" ]; then
     install_from_git
 else
@@ -174,14 +287,30 @@ else
     fail "systemctl restart $SERVICE_NAME failed"
 fi
 
-# 3. Best-effort health confirmation so the log tells the whole story.
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-    if systemctl is-active --quiet "$SERVICE_NAME"; then
-        log "service '$SERVICE_NAME' is active again (version $NEW_VERSION). done."
-        exit 0
-    fi
-    sleep 1
-done
+# 3. Health confirmation. Not cosmetic: if the new build can't serve
+#    /api/health, no agent got resumed, so we put the old one back rather
+#    than leaving every agent dead on a crash-looping service.
+if [ "$HEALTH_TIMEOUT" -le 0 ] 2>/dev/null; then
+    log "health check disabled (PIROUETTE_UPDATE_HEALTH_TIMEOUT=0); done."
+    exit 0
+fi
 
-log "WARN: service '$SERVICE_NAME' not active yet; check 'pru logs' / journalctl"
-exit 0
+if wait_for_health; then
+    log "service '$SERVICE_NAME' is healthy again (version $NEW_VERSION); agents resuming. done."
+    cleanup_backup
+    exit 0
+fi
+
+log "WARN: '$SERVICE_NAME' did not answer /api/health within ${HEALTH_TIMEOUT}s (version $NEW_VERSION)"
+if systemctl is-active --quiet "$SERVICE_NAME" && ! command -v curl >/dev/null 2>&1; then
+    # No curl on the box: we can't distinguish "slow" from "broken", and
+    # the unit is at least running. Don't roll back on a missing tool.
+    log "curl not available for health checks; unit is active, assuming OK"
+    cleanup_backup
+    exit 0
+fi
+
+rollback
+status=$?
+cleanup_backup
+exit "$status"

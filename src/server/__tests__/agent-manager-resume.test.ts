@@ -15,7 +15,7 @@
  * so we stub it and ensureResourceLoader(); shutdown()/stopAgent() are
  * exercised for real with a stubbed session handle.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -23,6 +23,7 @@ import path from "node:path";
 import { AgentManager, type AgentHandle } from "../agent-manager.js";
 import { ProjectManager } from "../project-manager.js";
 import { StateManager } from "../state.js";
+import { writeRestartNotice } from "../restart-notice.js";
 import { emptyUsage, type AgentConfig, type AgentState } from "../types.js";
 
 function makeAgent(id: string, state: AgentState): AgentConfig {
@@ -50,7 +51,7 @@ async function makeManager(agents: AgentConfig[]) {
   const projectManager = new ProjectManager(stateManager, dir);
   const manager = new AgentManager(stateManager, projectManager, dir);
   for (const agent of agents) stateManager.putAgent(agent);
-  return { manager, stateManager };
+  return { manager, stateManager, dir };
 }
 
 /** Stub resumeAgent + ensureResourceLoader (both far too heavy for unit
@@ -163,7 +164,7 @@ describe("AgentManager shutdown/restart cycle", () => {
     expect(stateManager.getAgent("b")?.interruptedTurn).toBe(false);
   });
 
-  it("resumeAll() auto-continues only the interrupted agents, and clears the flag", async () => {
+  it("resumeAll() auto-continues only the interrupted agents", async () => {
     const midTurn = makeAgent("mid", "shutdown");
     midTurn.interruptedTurn = true;
     const finished = makeAgent("done", "shutdown");
@@ -173,8 +174,10 @@ describe("AgentManager shutdown/restart cycle", () => {
     const continued = stubAutoContinue(manager);
     await manager.resumeAll();
     expect(continued).toEqual(["mid"]);
-    // Flag is cleared so a later boot doesn't re-nudge.
-    expect(stateManager.getAgent("mid")?.interruptedTurn).toBe(false);
+    // The flag deliberately survives resumeAll(): it is cleared only once
+    // the nudge has actually been delivered (see "post-restart nudges"),
+    // so a boot that dies mid-resume retries instead of dropping the work.
+    expect(stateManager.getAgent("mid")?.interruptedTurn).toBe(true);
   });
 
   it("resumeAll() auto-continues an agent left 'running' by a crash", async () => {
@@ -215,5 +218,242 @@ describe("AgentManager shutdown/restart cycle", () => {
     const resumed = stubResume(manager);
     await manager.resumeAll();
     expect(resumed).toEqual(["was-running"]);
+  });
+});
+
+/** A stand-in for a live pi session: records the prompts pirouette pushes
+ *  at it and can be told to reject the first N of them (the "provider is
+ *  still waking up right after a restart" case). */
+interface FakeSession {
+  messages: unknown[];
+  isStreaming: boolean;
+  prompts: string[];
+  failuresLeft: number;
+  prompt(message: string): Promise<void>;
+  abort(): Promise<void>;
+  dispose(): void;
+}
+
+function makeFakeSession(opts: { history?: number; failures?: number } = {}): FakeSession {
+  const session: FakeSession = {
+    messages: new Array(opts.history ?? 3).fill({}),
+    isStreaming: false,
+    prompts: [],
+    failuresLeft: opts.failures ?? 0,
+    async prompt(message: string) {
+      session.prompts.push(message);
+      if (session.failuresLeft > 0) {
+        session.failuresLeft -= 1;
+        throw new Error("model provider not ready");
+      }
+    },
+    async abort() {},
+    dispose() {},
+  };
+  return session;
+}
+
+/** Stub resumeAgent so it installs a fake handle (so the REAL
+ *  autoContinueAfterResume path runs), and return the sessions by id. */
+function stubResumeWithSessions(
+  manager: AgentManager,
+  sessions: Map<string, FakeSession>,
+): void {
+  const m = manager as unknown as {
+    ensureResourceLoader(): Promise<unknown>;
+    resumeAgent(id: string): Promise<void>;
+    handles: Map<string, AgentHandle>;
+    stateManager: StateManager;
+  };
+  m.ensureResourceLoader = async () => ({});
+  m.resumeAgent = async (id: string) => {
+    const config = m.stateManager.getAgent(id);
+    if (!config) throw new Error(`no agent ${id}`);
+    const session = sessions.get(id) ?? makeFakeSession();
+    sessions.set(id, session);
+    m.handles.set(id, {
+      config,
+      session,
+      unsubscribe: () => {},
+    } as unknown as AgentHandle);
+  };
+}
+
+describe("post-restart nudges", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("wakes the agent that ran `pru self-update`, even though its turn had ended", async () => {
+    // The initiating agent is NOT mid-turn: it printed "update kicked off"
+    // and finished long before the installer restarted the service.
+    const initiator = makeAgent("initiator", "shutdown");
+    initiator.interruptedTurn = false;
+    const bystander = makeAgent("bystander", "shutdown");
+    bystander.interruptedTurn = false;
+    const { manager, dir } = await makeManager([initiator, bystander]);
+    writeRestartNotice(dir, {
+      requestedAt: new Date().toISOString(),
+      sessionDir: initiator.sessionDir,
+      plan: "npm install pkg@latest",
+    });
+
+    const sessions = new Map<string, FakeSession>();
+    stubResumeWithSessions(manager, sessions);
+    await manager.resumeAll();
+    // Nudge delivery is fire-and-forget; let the microtasks drain.
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(sessions.get("initiator")?.prompts).toHaveLength(1);
+    expect(sessions.get("initiator")?.prompts[0]).toContain("self-update");
+    expect(sessions.get("initiator")?.prompts[0]).toContain("npm install pkg@latest");
+    expect(sessions.get("bystander")?.prompts).toEqual([]);
+  });
+
+  it("consumes the notice so a later restart doesn't re-nudge", async () => {
+    const initiator = makeAgent("initiator", "shutdown");
+    initiator.interruptedTurn = false;
+    const { manager, stateManager, dir } = await makeManager([initiator]);
+    writeRestartNotice(dir, {
+      requestedAt: new Date().toISOString(),
+      sessionDir: initiator.sessionDir,
+    });
+    const sessions = new Map<string, FakeSession>();
+    stubResumeWithSessions(manager, sessions);
+
+    await manager.resumeAll();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sessions.get("initiator")?.prompts).toHaveLength(1);
+
+    // Second boot: no notice on disk any more. (The agent is parked at
+    // waiting_input, as a real agent_end event would leave it.)
+    (manager as unknown as { handles: Map<string, AgentHandle> }).handles.clear();
+    stateManager.updateAgentState("initiator", { state: "waiting_input" });
+    await manager.resumeAll();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sessions.get("initiator")?.prompts).toHaveLength(1);
+  });
+
+  it("nudges an interrupted agent exactly once, not twice, when it also started the update", async () => {
+    const agent = makeAgent("both", "shutdown");
+    agent.interruptedTurn = true;
+    const { manager, dir } = await makeManager([agent]);
+    writeRestartNotice(dir, {
+      requestedAt: new Date().toISOString(),
+      sessionDir: agent.sessionDir,
+    });
+    const sessions = new Map<string, FakeSession>();
+    stubResumeWithSessions(manager, sessions);
+
+    await manager.resumeAll();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sessions.get("both")?.prompts).toHaveLength(1);
+  });
+
+  it("clears interruptedTurn only after the nudge is delivered", async () => {
+    const agent = makeAgent("mid", "shutdown");
+    agent.interruptedTurn = true;
+    const { manager, stateManager } = await makeManager([agent]);
+    const sessions = new Map<string, FakeSession>();
+    stubResumeWithSessions(manager, sessions);
+
+    await manager.resumeAll();
+    // resumeAll must NOT have cleared the flag optimistically...
+    await new Promise((r) => setTimeout(r, 0));
+    // ...but once the turn lands, it's cleared so the next boot is quiet.
+    expect(stateManager.getAgent("mid")?.interruptedTurn).toBe(false);
+    expect(sessions.get("mid")?.prompts).toHaveLength(1);
+  });
+
+  it("retries a nudge the provider rejects, and keeps the flag until it lands", async () => {
+    vi.useFakeTimers();
+    const agent = makeAgent("flaky", "shutdown");
+    agent.interruptedTurn = true;
+    const { manager, stateManager } = await makeManager([agent]);
+    const sessions = new Map<string, FakeSession>([
+      ["flaky", makeFakeSession({ failures: 1 })],
+    ]);
+    stubResumeWithSessions(manager, sessions);
+
+    await manager.resumeAll();
+    await vi.advanceTimersByTimeAsync(0);
+    // First attempt was rejected: still flagged, agent not abandoned.
+    expect(sessions.get("flaky")?.prompts).toHaveLength(1);
+    expect(stateManager.getAgent("flaky")?.interruptedTurn).toBe(true);
+
+    // The retry (after the backoff) succeeds.
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(sessions.get("flaky")?.prompts).toHaveLength(2);
+    expect(stateManager.getAgent("flaky")?.interruptedTurn).toBe(false);
+  });
+
+  it("leaves an agent usable (and re-nudgeable) if every attempt fails", async () => {
+    vi.useFakeTimers();
+    const agent = makeAgent("dead-provider", "shutdown");
+    agent.interruptedTurn = true;
+    const { manager, stateManager } = await makeManager([agent]);
+    const sessions = new Map<string, FakeSession>([
+      ["dead-provider", makeFakeSession({ failures: 99 })],
+    ]);
+    stubResumeWithSessions(manager, sessions);
+
+    await manager.resumeAll();
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    const cfg = stateManager.getAgent("dead-provider");
+    // Not wedged in "error": the user can still talk to it.
+    expect(cfg?.state).toBe("waiting_input");
+    expect(cfg?.errorMessage).toMatch(/auto-continue/);
+    // Flag survives so the NEXT boot tries again.
+    expect(cfg?.interruptedTurn).toBe(true);
+  });
+
+  it("does not nudge an agent whose session vanished (user stopped it)", async () => {
+    vi.useFakeTimers();
+    const agent = makeAgent("gone", "shutdown");
+    agent.interruptedTurn = true;
+    const { manager } = await makeManager([agent]);
+    const sessions = new Map<string, FakeSession>();
+    stubResumeWithSessions(manager, sessions);
+    const m = manager as unknown as { handles: Map<string, AgentHandle> };
+    // Resume installs a handle; drop it before the nudge is dispatched.
+    const original = (manager as unknown as { resumeAgent(id: string): Promise<void> }).resumeAgent;
+    (manager as unknown as { resumeAgent(id: string): Promise<void> }).resumeAgent = async (
+      id: string,
+    ) => {
+      await original.call(manager, id);
+      m.handles.delete(id);
+    };
+
+    await manager.resumeAll();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(sessions.get("gone")?.prompts).toEqual([]);
+  });
+
+  it("retries a failed resume in the background instead of parking the agent", async () => {
+    vi.useFakeTimers();
+    const agent = makeAgent("late", "shutdown");
+    agent.interruptedTurn = true;
+    const { manager, stateManager } = await makeManager([agent]);
+    const sessions = new Map<string, FakeSession>();
+    stubResumeWithSessions(manager, sessions);
+
+    // First resume attempt blows up (auth still refreshing), later ones work.
+    const m = manager as unknown as { resumeAgent(id: string): Promise<void> };
+    const working = m.resumeAgent.bind(manager);
+    let calls = 0;
+    m.resumeAgent = async (id: string) => {
+      calls += 1;
+      if (calls === 1) throw new Error("token refresh failed");
+      return working(id);
+    };
+
+    await manager.resumeAll();
+    expect(stateManager.getAgent("late")?.state).toBe("error");
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(calls).toBe(2);
+    expect(sessions.get("late")?.prompts).toHaveLength(1);
+    expect(stateManager.getAgent("late")?.errorMessage).toBeNull();
   });
 });
