@@ -5,6 +5,43 @@ follow [SemVer](https://semver.org).
 
 ---
 
+## Unreleased — self-update actually brings the agents back
+
+### Fixed
+
+- **`pru self-update` no longer strands agents.** The restart is intentionally
+  disruptive (it kills every in-flight bash command), but agents are now put
+  back to work instead of silently parking at `waiting_input`:
+  - The agent that *ran* the update is woken up. It was the one agent the
+    "was it mid-turn?" heuristic always missed — its turn ends while the
+    installer is still running, so it looks finished. `pru self-update` now
+    leaves a one-shot restart notice (naming its own pi session dir) that the
+    next server consumes and turns into a "the update landed, carry on" nudge.
+  - Post-restart nudges are retried (immediately, +10s, +45s) instead of being
+    a single best-effort `prompt()` that marked the agent `error` when the
+    provider stack was still waking up. `interruptedTurn` is now cleared only
+    once a turn is actually accepted, so an undelivered nudge is retried on the
+    next boot rather than lost.
+  - A resume that fails at boot is retried in the background (+15s, +60s,
+    +180s) instead of leaving the agent in `error`.
+  - `shutdown()` also treats pi's live `isStreaming` flag as "mid-turn", so an
+    agent whose state machine lagged still gets resumed.
+- **Self-update rolls back a build that won't start.** The worker snapshots the
+  installed package before upgrading, polls `/api/health` after the restart,
+  and reinstalls the snapshot if the new build never answers within
+  `PIROUETTE_UPDATE_HEALTH_TIMEOUT` (default 90s, `0` disables).
+- **State saves are serialized.** Two overlapping `save()` calls raced on the
+  shared `pirouette-state.json.tmp` path; the loser rejected with `ENOENT`, and
+  from the debounced background save that was an *unhandled rejection* — which
+  takes the whole server (and every agent) down.
+
+### Added
+
+- `PIROUETTE_SELF_UPDATE_RESUME_MESSAGE` and
+  `PIROUETTE_UPDATE_HEALTH_TIMEOUT` environment knobs.
+
+---
+
 ## 0.16.0 — single bring-your-own-host model; multi-host config
 
 ### Changed (breaking — config)

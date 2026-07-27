@@ -126,7 +126,29 @@ export class StateManager {
     this.state = { agents, projects: parsed.projects ?? {} };
   }
 
+  /** Serialize saves. Two overlapping `save()` calls used to race on the
+   *  shared `<file>.tmp` path: both write it, the first rename wins, the
+   *  second gets ENOENT. From the debounced timer that surfaced as an
+   *  *unhandled rejection*, which on modern Node takes the whole server
+   *  down (and with it every agent). Chaining is enough — writes are
+   *  cheap and always dump the latest in-memory state. */
+  private saveChain: Promise<void> = Promise.resolve();
+
   async save(): Promise<void> {
+    const next = this.saveChain.then(
+      () => this.writeStateFile(),
+      () => this.writeStateFile(),
+    );
+    // Keep the chain alive even if this write fails; the caller still sees
+    // the rejection via `next`.
+    this.saveChain = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
+
+  private async writeStateFile(): Promise<void> {
     await mkdir(this.stateDir, { recursive: true });
     // Atomic write: stream to a tmp file (same dir = same filesystem =
     // rename is atomic on POSIX), then rename into place. A reader sees
@@ -142,9 +164,14 @@ export class StateManager {
   private scheduleSave(): void {
     if (this.flushTimer) return;
     this.dirty = true;
-    this.flushTimer = setTimeout(async () => {
+    this.flushTimer = setTimeout(() => {
       this.flushTimer = undefined;
-      if (this.dirty) await this.save();
+      if (!this.dirty) return;
+      // Never let a background save reject into the void: an unhandled
+      // rejection here would kill the server process.
+      void this.save().catch((err) => {
+        console.error(`[state] background save failed: ${err}`);
+      });
     }, 1000);
   }
 

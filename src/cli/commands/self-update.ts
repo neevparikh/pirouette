@@ -24,8 +24,18 @@
  *
  *  After the restart, the new server's `resumeAll()` brings every agent
  *  that was running back (they were persisted as "shutdown" state on the
- *  old server's graceful exit), so the agent that kicked off the update
- *  simply resumes with its conversation intact.
+ *  old server's graceful exit) and re-kicks the ones whose turn the
+ *  restart cut short, so in-flight work continues instead of stalling.
+ *  The restart also kills every bash command the agents had running --
+ *  that is accepted and expected; the agents are told about it and pick
+ *  up from there.
+ *
+ *  This command additionally drops a "restart notice" (see
+ *  src/server/restart-notice.ts) naming the agent that invoked it, so the
+ *  new server can wake that agent too. Without it, the *initiating* agent
+ *  is the one agent that reliably does NOT auto-resume: its turn has
+ *  already ended by the time the installer restarts the service, so it
+ *  looks "finished" rather than "interrupted".
  *
  *  Two install sources:
  *    - npm (default): `npm install -g <spec>` from the registry. The
@@ -49,6 +59,11 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import {
+  agentSessionDirFromEnv,
+  writeRestartNotice,
+} from "../../server/restart-notice.js";
 
 export interface SelfUpdateOptions {
   /** Full npm spec to install, e.g. "@neevparikh/pirouette@1.2.3". A
@@ -291,6 +306,30 @@ export async function selfUpdate(opts: SelfUpdateOptions): Promise<void> {
     PIROUETTE_UPDATE_SETTLE: settle,
     ...(dataDir ? { PIROUETTE_DATA_DIR: dataDir } : {}),
   };
+
+  // Leave a note for the server that comes up after the restart.
+  //
+  // The agent running this command is almost never mid-turn when the
+  // restart finally lands (it says "update kicked off" and ends its turn
+  // while npm grinds away for 30+ seconds), so the generic
+  // "your turn was interrupted" resume path does not cover it -- the one
+  // agent guaranteed to care about the update is the one that would never
+  // wake back up. The note names this agent's session dir; the next boot
+  // consumes it and nudges exactly that agent.
+  if (dataDir) {
+    const sessionDir = agentSessionDirFromEnv(env);
+    const ok = writeRestartNotice(dataDir, {
+      requestedAt: new Date().toISOString(),
+      ...(sessionDir ? { sessionDir } : {}),
+      plan: describePlan(plan),
+      unit,
+    });
+    if (ok && sessionDir) {
+      console.log(
+        `[self-update] this agent will be resumed automatically after the restart`,
+      );
+    }
+  }
 
   // Foreground / debug path: run the worker right here. Note this will be
   // killed by the restart if invoked from inside an agent — it exists for

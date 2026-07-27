@@ -138,6 +138,27 @@ describe("StateManager.save — atomicity", () => {
     expect(files.includes("pirouette-state.json.tmp")).toBe(false);
   });
 
+  it("serializes concurrent saves instead of racing on the shared tmp file", async () => {
+    // Two overlapping saves used to both write `<file>.tmp`; the first
+    // rename won and the second blew up with ENOENT. From the debounced
+    // background save that was an unhandled rejection -> dead server ->
+    // every agent down. Saves are chained now.
+    const sm = new StateManager(stateDir);
+    await sm.load();
+    sm.putAgent(makeAgent("aaaaaaaa", "one"));
+    const first = sm.save();
+    sm.putAgent(makeAgent("bbbbbbbb", "two"));
+    const second = sm.save();
+    const third = sm.save();
+    await expect(Promise.all([first, second, third])).resolves.toBeDefined();
+
+    const parsed = JSON.parse(
+      readFileSync(path.join(stateDir, "pirouette-state.json"), "utf8"),
+    );
+    expect(Object.keys(parsed.agents).sort()).toEqual(["aaaaaaaa", "bbbbbbbb"]);
+    expect(readdirSync(stateDir).includes("pirouette-state.json.tmp")).toBe(false);
+  });
+
   it("survives a stale tmp file from a previous crashed save", async () => {
     // A previous save crashed AFTER writing to .tmp but BEFORE rename.
     // Next save should overwrite the tmp file successfully.
