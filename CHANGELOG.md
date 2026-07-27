@@ -26,6 +26,25 @@ follow [SemVer](https://semver.org).
 
 ### Fixed
 
+- **The fast-mode badge (`↯`) flickered off after almost every tool call.**
+  Fast-mode-capable providers emit a `pi:fast-mode` event on *every* request
+  they route, and pirouette stored the last one as a single global value — but
+  one provider instance serves every agent, so that value described whichever
+  model requested most recently rather than the agent you're looking at. The
+  usual culprit isn't even an agent: the `auto-mode` extension classifies each
+  mutating tool call with a `claude-sonnet-5` request, and Sonnet can't do fast
+  tier, so the provider correctly reports `intent: false` — blanking the badge
+  of an Opus agent that *was* running fast. In one production log that's 656
+  clobbering events against 606 legitimate Opus 5 ones; concurrent agents on
+  different models did the same thing to each other. Badge state is now tracked
+  per model (`src/server/fast-mode.ts`), the `fast_mode` WS envelope carries a
+  `{ global, byModel }` snapshot instead of a single `state`, and the dashboard
+  looks up the selected agent's live model. A model-less event — the `/fast
+  on|off` command, which really is provider-wide — still resets every per-model
+  reading, so toggling off doesn't leave a stale `↯` lit until the next turn.
+  Only the indicator was wrong: fast mode itself was being applied correctly
+  the whole time (every Opus 5 request in that log reported `actual: on`).
+
 - **`interruptedTurn` was deleted on every load, so auto-continue never fired
   in production.** `migrateAgent()` rebuilds each agent record field by field
   and the flag wasn't in the list — so the one piece of state whose entire job

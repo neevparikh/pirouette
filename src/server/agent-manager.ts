@@ -27,6 +27,7 @@ import { ProjectManager } from "./project-manager.js";
 import { StateManager } from "./state.js";
 import { normalizeEvent } from "./normalize.js";
 import { consumeRestartNotice, type RestartNotice } from "./restart-notice.js";
+import { FastModeTracker } from "./fast-mode.js";
 import {
   createPirouetteUIContext,
   type PendingUIRequest,
@@ -41,7 +42,7 @@ import {
   type ChatMessage,
   type DeleteAgentOptions,
   type ExtensionUIRequest,
-  type FastModeState,
+  type FastModeSnapshot,
   type NormalizedEvent,
   type WsEnvelope,
 } from "./types.js";
@@ -190,10 +191,11 @@ export class AgentManager {
    *  subscribe to provider-wide channels like pi-cas-provider's
    *  `pi:fast-mode` and relay them to the dashboard. */
   private eventBus: EventBusController | null = null;
-  /** Latest global fast-mode badge state (null until a fast-mode-capable
-   *  provider reports in). Mirrored to clients via the `fast_mode`
-   *  WS envelope and primed on connect via getFastMode(). */
-  private fastMode: FastModeState | null = null;
+  /** Fast-mode badge state, tracked per model (one shared provider serves
+   *  every agent, so a single value would be repainted by whichever model
+   *  requested last). Mirrored to clients via the `fast_mode` WS envelope and
+   *  primed on connect via getFastModeSnapshot(). */
+  private readonly fastMode = new FastModeTracker();
 
   constructor(
     private readonly stateManager: StateManager,
@@ -619,34 +621,29 @@ export class AgentManager {
     }
   }
 
-  /** Current global fast-mode badge state, or null if no fast-mode-capable
-   *  provider has reported in. Used to prime newly-connected WS clients. */
-  getFastMode(): FastModeState | null {
-    return this.fastMode;
+  /** Current fast-mode badge state per model. Used to prime newly-connected
+   *  WS clients; empty if no fast-mode-capable provider has reported in. */
+  getFastModeSnapshot(): FastModeSnapshot {
+    return this.fastMode.snapshot();
   }
 
   /** Handle a `pi:fast-mode` event from the shared extension bus
-   *  (pi-cas-provider). Normalizes the payload, stores it as the global
-   *  badge state, and broadcasts it to all dashboard clients. Defensive
-   *  about the payload shape since it crosses an extension boundary that
-   *  pirouette doesn't control. */
+   *  (pi-cas-provider / pi-hawk-provider). Folds it into the per-model
+   *  tracker and broadcasts the new snapshot to all dashboard clients.
+   *
+   *  Every request a fast-mode-capable provider routes emits one of these,
+   *  including the ones agents don't make themselves — notably the auto-mode
+   *  extension's per-tool-call classifier, which runs on a model that can't do
+   *  fast tier. Keying by model is what stops those from clearing the badge
+   *  of an agent that *is* running fast. */
   private handleFastModeEvent(data: unknown): void {
-    if (!data || typeof data !== "object") return;
-    const d = data as { intent?: unknown; actual?: unknown; model?: unknown };
-    const actual =
-      d.actual === "on" || d.actual === "off" || d.actual === "cooldown"
-        ? d.actual
-        : undefined;
-    const next: FastModeState = {
-      intent: Boolean(d.intent),
-      ...(actual ? { actual } : {}),
-      ...(typeof d.model === "string" ? { model: d.model } : {}),
-    };
-    this.fastMode = next;
+    const applied = this.fastMode.apply(data);
+    if (!applied) return;
+    const { state, snapshot } = applied;
     console.log(
-      `[agent-manager] fast-mode update: intent=${next.intent} actual=${next.actual ?? "?"} model=${next.model ?? "?"}`,
+      `[agent-manager] fast-mode update: intent=${state.intent} actual=${state.actual ?? "?"} model=${state.model ?? "(toggle)"}`,
     );
-    this.broadcastWs({ kind: "fast_mode", state: next });
+    this.broadcastWs({ kind: "fast_mode", snapshot });
   }
 
   /** Live stats pulled from the pi session, matching the data pi's TUI

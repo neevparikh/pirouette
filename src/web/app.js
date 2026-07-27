@@ -10,6 +10,7 @@
 import {
   describeToolCall,
   escHtml,
+  pickFastModeState,
   relTime,
   shortenPath,
 } from "./render.js";
@@ -49,12 +50,16 @@ const statsByAgent = {};
  *  across reloads via localStorage `pirouette-raw-view`. */
 let rawView = localStorage.getItem("pirouette-raw-view") === "1";
 
-/** Latest global fast-mode badge state from the server's `fast_mode` WS
- *  envelope (mirrored from pi-cas-provider's `pi:fast-mode` channel), or
- *  null if no fast-mode-capable provider has reported in. Provider-wide,
- *  so it's a single global value rather than per-agent.
- *  @type {{intent: boolean, actual?: "on"|"off"|"cooldown", model?: string} | null} */
-let fastModeState = null;
+/** Latest fast-mode badge snapshot from the server's `fast_mode` WS envelope
+ *  (mirrored from a provider's `pi:fast-mode` channel).
+ *
+ *  Keyed by model rather than a single global value: one provider instance
+ *  serves every agent, so the badge has to be looked up for the selected
+ *  agent's model or it just shows whichever model made the most recent
+ *  request — a concurrent agent, or auto-mode's per-tool-call classifier.
+ *  @type {{global: FastModeState | null, byModel: Record<string, FastModeState>}}
+ *  @typedef {{intent: boolean, actual?: "on"|"off"|"cooldown", model?: string}} FastModeState */
+let fastModeSnapshot = { global: null, byModel: {} };
 
 /** How to deliver the next message when the agent is currently streaming.
  *  "steer" = interrupt (pi's TUI default). "followUp" = queue for after
@@ -184,8 +189,20 @@ const vim = new VimMode($input, {
     !$mentionPopup.classList.contains("hidden") || !$slashPopup.classList.contains("hidden"),
 });
 
-/** Paint the fast-mode badge (↯) from `fastModeState`, mirroring pi-vim's
- *  glyph + color logic so both surfaces agree on intent vs. ground truth:
+/** Model the fast-mode badge should describe: the selected agent's live
+ *  model (so a mid-session `/model` switch is reflected) falling back to its
+ *  configured one. Null when no agent is selected — the badge then shows the
+ *  provider-wide toggle state. */
+function selectedFastModeModel() {
+  const agent = selectedAgentId ? agents.find((a) => a.id === selectedAgentId) : null;
+  if (!agent) return null;
+  const stats = statsByAgent[agent.id];
+  return stats?.model?.id || agent.model || null;
+}
+
+/** Paint the fast-mode badge (↯) for the *selected agent's model*, mirroring
+ *  pi-vim's glyph + color logic so both surfaces agree on intent vs. ground
+ *  truth:
  *
  *    intent off                  → no glyph (hidden)
  *    intent on, actual "on"       → warning (engaged — premium pricing active)
@@ -193,10 +210,11 @@ const vim = new VimMode($input, {
  *    intent on, actual "cooldown" → error   (extra-usage pool depleted)
  *    intent on, actual unknown    → muted   (requested, no turn yet)
  *
- *  Global (provider-wide), so it's independent of the selected agent. */
+ *  Called on every header render as well as on `fast_mode` envelopes, since
+ *  switching chats can change the answer without any new event arriving. */
 function renderFastModeBadge() {
   if (!$fastModeBadge) return;
-  const st = fastModeState;
+  const st = pickFastModeState(fastModeSnapshot, selectedFastModeModel());
   if (!st || !st.intent) {
     $fastModeBadge.classList.add("hidden");
     $fastModeBadge.textContent = "";
@@ -224,7 +242,10 @@ function renderFastModeBadge() {
   }
   $fastModeBadge.className = `text-[10px] font-mono ${color}`;
   $fastModeBadge.textContent = "\u21af";
-  $fastModeBadge.title = st.model ? `${title} (${st.model})` : title;
+  // Prefer the model the reading is about; fall back to the agent's model so
+  // a toggle-level reading still says which model it's being read for.
+  const forModel = st.model || selectedFastModeModel();
+  $fastModeBadge.title = forModel ? `${title} (${forModel})` : title;
 }
 
 function applyVimToggleStyle() {
@@ -1223,9 +1244,9 @@ function handleWsMessage(envelope) {
       break;
 
     case "fast_mode":
-      // Global fast-mode badge state (pi-cas-provider's `pi:fast-mode`).
-      // `state` may be null (no fast-mode provider has reported in).
-      fastModeState = envelope.state;
+      // Fast-mode badge state per model (a provider's `pi:fast-mode`
+      // channel). Empty until a fast-mode-capable provider reports in.
+      fastModeSnapshot = envelope.snapshot ?? { global: null, byModel: {} };
       renderFastModeBadge();
       break;
 
@@ -1792,6 +1813,9 @@ function statsColorClass(pct) {
 
 function renderAgentHeader() {
   const agent = agents.find((a) => a.id === selectedAgentId);
+  // The badge is per-model, so it follows the selected agent (and its live
+  // model) rather than only changing when a `fast_mode` envelope arrives.
+  renderFastModeBadge();
   // v0.13.8: agent name + status hidden in the header. $agentName /
   // $agentStatus DOM nodes still exist (display: hidden) so existing
   // code that touches their textContent stays a no-op rather than a

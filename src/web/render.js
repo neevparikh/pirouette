@@ -446,3 +446,42 @@ export function relTime(ms, now) {
   if (h < 24) return `${h}h ago`;
   return `${Math.floor(h / 24)}d ago`;
 }
+
+// --- fast-mode badge ---
+
+/** Bare model id: provider prefix stripped, lowercased.
+ *
+ *  Fast-mode providers report their own local id (`claude-opus-5`) while
+ *  agent configs and pi's live stats are provider-qualified
+ *  (`hawk/claude-opus-5`), so both sides get folded to the same key. Must
+ *  stay in lockstep with `normalizeFastModeModelId` in
+ *  src/server/fast-mode.ts, which is what keys the snapshot we're reading.
+ *  Returns null for anything unusable. */
+export function normalizeModelId(model) {
+  if (typeof model !== "string") return null;
+  const bare = model.trim().split("/").pop();
+  if (!bare) return null;
+  return bare.toLowerCase() || null;
+}
+
+/** Pick the fast-mode state that applies to `model` out of the server's
+ *  snapshot.
+ *
+ *  Per-model readings win; the provider-wide toggle (`global`) is the
+ *  fallback for a model that hasn't run a turn yet, so `/fast on` lights the
+ *  "requested, awaiting next turn" badge immediately. Returns null when
+ *  nothing applies (badge hidden).
+ *
+ *  This lookup is the whole point of the per-model split: without it the
+ *  badge shows whichever model the shared provider served last, which in a
+ *  multi-agent server (or with auto-mode's per-tool-call classifier running
+ *  on a non-fast model) is usually not the agent you're looking at. */
+export function pickFastModeState(snapshot, model) {
+  if (!snapshot || typeof snapshot !== "object") return null;
+  const key = normalizeModelId(model);
+  const byModel = snapshot.byModel;
+  if (key && byModel && Object.prototype.hasOwnProperty.call(byModel, key)) {
+    return byModel[key] ?? null;
+  }
+  return snapshot.global ?? null;
+}

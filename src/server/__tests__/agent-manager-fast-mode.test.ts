@@ -1,18 +1,21 @@
 /**
- * Tests for the global fast-mode badge bridge.
+ * Tests for the fast-mode badge bridge.
  *
- * pi-cas-provider broadcasts a `pi:fast-mode` event on the shared extension
- * event bus (`pi.events`) whenever fast-mode intent/actual changes. The
- * AgentManager subscribes to that bus, normalizes the payload into a
- * `FastModeState`, stores it as global state (one shared provider across all
- * agents), and re-broadcasts it to dashboard clients via a `fast_mode`
- * WS envelope. New clients are primed via `getFastMode()`.
+ * A fast-mode-capable provider (pi-cas-provider, pi-hawk-provider) broadcasts
+ * a `pi:fast-mode` event on the shared extension event bus (`pi.events`) for
+ * every request it routes. The AgentManager subscribes to that bus, folds the
+ * payload into a per-model `FastModeTracker`, and re-broadcasts the resulting
+ * snapshot to dashboard clients via a `fast_mode` WS envelope. New clients are
+ * primed via `getFastModeSnapshot()`.
  *
- * The bus wiring itself (createEventBus + DefaultResourceLoader) only runs
- * inside ensureResourceLoader(), which loads real extensions — too heavy for
- * a unit test. Here we exercise the normalization + broadcast + getter
- * contract directly via the private handler, which is the part most likely
- * to regress.
+ * Normalization itself is covered in fast-mode.test.ts; what's checked here is
+ * the manager's contract: fold, broadcast, prime — and that one model's
+ * request can't blank another model's badge, which is the bug that made the
+ * badge flicker off after every tool call.
+ *
+ * The bus wiring (createEventBus + DefaultResourceLoader) only runs inside
+ * ensureResourceLoader(), which loads real extensions — too heavy for a unit
+ * test. Here we call the private handler the bus would call.
  */
 import { describe, expect, it } from "vitest";
 import { mkdtemp } from "node:fs/promises";
@@ -37,52 +40,67 @@ function emitFastMode(manager: AgentManager, data: unknown): void {
   (manager as unknown as { handleFastModeEvent(d: unknown): void }).handleFastModeEvent(data);
 }
 
+function fastModeEnvelopes(sent: WsEnvelope[]) {
+  return sent.filter((e) => e.kind === "fast_mode");
+}
+
 describe("AgentManager fast-mode badge", () => {
-  it("starts with no fast-mode state", async () => {
+  it("starts with an empty snapshot", async () => {
     const manager = await makeManager();
-    expect(manager.getFastMode()).toBeNull();
+    expect(manager.getFastModeSnapshot()).toEqual({ global: null, byModel: {} });
   });
 
-  it("normalizes a payload, stores it, and broadcasts a fast_mode envelope", async () => {
+  it("stores a per-model reading and broadcasts a fast_mode envelope", async () => {
     const manager = await makeManager();
     const sent: WsEnvelope[] = [];
     manager.onWsBroadcast((e) => sent.push(e));
 
-    emitFastMode(manager, { intent: true, actual: "on", model: "claude-opus-4-7" });
+    emitFastMode(manager, { intent: true, actual: "on", model: "claude-opus-5" });
 
-    const expected = { intent: true, actual: "on", model: "claude-opus-4-7" };
-    expect(manager.getFastMode()).toEqual(expected);
-    const fm = sent.filter((e) => e.kind === "fast_mode");
+    const expected = {
+      global: null,
+      byModel: { "claude-opus-5": { intent: true, actual: "on", model: "claude-opus-5" } },
+    };
+    expect(manager.getFastModeSnapshot()).toEqual(expected);
+    const fm = fastModeEnvelopes(sent);
     expect(fm).toHaveLength(1);
-    expect(fm[0]).toEqual({ kind: "fast_mode", state: expected });
+    expect(fm[0]).toEqual({ kind: "fast_mode", snapshot: expected });
   });
 
-  it("drops an unknown `actual` value and coerces intent to a boolean", async () => {
+  it("keeps an Opus badge lit when auto-mode's Sonnet classifier reports in", async () => {
     const manager = await makeManager();
-    emitFastMode(manager, { intent: 1, actual: "bogus", model: 42 });
-    // actual "bogus" is rejected; non-string model dropped; intent → true.
-    expect(manager.getFastMode()).toEqual({ intent: true });
+    emitFastMode(manager, { intent: true, actual: "on", model: "claude-opus-5" });
+    // Fires on every mutating tool call of every agent, on a model that can't
+    // do fast tier. Must not touch the Opus entry.
+    emitFastMode(manager, { intent: false, model: "claude-sonnet-5" });
+
+    const { byModel } = manager.getFastModeSnapshot();
+    expect(byModel["claude-opus-5"]).toEqual({
+      intent: true,
+      actual: "on",
+      model: "claude-opus-5",
+    });
+    expect(byModel["claude-sonnet-5"]).toEqual({ intent: false, model: "claude-sonnet-5" });
   });
 
-  it("accepts each valid `actual` state", async () => {
+  it("lets a model-less toggle event reset every per-model reading", async () => {
     const manager = await makeManager();
-    for (const actual of ["on", "off", "cooldown"] as const) {
-      emitFastMode(manager, { intent: true, actual });
-      expect(manager.getFastMode()).toEqual({ intent: true, actual });
-    }
-  });
-
-  it("represents intent-off (badge hidden) without an actual", async () => {
-    const manager = await makeManager();
+    emitFastMode(manager, { intent: true, actual: "on", model: "claude-opus-5" });
     emitFastMode(manager, { intent: false });
-    expect(manager.getFastMode()).toEqual({ intent: false });
+
+    expect(manager.getFastModeSnapshot()).toEqual({ global: { intent: false }, byModel: {} });
   });
 
-  it("ignores non-object payloads", async () => {
+  it("ignores non-object payloads without broadcasting", async () => {
     const manager = await makeManager();
+    const sent: WsEnvelope[] = [];
+    manager.onWsBroadcast((e) => sent.push(e));
+
     emitFastMode(manager, "nope");
     emitFastMode(manager, null);
     emitFastMode(manager, undefined);
-    expect(manager.getFastMode()).toBeNull();
+
+    expect(manager.getFastModeSnapshot()).toEqual({ global: null, byModel: {} });
+    expect(fastModeEnvelopes(sent)).toHaveLength(0);
   });
 });

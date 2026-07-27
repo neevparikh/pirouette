@@ -8,7 +8,9 @@ import {
   enhanceImagePaths,
   escHtml,
   looksLikeImagePathRef,
+  normalizeModelId,
   parseToolArgs,
+  pickFastModeState,
   relTime,
   renderDiff,
   renderMarkdown,
@@ -356,5 +358,53 @@ describe("enhanceImagePaths", () => {
     const html = "<code>my-file.png</code>";
     const { thumbnails } = enhanceImagePaths(html, "agent-1");
     expect(thumbnails).toContain('href="/api/agents/agent-1/file?path=my-file.png"');
+  });
+});
+
+describe("normalizeModelId", () => {
+  it("strips the provider prefix and lowercases", () => {
+    expect(normalizeModelId("hawk/claude-opus-5")).toBe("claude-opus-5");
+    expect(normalizeModelId("Claude-Opus-5")).toBe("claude-opus-5");
+    expect(normalizeModelId(" hawk/Claude-Opus-5 ")).toBe("claude-opus-5");
+  });
+  it("returns null for unusable ids", () => {
+    for (const bad of [null, undefined, 42, "", "   ", "hawk/"]) {
+      expect(normalizeModelId(bad)).toBeNull();
+    }
+  });
+});
+
+describe("pickFastModeState", () => {
+  const opus = { intent: true, actual: "on", model: "claude-opus-5" };
+  const sonnet = { intent: false, model: "claude-sonnet-5" };
+  const snapshot = {
+    global: { intent: true },
+    byModel: { "claude-opus-5": opus, "claude-sonnet-5": sonnet },
+  };
+
+  it("resolves a provider-qualified model to its per-model reading", () => {
+    expect(pickFastModeState(snapshot, "hawk/claude-opus-5")).toEqual(opus);
+    expect(pickFastModeState(snapshot, "claude-opus-5")).toEqual(opus);
+  });
+
+  it("is unaffected by other models' readings", () => {
+    // The badge for an Opus agent must not follow the Sonnet classifier that
+    // auto-mode fires on every tool call.
+    expect(pickFastModeState(snapshot, "hawk/claude-opus-5").actual).toBe("on");
+    expect(pickFastModeState(snapshot, "hawk/claude-sonnet-5").intent).toBe(false);
+  });
+
+  it("falls back to the provider-wide toggle for an unseen model", () => {
+    expect(pickFastModeState(snapshot, "hawk/claude-haiku-5")).toEqual({ intent: true });
+  });
+
+  it("falls back to the toggle when no model is given (no agent selected)", () => {
+    expect(pickFastModeState(snapshot, null)).toEqual({ intent: true });
+  });
+
+  it("returns null when nothing applies", () => {
+    expect(pickFastModeState({ global: null, byModel: {} }, "claude-opus-5")).toBeNull();
+    expect(pickFastModeState(null, "claude-opus-5")).toBeNull();
+    expect(pickFastModeState(undefined, null)).toBeNull();
   });
 });
