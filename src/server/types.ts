@@ -114,20 +114,37 @@ export interface ProjectConfig {
 /** Name of the auto-created project used when the user doesn't specify one. */
 export const DEFAULT_PROJECT_NAME = "scratchpad";
 
-/** Global fast-mode badge state, mirrored from pi-cas-provider's
- *  `pi:fast-mode` event bus channel (see pi-cas-provider/src/badge.ts).
- *  Fast mode is a provider-wide setting in pirouette (one shared
- *  ResourceLoader / provider instance across all agents), so this is a
- *  single global state rather than per-agent.
+/** One fast-mode badge reading, mirrored from a provider's `pi:fast-mode`
+ *  event bus channel (pi-cas-provider/src/badge.ts, pi-hawk-provider).
  *
- *    - `intent`  : what the provider will request on the next turn.
- *    - `actual`  : what the API actually engaged on the most recent turn.
- *    - `model`   : model id from the most recent completed turn.
+ *    - `intent`  : whether fast tier is being requested (for `model`, when
+ *                  present; otherwise the provider-wide toggle itself).
+ *    - `actual`  : what the API actually engaged on that turn.
+ *    - `model`   : model the reading is about. Absent on toggle-level events
+ *                  emitted by the `/fast on|off` command.
  */
 export interface FastModeState {
   intent: boolean;
   actual?: "on" | "off" | "cooldown";
   model?: string;
+}
+
+/** Fast-mode badge state for the whole server, split by model.
+ *
+ *  The fast-mode *toggle* is provider-wide (one shared ResourceLoader /
+ *  provider instance across all agents) but whether it takes effect is
+ *  per-model, and providers emit an event on every request they route. A
+ *  single last-write-wins value therefore ends up describing whichever model
+ *  ran last — usually not the agent you're looking at. See
+ *  `src/server/fast-mode.ts`. */
+export interface FastModeSnapshot {
+  /** Latest toggle-level reading (an event with no model). Null until a
+   *  fast-mode-capable provider reports in. Used as the fallback for models
+   *  that haven't run a turn yet. */
+  global: FastModeState | null;
+  /** Latest per-request reading per model, keyed by bare model id (provider
+   *  prefix stripped, lowercased — see `normalizeFastModeModelId`). */
+  byModel: Record<string, FastModeState>;
 }
 
 /** Envelope sent over WebSocket to clients (server → client). */
@@ -171,11 +188,11 @@ export type WsEnvelope =
       statusKey: string;
       statusText: string | null;
     }
-  /** Global fast-mode badge state (pi-cas-provider's `pi:fast-mode`
-   *  channel). Broadcast whenever it changes, and primed on connect.
-   *  `state === null` means no fast-mode-capable provider has reported in
-   *  yet (badge stays hidden). */
-  | { kind: "fast_mode"; state: FastModeState | null };
+  /** Fast-mode badge state (a provider's `pi:fast-mode` channel), keyed by
+   *  model so each agent's badge is independent. Broadcast whenever it
+   *  changes, and primed on connect. An empty snapshot means no
+   *  fast-mode-capable provider has reported in yet (badge stays hidden). */
+  | { kind: "fast_mode"; snapshot: FastModeSnapshot };
 
 /** Envelope sent over WebSocket from a client to the server. Kept separate
  *  from WsEnvelope so the server can validate the smaller, narrower union

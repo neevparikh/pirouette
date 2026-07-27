@@ -997,10 +997,13 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
       projects: projectManager.getAllProjects(),
     } satisfies WsEnvelope);
 
-    // Prime the global fast-mode badge so a freshly-loaded / reconnected
-    // client shows the ⚡ state immediately instead of waiting for the next
-    // turn to re-broadcast it.
-    safeSend({ kind: "fast_mode", state: agentManager.getFastMode() } satisfies WsEnvelope);
+    // Prime the fast-mode badge so a freshly-loaded / reconnected client
+    // shows the ⚡ state immediately instead of waiting for the next turn to
+    // re-broadcast it.
+    safeSend({
+      kind: "fast_mode",
+      snapshot: agentManager.getFastModeSnapshot(),
+    } satisfies WsEnvelope);
 
     // Replay any pending extension UI requests to the joining client so
     // a refresh — or the case where the user has 0 browsers open at the
