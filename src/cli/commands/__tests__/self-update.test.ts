@@ -6,10 +6,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  compareVersions,
+  isExactVersion,
+  judgeVersionChange,
   packageName,
   parseGitSpec,
   resolveInstallPlan,
   resolvePackageSpec,
+  specVersion,
 } from "../self-update.js";
 
 describe("packageName", () => {
@@ -194,5 +198,141 @@ describe("resolveInstallPlan", () => {
     expect(
       resolveInstallPlan({ package: "@acme/fork@2.0.0" }, {}, noSentinel, gitUrl),
     ).toEqual({ mode: "npm", spec: "@acme/fork@2.0.0" });
+  });
+});
+
+describe("specVersion / isExactVersion", () => {
+  it("pulls the version or dist-tag out of a spec", () => {
+    expect(specVersion("@scope/pkg@1.2.3")).toBe("1.2.3");
+    expect(specVersion("pkg@latest")).toBe("latest");
+    expect(specVersion("@scope/pkg")).toBeUndefined();
+    expect(specVersion("pkg")).toBeUndefined();
+  });
+
+  it("tells a pinned version apart from a dist-tag", () => {
+    expect(isExactVersion("1.2.3")).toBe(true);
+    expect(isExactVersion("1.2.3-rc.1")).toBe(true);
+    expect(isExactVersion("latest")).toBe(false);
+    expect(isExactVersion("next")).toBe(false);
+    expect(isExactVersion(undefined)).toBe(false);
+  });
+});
+
+describe("compareVersions", () => {
+  it("orders released versions numerically, not lexically", () => {
+    expect(compareVersions("0.16.1", "0.14.2")).toBe(1);
+    expect(compareVersions("0.14.2", "0.16.1")).toBe(-1);
+    expect(compareVersions("0.16.1", "0.16.1")).toBe(0);
+    // The lexical trap: "0.9.0" > "0.10.0" as strings.
+    expect(compareVersions("0.10.0", "0.9.0")).toBe(1);
+    expect(compareVersions("1.0.0", "0.99.99")).toBe(1);
+  });
+
+  it("sorts a prerelease below its release", () => {
+    expect(compareVersions("1.0.0-rc.1", "1.0.0")).toBe(-1);
+    expect(compareVersions("1.0.0", "1.0.0-rc.1")).toBe(1);
+    expect(compareVersions("1.0.0-rc.2", "1.0.0-rc.1")).toBe(1);
+    expect(compareVersions("1.0.0-alpha", "1.0.0-beta")).toBe(-1);
+    // Numeric identifiers sort below alphanumeric ones (semver rule 11).
+    expect(compareVersions("1.0.0-1", "1.0.0-alpha")).toBe(-1);
+  });
+
+  it("tolerates v-prefixes, build metadata and short versions", () => {
+    expect(compareVersions("v1.2.3", "1.2.3")).toBe(0);
+    expect(compareVersions("1.2.3+build9", "1.2.3+build1")).toBe(0);
+    expect(compareVersions("1.2", "1.2.0")).toBe(0);
+    expect(compareVersions("2", "1.9.9")).toBe(1);
+  });
+});
+
+describe("judgeVersionChange", () => {
+  const base = { pinned: false, force: false, spec: "@neevparikh/pirouette@latest" };
+
+  it("proceeds when the target is newer", () => {
+    expect(
+      judgeVersionChange({ ...base, installed: "0.16.1", target: "0.17.0" }).action,
+    ).toBe("proceed");
+  });
+
+  it("refuses the real-world downgrade that motivated this", () => {
+    // npm `latest` was 0.14.2 while the host ran 0.16.1 (installed from
+    // git). A bare `pru self-update` would have rolled the fleet back.
+    const verdict = judgeVersionChange({ ...base, installed: "0.16.1", target: "0.14.2" });
+    expect(verdict.action).toBe("refuse");
+    if (verdict.action !== "refuse") throw new Error("unreachable");
+    expect(verdict.message).toContain("0.14.2");
+    expect(verdict.message).toContain("0.16.1");
+    // The message has to point at the way forward, not just say no.
+    expect(verdict.message).toContain("--from-git");
+    expect(verdict.message).toContain("--force");
+  });
+
+  it("does nothing (and does NOT restart) when already on the target", () => {
+    const verdict = judgeVersionChange({ ...base, installed: "0.16.1", target: "0.16.1" });
+    expect(verdict.action).toBe("up-to-date");
+    if (verdict.action !== "up-to-date") throw new Error("unreachable");
+    expect(verdict.message).toContain("no restart");
+  });
+
+  it("refuses a PINNED downgrade too — this is the exact command that caused the outage", () => {
+    // `pirouette self-update --package @neevparikh/pirouette@0.14.2` against
+    // a host running 0.16.1. An earlier draft classified a pinned exact
+    // version as "explicit intent" and waved it through; it rolled the fleet
+    // back across a state-schema boundary and destroyed 64 archived flags.
+    // Naming a version is not consent to move a live fleet backwards.
+    const verdict = judgeVersionChange({
+      ...base,
+      installed: "0.16.1",
+      target: "0.14.2",
+      pinned: true,
+      spec: "@neevparikh/pirouette@0.14.2",
+    });
+    expect(verdict.action).toBe("refuse");
+    if (verdict.action !== "refuse") throw new Error("unreachable");
+    // --force is the only escape hatch on offer; the message must not
+    // advertise "just pin the old version" as a supported route, since that
+    // is the shape of the command that did the damage.
+    expect(verdict.message).toContain("--force");
+    expect(verdict.message).not.toMatch(/--target <?older/);
+  });
+
+  it("allows a pinned reinstall of the SAME version (repair)", () => {
+    expect(
+      judgeVersionChange({
+        ...base,
+        installed: "0.16.1",
+        target: "0.16.1",
+        pinned: true,
+        spec: "@neevparikh/pirouette@0.16.1",
+      }).action,
+    ).toBe("proceed");
+  });
+
+  it("still allows a pinned UPGRADE", () => {
+    expect(
+      judgeVersionChange({
+        ...base,
+        installed: "0.16.1",
+        target: "0.17.0",
+        pinned: true,
+        spec: "@neevparikh/pirouette@0.17.0",
+      }).action,
+    ).toBe("proceed");
+  });
+
+  it("--force overrides everything", () => {
+    expect(
+      judgeVersionChange({ ...base, installed: "0.16.1", target: "0.14.2", force: true }).action,
+    ).toBe("proceed");
+    expect(
+      judgeVersionChange({ ...base, installed: "0.16.1", target: "0.16.1", force: true }).action,
+    ).toBe("proceed");
+  });
+
+  it("stands down when it can't tell (registry lookup failed, unknown install)", () => {
+    // A flaky `npm view` must never be able to block an update.
+    expect(judgeVersionChange({ ...base, installed: "0.16.1" }).action).toBe("proceed");
+    expect(judgeVersionChange({ ...base, target: "0.17.0" }).action).toBe("proceed");
+    expect(judgeVersionChange({ ...base }).action).toBe("proceed");
   });
 });

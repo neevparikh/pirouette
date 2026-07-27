@@ -214,6 +214,10 @@ program
   .option("--unit <name>", "Transient systemd unit name for the worker (default: pirouette-self-update)")
   .option("--settle <seconds>", "Seconds the worker waits before starting (default: 2)")
   .option("--foreground", "Run the updater in this process (debug only; the restart will kill it)")
+  .option(
+    "--force",
+    "Install even if the resolved version is the same as, or older than, what's running",
+  )
   .action(selfUpdate);
 
 program

@@ -278,6 +278,21 @@ pru self-update --ref <sha>             # build a specific commit
 pru self-update --package github:owner/repo#branch
 ```
 
+**It won't move you backwards.** In npm mode the target version is resolved
+before anything is installed, and an update that would *downgrade* the host is
+refused — `--force` is the only way through, pinning an exact version is not
+enough. This is not hypothetical: `--package @neevparikh/pirouette@0.14.2` on a
+box running 0.16.1 rolled a live fleet back across a state-schema boundary and
+silently destroyed 64 `archived` flags, because an older build drops record
+fields it doesn't know about. If the published release is behind the code on
+your host (normal when it was installed from git), use `--from-git`. A target
+that resolves to the version you're already on is a no-op — it prints and
+exits rather than restarting every agent for nothing.
+
+Every update also snapshots the agent state file to
+`state/pirouette-state.json.pre-update-<version>-<ts>` before installing,
+keeping the last 10 (`PIROUETTE_UPDATE_STATE_BACKUPS`, `0` disables).
+
 Because the worker lives in a separate cgroup, the service restart doesn't kill
 it. The old server exits gracefully (persisting every running agent as
 `shutdown` state), and the new server's `resumeAll()` brings those agents back
@@ -360,6 +375,7 @@ The details that make this hold up in practice:
 | `PIROUETTE_RESUME_CONTINUE_MESSAGE` | see above | Nudge sent to an agent whose turn a restart cut short |
 | `PIROUETTE_SELF_UPDATE_RESUME_MESSAGE` | see above | Nudge sent to the agent that ran `pru self-update` |
 | `PIROUETTE_UPDATE_HEALTH_TIMEOUT` | `90` | Seconds to wait for `/api/health` after a self-update before rolling back (`0` disables) |
+| `PIROUETTE_UPDATE_STATE_BACKUPS` | `10` | Pre-update state-file snapshots to keep (`0` disables) |
 
 ## Authenticating tools inside the host
 
