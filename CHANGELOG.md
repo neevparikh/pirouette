@@ -9,6 +9,30 @@ follow [SemVer](https://semver.org).
 
 ### Added
 
+- **<kbd>Esc</kbd> interrupts the current turn**, the way it does in pi's TUI.
+  Until now the only way to stop a runaway agent from the dashboard was
+  `stop`, which disposes the pi session entirely and parks the agent until
+  someone resumes it — a sledgehammer for "no, not that file". The new
+  `POST /api/agents/:id/interrupt` cancels whatever is in flight (streaming
+  turn incl. auto-retry backoff, compaction, or a session-level bash run)
+  and leaves the session live and ready for the next message. Queued
+  steering / follow-up messages are dropped as part of the abort — otherwise
+  pi flushes them straight into a fresh turn — and returned to the caller,
+  so the dashboard restores them into the composer exactly like pi's TUI
+  restores them to the editor. Surfaced as the Escape key, an `interrupt esc`
+  pill in the agent header (visible only mid-turn), the `/interrupt` slash
+  command, and `pru interrupt <agent>`.
+
+  Escape is heavily overloaded in the dashboard, so the handler runs in the
+  capture phase and explicitly yields to everything with a better claim on
+  the key: the extension-UI modal, the new-project modal, the `@mention` /
+  slash autocomplete popups, open mobile drawers and pickers, and vim's
+  insert mode (a second Escape from normal mode interrupts). The `abort()`
+  wait is bounded at 10s so a wedged tool teardown can't hold the HTTP
+  response open, and the state machine has a backstop for the case where
+  pi's `agent_end` doesn't arrive — a no-longer-streaming agent must never
+  be left showing `running`.
+
 - **`pru self-update` refuses to move the host backwards.** In npm mode it
   resolves the target version up front and stops if it is older than what's
   running — `--force` is the only way through, whether or not the version was

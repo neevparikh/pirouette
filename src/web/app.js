@@ -109,6 +109,7 @@ const $themePicker = document.getElementById("theme-picker");
 const $themeSearch = document.getElementById("theme-search");
 const $themeReset = document.getElementById("theme-reset");
 const $themeList = document.getElementById("theme-list");
+const $interruptBtn = document.getElementById("agent-interrupt-btn");
 const $stopBtn = document.getElementById("agent-stop-btn");
 const $resumeBtn = document.getElementById("agent-resume-btn");
 const $deleteBtn = document.getElementById("agent-delete-btn");
@@ -795,6 +796,51 @@ if ($mobileBackdrop) {
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeAllDrawers();
 });
+
+// --- Esc = interrupt the current turn -------------------------------------
+//
+// Mirrors pi's TUI, where Escape aborts the in-flight turn (and puts any
+// queued steering text back in the editor). Escape is heavily overloaded in
+// this app, so this handler runs in the CAPTURE phase -- before the
+// textarea-level handlers -- and explicitly yields to everything with a
+// better claim on the key:
+//
+//   1. the extension-UI modal (its own capture handler, registered earlier,
+//      answers the request and preventDefaults),
+//   2. the new-project modal,
+//   3. the @mention / slash autocomplete popups (closed by the $input
+//      keydown handler, which bubbles later),
+//   4. an open mobile drawer or model/thinking/theme picker (closed by the
+//      drawer handler above),
+//   5. vim insert mode -- Escape means "go to normal mode" first. Hit it
+//      again from normal mode and you get the interrupt, which is the
+//      muscle memory a vim user already has.
+//
+// Only when none of those apply, and the selected agent is actually
+// mid-turn, do we interrupt. We don't stopPropagation: closing state that
+// happens to also listen for Escape is harmless once the interrupt fired.
+document.addEventListener(
+  "keydown",
+  (e) => {
+    if (e.key !== "Escape" || e.defaultPrevented) return;
+    if (!$extUiModal.classList.contains("hidden")) return;
+    if ($projModal && !$projModal.classList.contains("hidden")) return;
+    if (!$mentionPopup.classList.contains("hidden")) return;
+    if (!$slashPopup.classList.contains("hidden")) return;
+    const drawerOpen =
+      ($chatSidebar && $chatSidebar.classList.contains("drawer-open")) ||
+      ($headerActions && $headerActions.classList.contains("drawer-open"));
+    const pickerOpen =
+      ($modelPicker && !$modelPicker.classList.contains("hidden")) ||
+      ($thinkingPicker && !$thinkingPicker.classList.contains("hidden")) ||
+      ($themePicker && !$themePicker.classList.contains("hidden"));
+    if (drawerOpen || pickerOpen) return;
+    if (vim.isEnabled() && document.activeElement === $input && vim.mode === "insert") return;
+    if (!canInterruptSelected()) return;
+    void interruptAgent();
+  },
+  true,
+);
 window.addEventListener("resize", () => {
   updateInputPlaceholder();
 });
@@ -1825,6 +1871,7 @@ function renderAgentHeader() {
     $agentInfo.textContent = "";
     $agentStats.textContent = "";
     // Hide every action pill when no agent is selected.
+    if ($interruptBtn) $interruptBtn.classList.add("hidden");
     $stopBtn.classList.add("hidden");
     $resumeBtn.classList.add("hidden");
     $deleteBtn.classList.add("hidden");
@@ -1879,6 +1926,9 @@ function renderAgentHeader() {
 
   const running = agent.state !== "stopped" && agent.state !== "shutdown";
   $stopBtn.classList.toggle("hidden", !running);
+  // Interrupt only makes sense mid-turn; hiding it otherwise keeps the
+  // header honest about what Escape will do right now.
+  if ($interruptBtn) $interruptBtn.classList.toggle("hidden", agent.state !== "running");
   $resumeBtn.classList.toggle(
     "hidden",
     agent.state !== "stopped" && agent.state !== "shutdown" && agent.state !== "error",
@@ -2346,6 +2396,60 @@ async function stopAgent() {
   await fetch(`/api/agents/${selectedAgentId}/stop`, { method: "POST" });
 }
 
+/** Cancel the selected agent's in-flight work without tearing its session
+ *  down — the dashboard's Escape key, and the twin of Escape in pi's TUI.
+ *
+ *  The server drops any queued steering / follow-up messages as part of the
+ *  abort and hands them back to us; we push them into the composer so the
+ *  user can edit and resend, exactly like pi's TUI restores queued text to
+ *  the editor. Resolves to true if something was actually in flight and got
+ *  cancelled. */
+async function interruptAgent() {
+  if (!selectedAgentId) return false;
+  const agentId = selectedAgentId;
+  try {
+    const res = await fetch(`/api/agents/${agentId}/interrupt`, { method: "POST" });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      // 409 == not running: nothing to interrupt, not worth shouting about.
+      if (res.status !== 409) {
+        console.error("interrupt failed:", data.error || res.statusText);
+      }
+      return false;
+    }
+    const result = await res.json();
+    const dropped = [
+      ...(result.cleared?.steering ?? []),
+      ...(result.cleared?.followUp ?? []),
+    ];
+    // Only restore into the composer if the user is still looking at the
+    // agent we interrupted — otherwise we'd paste one chat's queue into
+    // another chat's input box.
+    if (dropped.length > 0 && selectedAgentId === agentId) {
+      const existing = $input.value.trim();
+      $input.value = [dropped.join("\n\n"), existing].filter(Boolean).join("\n\n");
+      autoResize();
+      $input.focus();
+      // Land the user in insert mode so the restored text is immediately
+      // editable (same courtesy sendMessage extends after a send). No-op
+      // when vim mode is off.
+      vim.enterInsertMode();
+    }
+    return Boolean(result.interrupted);
+  } catch (err) {
+    console.error("interrupt error:", err);
+    return false;
+  }
+}
+
+/** True when the selected agent has something Escape could cancel. Used
+ *  both for the header pill's visibility and for the key handler, so the
+ *  two can't disagree about when Escape does something. */
+function canInterruptSelected() {
+  const agent = agents.find((a) => a.id === selectedAgentId);
+  return agent?.state === "running";
+}
+
 /** Fork the currently-selected agent at HEAD (full session copy). The
  *  server creates a sibling agent with its own worktree + session and
  *  broadcasts `agent_created`; we then auto-select it so the UI follows.
@@ -2635,7 +2739,8 @@ const SLASH_COMMANDS = [
   { name: "fork", description: "Fork this agent (copy session into a new agent)", kind: "client", takesArgs: false },
   { name: "new", description: "Discard history and start a fresh session for this agent", kind: "api", endpoint: "new", takesArgs: false },
   { name: "compact", description: "Manually compact session context", argLabel: "[instructions]", kind: "api", endpoint: "compact", takesArgs: true },
-  { name: "stop", description: "Stop the running agent", kind: "client", takesArgs: false },
+  { name: "interrupt", description: "Interrupt the current turn, keep the session alive (Esc)", kind: "client", takesArgs: false },
+  { name: "stop", description: "Stop the running agent (disposes its session)", kind: "client", takesArgs: false },
   { name: "resume", description: "Resume a stopped agent", kind: "client", takesArgs: false },
   { name: "copy", description: "Copy last assistant message to clipboard", kind: "client", takesArgs: false },
   { name: "raw", description: "Toggle raw markdown view", kind: "client", takesArgs: false },
@@ -2909,6 +3014,9 @@ async function executeSlashCommand(name, args) {
     switch (name) {
       case "fork":
         await forkAgent();
+        break;
+      case "interrupt":
+        await interruptAgent();
         break;
       case "stop":
         await stopAgent();
@@ -3297,6 +3405,7 @@ $themeReset.addEventListener("click", () => {
   applyActiveTheme();
   closeThemePicker();
 });
+if ($interruptBtn) $interruptBtn.addEventListener("click", () => void interruptAgent());
 $stopBtn.addEventListener("click", stopAgent);
 $resumeBtn.addEventListener("click", resumeAgent);
 $deleteBtn.addEventListener("click", deleteAgent);

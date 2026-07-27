@@ -43,6 +43,8 @@ import {
   type DeleteAgentOptions,
   type ExtensionUIRequest,
   type FastModeSnapshot,
+  type InterruptResult,
+  type InterruptTarget,
   type NormalizedEvent,
   type WsEnvelope,
 } from "./types.js";
@@ -67,6 +69,12 @@ const DEFAULT_SELF_UPDATE_RESUME_MESSAGE =
   "restarted, which aborted any commands that were still running. You are " +
   "now on the new build. Re-check anything that was in flight and continue " +
   "from where you left off.";
+
+/** How long `interruptAgent()` waits for pi's `session.abort()` to reach
+ *  idle before giving up on the wait (the abort signal has already been
+ *  fired at that point; a wedged tool teardown shouldn't hold the HTTP
+ *  response open). */
+const INTERRUPT_ABORT_TIMEOUT_MS = 10_000;
 
 /** Backoff before each background attempt to resume an agent whose initial
  *  resume failed (transient auth/network hiccups right after a restart). */
@@ -1625,6 +1633,139 @@ export class AgentManager {
     } else {
       console.log(`[agent-manager] ${mode} enqueued for ${id}`);
     }
+  }
+
+  /** Interrupt whatever the agent is doing right now, WITHOUT tearing the
+   *  session down. This is the dashboard's Escape key, and the analogue of
+   *  hitting Escape in pi's TUI:
+   *
+   *    - streaming turn (or auto-retry backoff) → drop the pending
+   *      steering / follow-up queue and `session.abort()` the turn. Pi
+   *      fires the AbortSignal the LLM call and any running tool are
+   *      listening on, then emits `agent_end`, which flips our state
+   *      machine to `waiting_input`.
+   *    - compaction in flight → `session.abortCompaction()`.
+   *    - session-level bash (`!cmd`) running → `session.abortBash()`.
+   *
+   *  Contrast with `stopAgent()`, which disposes the pi session entirely
+   *  and parks the agent in `stopped` until someone resumes it. After an
+   *  interrupt the agent is still live and ready for the next message --
+   *  the conversation just stops mid-turn.
+   *
+   *  No agent lock, for the same reason `stopAgent()` fires its pre-lock
+   *  abort and `compactAgent()` skips the lock entirely: `sendMessage()`
+   *  is (deliberately) not holding the lock across the streaming turn, but
+   *  it does take it in short bursts, and cancellation must not queue
+   *  behind anything. Pi's abort APIs are explicitly safe to call
+   *  concurrently with `prompt()`.
+   *
+   *  Throws if the agent isn't running (nothing to interrupt). Returns a
+   *  summary the caller can surface: what got cancelled, and any queued
+   *  messages we dropped (the dashboard puts those back in the composer,
+   *  matching pi's TUI). */
+  async interruptAgent(id: string): Promise<InterruptResult> {
+    const handle = this.handles.get(id);
+    if (!handle) throw new Error(`Agent ${id} is not running`);
+    // Pi's abort surface beyond `abort()` / `isStreaming` isn't on the
+    // public typings we pin against in every version, and an extension
+    // could in principle swap the session out from under us. Read through
+    // an `any` view and feature-detect rather than hard-depend.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const session = handle.session as any;
+
+    const isStreaming = handle.session.isStreaming === true;
+    const isRetrying = session.isRetrying === true;
+    const isCompacting = session.isCompacting === true;
+    const isBashRunning = session.isBashRunning === true;
+
+    const cancelled: InterruptTarget[] = [];
+    let cleared: { steering: string[]; followUp: string[] } = {
+      steering: [],
+      followUp: [],
+    };
+    let settled = true;
+
+    console.log(
+      `[agent-manager] interrupt ${handle.config.name} (${id}): ` +
+        `streaming=${isStreaming} retrying=${isRetrying} compacting=${isCompacting} bash=${isBashRunning}`,
+    );
+
+    // Compaction runs its own LLM call outside the agent turn, so it gets
+    // its own cancel path (same as pi's TUI, which rebinds Escape to
+    // abortCompaction for the duration).
+    if (isCompacting && typeof session.abortCompaction === "function") {
+      try {
+        session.abortCompaction();
+        cancelled.push("compaction");
+      } catch (err) {
+        console.warn(`[agent-manager] abortCompaction failed for ${id}: ${err}`);
+      }
+    }
+
+    if (isStreaming || isRetrying) {
+      // Drop the queue BEFORE aborting: pi flushes steering messages into
+      // the next turn, and a user who just asked to stop doesn't want the
+      // queue re-triggering one. Whatever we take out is handed back to
+      // the caller so the UI can restore it into the composer.
+      try {
+        if (typeof session.clearQueue === "function") {
+          const q = session.clearQueue() as { steering?: string[]; followUp?: string[] };
+          cleared = {
+            steering: [...(q?.steering ?? [])],
+            followUp: [...(q?.followUp ?? [])],
+          };
+        }
+      } catch (err) {
+        console.warn(`[agent-manager] clearQueue failed for ${id}: ${err}`);
+      }
+      cancelled.push("turn");
+      try {
+        // `abort()` fires the AbortSignal (cancelling the in-flight LLM
+        // call + any tool listening on it) and then awaits idle. Bound the
+        // wait so one wedged tool can't hold the HTTP response open.
+        await withTimeout(
+          handle.session.abort(),
+          INTERRUPT_ABORT_TIMEOUT_MS,
+          `abort(${id})`,
+        );
+      } catch (err) {
+        settled = false;
+        console.warn(
+          `[agent-manager] interrupt ${id}: abort did not settle: ${err instanceof Error ? err.message : err}`,
+        );
+      }
+    } else if (isBashRunning && typeof session.abortBash === "function") {
+      try {
+        session.abortBash();
+        cancelled.push("bash");
+      } catch (err) {
+        console.warn(`[agent-manager] abortBash failed for ${id}: ${err}`);
+      }
+    }
+
+    // Belt and braces on the state machine. Aborting a turn makes pi emit
+    // `agent_end`, which `handleAgentEvent` turns into waiting_input/idle.
+    // If that didn't happen (abort raced an already-finishing turn, or an
+    // event was dropped) we'd leave a live agent stuck showing "running"
+    // in the sidebar, with the composer hiding the send-mode toggle.
+    if (settled && handle.session.isStreaming !== true) {
+      const current = this.stateManager.getAgent(id)?.state;
+      if (current === "running") {
+        const hasHistory = handle.session.messages.length > 0;
+        this.setAgentState(id, hasHistory ? "waiting_input" : "idle");
+      }
+    }
+
+    const interrupted = cancelled.length > 0;
+    console.log(
+      `[agent-manager] interrupt ${id}: ${
+        interrupted ? `cancelled ${cancelled.join("+")}` : "nothing in flight"
+      }` +
+        (cleared.steering.length + cleared.followUp.length > 0
+          ? ` (dropped ${cleared.steering.length + cleared.followUp.length} queued message(s))`
+          : ""),
+    );
+    return { interrupted, cancelled, cleared, settled };
   }
 
   /** Stop an agent gracefully.

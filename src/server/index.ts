@@ -782,6 +782,29 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
         return;
       }
 
+      // Interrupt the agent's in-flight work (turn / compaction / bash)
+      // WITHOUT tearing the session down -- the dashboard's Escape key and
+      // the analogue of Escape in pi's TUI. Contrast with /stop, which
+      // disposes the session and parks the agent until it's resumed.
+      //
+      // Returns the queued steering/follow-up messages that were dropped so
+      // the client can restore them into the composer (pi's TUI does the
+      // same). 409 if the agent isn't running -- there's nothing to cancel
+      // and, unlike /message, we deliberately do NOT auto-resume it.
+      if (method === "POST" && sub === "/interrupt") {
+        if (!agentManager.isRunning(agentId)) {
+          error(res, 409, "Agent is not running");
+          return;
+        }
+        try {
+          const result = await agentManager.interruptAgent(agentId);
+          json(res, 200, result);
+        } catch (err) {
+          error(res, 500, err instanceof Error ? err.message : String(err));
+        }
+        return;
+      }
+
       if (method === "POST" && sub === "/stop") {
         try {
           await agentManager.stopAgent(agentId);
