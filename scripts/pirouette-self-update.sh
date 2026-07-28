@@ -199,12 +199,41 @@ snapshot_current_install() {
         log "WARN: no existing global install found; rollback disabled"
         return 0
     fi
-    local outdir tarball
+    local outdir tarball stage
     outdir="$(mktemp -d "${TMPDIR:-/tmp}/pirouette-rollback.XXXXXX")" || return 0
-    # --ignore-scripts: we want a bit-for-bit snapshot of what is installed
-    # (dist/ is already built there), not a rebuild -- the global install
-    # has no devDependencies, so running `prepare` would fail.
-    tarball="$( cd "$dir" && npm pack --silent --ignore-scripts --pack-destination "$outdir" 2>/dev/null | tail -1 )"
+
+    # We want a bit-for-bit snapshot of what is installed (dist/ is already
+    # built there), not a rebuild -- the global install has no
+    # devDependencies, so running `prepare` would fail.
+    #
+    # `npm pack --ignore-scripts` is NOT enough: as of npm 10.9 packing a
+    # *directory* runs that directory's `prepare` script regardless of the
+    # flag (and of npm_config_ignore_scripts). Here `prepare` is `npm run
+    # build`, which needs esbuild/tsc -- absent from a global install -- so
+    # the pack failed, the snapshot came out empty, and every self-update
+    # silently ran with "rollback disabled". The safety net was only ever
+    # missing at the exact moment it was needed, which is why it went
+    # unnoticed.
+    #
+    # So: stage a copy (node_modules excluded -- `files` omits it anyway,
+    # and it's ~170MB against ~2MB of package), drop the build lifecycle
+    # hooks from the copy's package.json, and pack that instead. The
+    # staged tree is otherwise identical to what's installed.
+    stage="$outdir/stage"
+    if mkdir -p "$stage" && tar -C "$dir" --exclude=./node_modules -cf - . 2>/dev/null | tar -C "$stage" -xf - 2>/dev/null; then
+        node -e '
+            const fs = require("node:fs");
+            const p = process.argv[1] + "/package.json";
+            const pkg = JSON.parse(fs.readFileSync(p, "utf8"));
+            for (const s of ["prepare", "prepack", "postpack"]) delete pkg.scripts?.[s];
+            fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + "\n");
+        ' "$stage" 2>/dev/null || log "WARN: could not strip lifecycle scripts from the snapshot copy"
+        tarball="$( cd "$stage" && npm pack --silent --ignore-scripts --pack-destination "$outdir" 2>/dev/null | tail -1 )"
+        rm -rf "$stage"
+    else
+        log "WARN: could not stage a copy of the current install"
+        tarball=""
+    fi
     if [ -n "$tarball" ] && [ -f "$outdir/$tarball" ]; then
         BACKUP_TARBALL="$outdir/$tarball"
         log "rollback snapshot: $BACKUP_TARBALL"
