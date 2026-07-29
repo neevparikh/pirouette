@@ -2361,6 +2361,16 @@ async function sendMessage() {
   // server ignores `mode` when not streaming, but consistency is nice).
   const modeForThisSend = sendMode;
 
+  // Sending to an archived chat pulls it back out of the archive — the
+  // server does the same and broadcasts `agent_updated`, but we apply it
+  // locally first so the sidebar doesn't keep hiding the chat we're about
+  // to switch to (and the reply we're waiting for).
+  const targetAgent = agents.find((a) => a.id === targetId);
+  if (targetAgent?.archived) {
+    targetAgent.archived = false;
+    renderAgentList();
+  }
+
   // Auto-focus the new agent so the chat view follows.
   if (targetId !== selectedAgentId) await selectAgent(targetId);
   else renderMessages();

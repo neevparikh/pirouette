@@ -48,6 +48,22 @@ follow [SemVer](https://semver.org).
   JSON with fields missing — nothing detected it and there was no backup to
   restore from.
 
+### Changed
+
+- **Sending a message to an archived chat un-archives it.** Archiving is a
+  "tuck this away, I'm done with it" gesture, so typing into the chat
+  contradicts it — and until now the flag stuck, which meant the chat stayed
+  hidden behind the *show archived* toggle and the agent's reply landed
+  somewhere the user couldn't see. `AgentManager.sendMessage` now clears the
+  flag (in the same critical section that clears a stale `errorMessage`) and
+  broadcasts the existing `agent_updated` envelope, so every open dashboard
+  moves the chat back into the default listing without a refresh. It fires
+  for mid-turn steers and follow-ups too, not just fresh turns, and it covers
+  the CLI and API paths for free because it lives below the HTTP layer. The
+  dashboard also drops the flag locally before the POST so the sidebar
+  doesn't briefly hide the chat it is about to select. No-op when the chat
+  wasn't archived — no spurious broadcasts.
+
 ### Fixed
 
 - **The fast-mode badge (`↯`) flickered off after almost every tool call.**

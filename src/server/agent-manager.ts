@@ -528,6 +528,35 @@ export class AgentManager {
    *  listing. Purely a metadata flag. */
   setArchived(id: string, archived: boolean): void {
     this.stateManager.updateAgentState(id, { archived: !!archived });
+    const handle = this.handles.get(id);
+    if (handle) handle.config.archived = !!archived;
+  }
+
+  /** Pull a chat back out of the archive because the user just did
+   *  something that proves they're still using it (today: sent a message).
+   *
+   *  Archiving is a "tuck this away, I'm done with it" gesture, so a new
+   *  message contradicts it. Leaving the chat archived would hide the
+   *  agent's reply behind the "show archived" toggle -- the user types,
+   *  the chat stays invisible in the sidebar, and the response looks lost.
+   *
+   *  Broadcasts `agent_updated` (same envelope the /archive endpoint
+   *  sends) so every open dashboard moves the chat back into the default
+   *  listing without a refresh. No-op when the chat isn't archived, so
+   *  this is cheap to call on every message. */
+  private unarchiveOnActivity(id: string): void {
+    const config = this.stateManager.getAgent(id);
+    if (!config?.archived) return;
+    console.log(`[agent-manager] unarchiving ${config.name} (${id}): user sent a message`);
+    this.setArchived(id, false);
+    const updated = this.stateManager.getAgent(id);
+    if (updated) {
+      this.broadcastWs({
+        kind: "agent_updated",
+        agentId: id,
+        agent: { ...updated, running: this.handles.has(id) },
+      });
+    }
   }
 
   /** Resolve a CLI/URL agent reference (id or human-friendly name) to a
@@ -1568,6 +1597,10 @@ export class AgentManager {
       console.log(
         `[agent-manager] sendMessage to ${handle.config.name} (${id}): streaming=${handle.session.isStreaming} mode=${mode}${imageCount > 0 ? ` images=${imageCount}` : ""}`,
       );
+      // A message means the user is actively working in this chat, so it
+      // shouldn't stay tucked away in the archive (they'd never see the
+      // reply). No-op unless the chat is actually archived.
+      this.unarchiveOnActivity(id);
       // Clear any prior error when the user sends a new message.
       if (handle.config.errorMessage) {
         this.stateManager.updateAgentState(id, { errorMessage: null });
