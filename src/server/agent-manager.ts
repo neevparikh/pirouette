@@ -3,6 +3,7 @@
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   createAgentSession,
@@ -21,6 +22,13 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 
+import { getConfig } from "../config.js";
+import {
+  applyCompactionSettings,
+  compactionSettingsFor,
+  resolveCompactionPolicy,
+  type CompactionPolicy,
+} from "./compaction-policy.js";
 import { createWorktree, removeWorktree } from "./git.js";
 import { setupWorktreeDataTools } from "./worktree-setup.js";
 import { ProjectManager } from "./project-manager.js";
@@ -69,6 +77,32 @@ const DEFAULT_SELF_UPDATE_RESUME_MESSAGE =
   "restarted, which aborted any commands that were still running. You are " +
   "now on the new build. Re-check anything that was in flight and continue " +
   "from where you left off.";
+
+/** Grace period between handing an agent's work over to its successor and
+ *  tearing the old session down. The handoff is normally requested *by* the
+ *  outgoing agent from inside a tool call, so an immediate stop would kill
+ *  the call before its result (the successor's id) ever reaches it. */
+const HANDOFF_PARENT_STOP_DELAY_MS = 5_000;
+
+/** Name for the agent taking over from `name`: `foo` → `foo-2` → `foo-3`.
+ *  Successive handoffs on a long-running task read as one numbered series
+ *  in the sidebar instead of `foo-handoff-handoff-handoff`. */
+export function nextHandoffName(name: string): string {
+  const trimmed = name.trim() || "agent";
+  const match = trimmed.match(/^(.*?)-(\d+)$/);
+  if (match) {
+    const [, stem, n] = match;
+    return `${stem}-${Number(n) + 1}`;
+  }
+  return `${trimmed}-2`;
+}
+
+/** Skills bundled with the pirouette package. Resolves to `<pkg>/skills`
+ *  from both `src/server/` (dev, via tsx) and `dist/server/` (installed),
+ *  since the built layout mirrors the source layout one level down. */
+export function packagedSkillsDir(): string {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "skills");
+}
 
 /** How long `interruptAgent()` waits for pi's `session.abort()` to reach
  *  idle before giving up on the wait (the abort signal has already been
@@ -153,6 +187,10 @@ export interface AgentHandle {
   config: AgentConfig;
   session: AgentSession;
   unsubscribe: () => void;
+  /** The session's settings manager. Held so model switches can recompute
+   *  the auto-compaction threshold, which is derived from the model's
+   *  context window (see compaction-policy.ts). */
+  settingsManager: SettingsManager;
 }
 
 export type AgentEventCallback = (agentId: string, event: NormalizedEvent) => void;
@@ -204,6 +242,10 @@ export class AgentManager {
    *  requested last). Mirrored to clients via the `fast_mode` WS envelope and
    *  primed on connect via getFastModeSnapshot(). */
   private readonly fastMode = new FastModeTracker();
+
+  /** Auto-compaction policy (`[defaults.compaction]` + PIROUETTE_AUTO_COMPACT_*).
+   *  Resolved once on first use; warnings are logged once, not per agent. */
+  private compactionPolicy: CompactionPolicy | null = null;
 
   constructor(
     private readonly stateManager: StateManager,
@@ -266,6 +308,12 @@ export class AgentManager {
           cwd: this.dataDir,
           agentDir: getAgentDir(),
           eventBus,
+          // Skills that ship with pirouette itself (skills/<name>/SKILL.md
+          // in the package). They document pirouette-specific workflows
+          // — handing off to a fresh agent, for one — that an agent can't
+          // be expected to figure out from the API surface alone. User
+          // skills in ~/.pi/agent/skills still win on a name collision.
+          additionalSkillPaths: [packagedSkillsDir()],
         });
         await loader.reload();
         this.resourceLoader = loader;
@@ -809,6 +857,8 @@ export class AgentManager {
       if (handle) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await (handle.session as any).setModel(model);
+        // Re-derive the compaction threshold for the new model's window.
+        this.applyCompactionSettings(handle.settingsManager, model, config.name);
         console.log(`[agent-manager] live setModel ${id} -> ${qualifiedId}`);
       } else {
         console.log(`[agent-manager] config-only setModel ${id} -> ${qualifiedId} (no live session)`);
@@ -1259,6 +1309,124 @@ export class AgentManager {
 
       return config;
     });
+  }
+
+  /** Hand an agent's work over to a fresh agent in the same worktree.
+   *
+   *  The successor is a new chat with an empty context that adopts the
+   *  parent's project, worktree, branch, model and thinking level. Nothing
+   *  is copied from the conversation — the *worktree* is the shared state,
+   *  plus whatever briefing the caller passes as `message`. That's the whole
+   *  point: a handoff exists to escape a context that has become long,
+   *  stale, or expensive, so a fork (which copies the history) is exactly
+   *  the wrong tool.
+   *
+   *  Mechanics:
+   *    1. Allocate the successor, pointing `worktreePath` / `branchName` at
+   *       the parent's. No new worktree is created, so uncommitted work,
+   *       untracked scratch files, build caches and the checked-out branch
+   *       all carry over untouched.
+   *    2. Start its session (`resume: false` → empty context).
+   *    3. Archive the parent, so the sidebar shows one live chat, not two.
+   *    4. Send the briefing to the successor (fire-and-forget; the turn can
+   *       run for minutes).
+   *    5. Stop the parent after a short grace period. The grace period
+   *       matters when the *parent itself* triggered the handoff: it is
+   *       mid-tool-call, and tearing its session down synchronously would
+   *       kill the very bash/HTTP call that asked for this.
+   *
+   *  Two agents briefly share one worktree (between steps 1 and 5), which is
+   *  why the parent is stopped rather than left idle. `removeAgent` refuses
+   *  to delete a worktree another agent still points at.
+   */
+  async handoffAgent(
+    parentId: string,
+    opts: { name?: string; message?: string; stopParentDelayMs?: number } = {},
+  ): Promise<AgentConfig> {
+    const parent = this.getAgent(parentId);
+    if (!parent) throw new Error(`Agent ${parentId} not found`);
+    if (!parent.worktreePath) {
+      throw new Error(`Cannot hand off agent "${parent.name}": it has no worktree.`);
+    }
+    const project = this.projectManager.getProject(parent.projectName);
+    if (!project) {
+      throw new Error(`Project "${parent.projectName}" not found.`);
+    }
+
+    const id = randomUUID().slice(0, 8);
+    const name = (opts.name ?? nextHandoffName(parent.name)).trim();
+    const sessionDir = this.agentSessionDir(name, id);
+
+    const successor = await this.withAgentLock(id, async () => {
+      await mkdir(sessionDir, { recursive: true });
+      const now = new Date().toISOString();
+      const config: AgentConfig = {
+        id,
+        name,
+        projectName: parent.projectName,
+        // Deliberately the parent's worktree, not a new one.
+        worktreePath: parent.worktreePath,
+        branchName: parent.branchName,
+        sessionDir,
+        state: "starting",
+        createdAt: now,
+        lastActivity: now,
+        model: parent.model,
+        thinkingLevel: parent.thinkingLevel,
+        usage: emptyUsage(),
+        errorMessage: null,
+        parentAgentId: parent.id,
+      };
+      this.stateManager.putAgent(config);
+
+      try {
+        await this.startSession(config, { resume: false });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.markError(config, msg);
+        throw err;
+      }
+      return config;
+    });
+
+    console.log(
+      `[agent-manager] handoff ${parent.name} (${parentId}) -> ${name} (${id}) ` +
+        `in ${parent.worktreePath}`,
+    );
+
+    // Archive the parent. Its transcript stays on disk and stays readable
+    // behind the dashboard's "show archived" toggle.
+    if (!parent.archived) {
+      this.setArchived(parentId, true);
+      const updated = this.stateManager.getAgent(parentId);
+      if (updated) {
+        this.broadcastWs({
+          kind: "agent_updated",
+          agentId: parentId,
+          agent: { ...updated, running: this.handles.has(parentId) },
+        });
+      }
+    }
+
+    if (opts.message) {
+      this.sendMessage(id, opts.message).catch((err) => {
+        console.error(`[agent-manager] handoff briefing failed for ${id}: ${err}`);
+      });
+    }
+
+    const delay = opts.stopParentDelayMs ?? HANDOFF_PARENT_STOP_DELAY_MS;
+    const stopParent = () =>
+      this.stopAgent(parentId).catch((err) => {
+        console.error(`[agent-manager] stopping handed-off agent ${parentId} failed: ${err}`);
+      });
+    if (delay > 0) {
+      const timer = setTimeout(stopParent, delay);
+      if (typeof timer.unref === "function") timer.unref();
+    } else {
+      await stopParent();
+    }
+
+    return successor;
   }
 
   /** List user messages in an agent's session that can serve as fork
@@ -1900,7 +2068,18 @@ export class AgentManager {
     return this.withAgentLock(id, async () => {
       if (config) {
         const project = this.projectManager.getProject(config.projectName);
-        if (opts.deleteWorktree && config.worktreePath) {
+        // A handoff points the successor at the parent's worktree, so
+        // "delete this agent and its worktree" must not pull the rug out
+        // from under a sibling that is still working in it.
+        const sharedWith = this.stateManager
+          .getAgents()
+          .filter((a) => a.id !== id && a.worktreePath === config.worktreePath);
+        if (opts.deleteWorktree && config.worktreePath && sharedWith.length > 0) {
+          console.log(
+            `[agent-manager] keeping worktree ${config.worktreePath}: still used by ` +
+              sharedWith.map((a) => `${a.name} (${a.id})`).join(", "),
+          );
+        } else if (opts.deleteWorktree && config.worktreePath) {
           try {
             if (project) {
               // Properly unregister the worktree with git so `worktree list`
@@ -2058,6 +2237,8 @@ export class AgentManager {
     // registered in the model registry before we resolve a model.
     const resourceLoader = await this.ensureResourceLoader();
 
+    // Compaction settings depend on the model's context window, so they are
+    // applied below (once the model is resolved) via applyOverrides().
     const settingsManager = SettingsManager.inMemory({
       compaction: { enabled: true },
       retry: { enabled: true, maxRetries: 3 },
@@ -2108,6 +2289,8 @@ export class AgentManager {
     }
 
     console.log(`[agent-manager] resolved model for ${config.name}: ${resolvedModelString}`);
+
+    this.applyCompactionSettings(settingsManager, model, config.name);
 
     const thinkingLevel = (config.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high") ?? "off";
 
@@ -2201,11 +2384,54 @@ export class AgentManager {
       this.handleAgentEvent(config.id, event);
     });
 
-    this.handles.set(config.id, { config, session, unsubscribe });
+    this.handles.set(config.id, { config, session, unsubscribe, settingsManager });
     // Fresh sessions are "idle" (no messages yet). Resumed sessions with
     // existing history are already in a user-turn, so they're "waiting_input".
     const hasHistory = session.messages.length > 0;
     this.setAgentState(config.id, resume && hasHistory ? "waiting_input" : "idle");
+  }
+
+  /** Effective auto-compaction policy, resolved once per server process. */
+  private getCompactionPolicy(): CompactionPolicy {
+    if (!this.compactionPolicy) {
+      let configured;
+      try {
+        configured = getConfig().defaults?.compaction;
+      } catch (err) {
+        console.error(`[agent-manager] could not read compaction config: ${err}`);
+      }
+      const { policy, warnings } = resolveCompactionPolicy(configured);
+      for (const w of warnings) console.warn(`[agent-manager] compaction config: ${w}`);
+      if (policy.fraction > 0) {
+        console.log(
+          `[agent-manager] auto-compaction at ${Math.round(policy.fraction * 100)}% of the ` +
+            `context window for ${policy.models.length > 0 ? policy.models.join(", ") : "every model"}`,
+        );
+      }
+      this.compactionPolicy = policy;
+    }
+    return this.compactionPolicy;
+  }
+
+  /** Push model-dependent compaction settings into a session's settings
+   *  manager. Called at session start and again whenever the model changes,
+   *  because the trigger point is a fraction of *that model's* context
+   *  window — switching from a 1M-token model to a 200k one without
+   *  recomputing would leave the agent with a reserve larger than the whole
+   *  window (i.e. compacting on every single turn). */
+  private applyCompactionSettings(
+    settingsManager: SettingsManager,
+    model: { provider?: string; id?: string; contextWindow?: number } | null | undefined,
+    agentName: string,
+  ): void {
+    const settings = compactionSettingsFor(this.getCompactionPolicy(), model);
+    applyCompactionSettings(settingsManager, settings);
+    if (settings.triggerTokens !== null) {
+      console.log(
+        `[agent-manager] ${agentName}: auto-compact at ~${settings.triggerTokens} tokens ` +
+          `(keeping the most recent ${settings.keepRecentTokens})`,
+      );
+    }
   }
 
   /** Transition an agent into an error state with a human-readable message. */

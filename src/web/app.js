@@ -2507,6 +2507,31 @@ async function forkAgent(opts = {}) {
   }
 }
 
+/** Hand the selected agent's work to a fresh agent in the same worktree.
+ *  The old chat gets archived (and stopped shortly after) server-side, so
+ *  we follow the successor the way /fork follows the child. `briefing` is
+ *  the successor's first message -- without one it sits idle waiting for
+ *  the user. */
+async function handoffAgent(briefing) {
+  if (!selectedAgentId) return;
+  try {
+    const res = await fetch(`/api/agents/${selectedAgentId}/handoff`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(briefing ? { message: briefing } : {}),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(`Failed to hand off: ${data.error || res.statusText}`);
+      return;
+    }
+    const successor = await res.json();
+    await selectAgent(successor.id);
+  } catch (err) {
+    alert(`Failed to hand off: ${err}`);
+  }
+}
+
 async function resumeAgent() {
   if (!selectedAgentId) return;
   await fetch(`/api/agents/${selectedAgentId}/resume`, { method: "POST" });
@@ -2765,6 +2790,7 @@ const SLASH_COMMANDS = [
   { name: "fork", description: "Fork this agent (copy session into a new agent)", kind: "client", takesArgs: false },
   { name: "new", description: "Discard history and start a fresh session for this agent", kind: "api", endpoint: "new", takesArgs: false },
   { name: "compact", description: "Manually compact session context", argLabel: "[instructions]", kind: "api", endpoint: "compact", takesArgs: true },
+  { name: "handoff", description: "Hand this agent's work to a fresh agent in the same worktree", argLabel: "[briefing]", kind: "client", takesArgs: true },
   { name: "interrupt", description: "Interrupt the current turn, keep the session alive (Esc)", kind: "client", takesArgs: false },
   { name: "stop", description: "Stop the running agent (disposes its session)", kind: "client", takesArgs: false },
   { name: "resume", description: "Resume a stopped agent", kind: "client", takesArgs: false },
@@ -3036,10 +3062,12 @@ async function executeSlashCommand(name, args) {
   if (!cmd) return false;
 
   if (cmd.kind === "client") {
-    // Client-side commands ignore args (none of them currently take any).
     switch (name) {
       case "fork":
         await forkAgent();
+        break;
+      case "handoff":
+        await handoffAgent(args);
         break;
       case "interrupt":
         await interruptAgent();

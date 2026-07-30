@@ -198,6 +198,9 @@ your override file in `$EDITOR`.
 | `defaults.bind_host` | defaults | Server bind address (default `127.0.0.1`) |
 | `defaults.dotfiles.clone_url` | defaults | `yadm clone` URL (optional) |
 | `defaults.dotfiles.authorized_keys_url` | defaults | authorized_keys URL (optional) |
+| `defaults.compaction.auto_compact_at` | defaults | Compact at this fraction of the context window (0 = pi's default) |
+| `defaults.compaction.auto_compact_models` | defaults | Model globs the threshold applies to (empty = all) |
+| `defaults.compaction.keep_recent_tokens` | defaults | Tokens kept verbatim after a compaction (0 = a quarter of the threshold) |
 | `hosts.<name>.ssh_alias` | host | `~/.ssh/config` alias (required) |
 | `hosts.<name>.user` | host | SSH login user (required) |
 | `hosts.<name>.persistent_root` | host | Mount-point of the persistent volume (required) |
@@ -223,6 +226,7 @@ overridden per host under `[hosts.<name>.dotfiles]`.
 | `pru list` | List all agents and their state |
 | `pru send <agent> <msg>` | Send a message to an agent |
 | `pru interrupt <agent>` | Cancel the agent's current turn; the session stays alive |
+| `pru handoff [agent]` | Replace an agent with a fresh one in the same worktree (defaults to self) |
 | `pru stop <agent>` | Stop an agent (keeps its state) |
 | `pru rm <agent>` | Remove an agent; `--all` also deletes its worktree + session files |
 | `pru status` | Show host + server health |
@@ -243,6 +247,44 @@ Escape yields to anything with a better claim on the key first: an open
 modal, the `@mention` / `/command` autocomplete, a mobile drawer or picker,
 and — with vim mode on — leaving insert mode. From normal mode a second
 Escape interrupts.
+
+### Long tasks: compaction and handoff
+
+Two ways to deal with a chat that has outgrown its context.
+
+**Compaction** summarizes the conversation in place. Pi does it
+automatically when the window is nearly full; `defaults.compaction.auto_compact_at`
+moves that trigger down to a fraction of the window, per model:
+
+```toml
+[defaults.compaction]
+auto_compact_at    = 0.4                       # compact at 40% of the window
+auto_compact_models = ["myprovider/claude-*"]  # empty = every model
+```
+
+That lives in the *host's* `~/.pirouette/config.toml` (the server reads it),
+or as `PIROUETTE_AUTO_COMPACT_AT` / `PIROUETTE_AUTO_COMPACT_MODELS` in the
+server's environment. It re-derives on a model switch, so moving an agent
+from a 1M-token model to a 200k one doesn't leave it compacting every turn.
+`/compact [instructions]` still compacts on demand.
+
+**Handoff** throws the conversation away and keeps the work. A new agent
+starts in the *same worktree* — same branch, same uncommitted changes, same
+model — with an empty context and a briefing; the outgoing chat is archived
+and then stopped:
+
+```bash
+pru handoff <agent> --message-file notes.md   # or --message "..."
+```
+
+`/handoff [briefing]` does it from the dashboard and follows the successor.
+Agents can hand *themselves* off: `pru handoff` with no argument picks up
+the caller's own id, and the packaged `handoff` skill tells them how to
+write a briefing worth reading. Nothing is copied from the old
+conversation, which is the point — use `/fork` when you want the history.
+
+Deleting either agent with `--worktree` leaves the shared worktree alone as
+long as the other still points at it.
 
 ### Host
 
@@ -382,10 +424,13 @@ The details that make this hold up in practice:
 | var | default | purpose |
 |---|---|---|
 | `PIROUETTE_SELECTED_HOST` | — | Host to target (set by `--host`) |
-| `PIROUETTE_URL` | selected host's `public_url` | CLI → server URL (overrides config) |
+| `PIROUETTE_URL` | selected host's `public_url` | CLI → server URL (overrides config). The server exports its own loopback URL, so `pru` works inside an agent |
 | `PIROUETTE_HOST` | `127.0.0.1` | Server bind host (set on the host by setup) |
 | `PIROUETTE_PORT` | `7777` | Server port |
 | `PIROUETTE_DATA_DIR` | `.pirouette/data` | Server data directory |
+| `PIROUETTE_AUTO_COMPACT_AT` | `0` | Compact at this fraction of the context window (overrides config) |
+| `PIROUETTE_AUTO_COMPACT_MODELS` | — | Comma-separated model globs the threshold applies to |
+| `PIROUETTE_AUTO_COMPACT_KEEP_RECENT_TOKENS` | — | Tokens kept verbatim after a compaction |
 | `PIROUETTE_RESUME_AUTOCONTINUE` | `1` | `0` leaves restart-interrupted agents parked at `waiting_input` |
 | `PIROUETTE_RESUME_CONTINUE_MESSAGE` | see above | Nudge sent to an agent whose turn a restart cut short |
 | `PIROUETTE_SELF_UPDATE_RESUME_MESSAGE` | see above | Nudge sent to the agent that ran `pru self-update` |

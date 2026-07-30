@@ -91,6 +91,16 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
     process.env.PIROUETTE_DEFAULT_THINKING_LEVEL = cfg.defaults.default_thinking_level;
   }
 
+  // Point `pru` at ourselves for everything spawned from this process —
+  // notably the agents' bash tool, whose environment is inherited from the
+  // server. Without it `pru list` / `pru handoff` inside an agent fail with
+  // "No pirouette server URL" because the host-side config has no
+  // `public_url` (that's a laptop-side setting). Always loopback: the
+  // server is on the same box, and the bind address may be 0.0.0.0.
+  if (!process.env.PIROUETTE_URL) {
+    process.env.PIROUETTE_URL = `http://127.0.0.1:${port}`;
+  }
+
   // ---- state + managers ----
   const stateManager = new StateManager(stateDir);
   const projectManager = new ProjectManager(stateManager, dataDir);
@@ -855,6 +865,43 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
           json(res, 202, { accepted: true });
         } catch (err) {
           error(res, 500, err instanceof Error ? err.message : String(err));
+        }
+        return;
+      }
+
+      // Hand this agent's work over to a fresh agent in the same worktree:
+      // successor starts with an empty context, this agent gets archived
+      // and (after a grace period) stopped. Optional `message` is the
+      // briefing sent to the successor as its first turn; optional `name`
+      // overrides the default `<parent>-<n+1>`.
+      //
+      // Usually called by the outgoing agent itself, mid-tool-call, which
+      // is why the parent's teardown is deferred rather than awaited here.
+      if (method === "POST" && sub === "/handoff") {
+        try {
+          const rawBody = await readBody(req).catch(() => "");
+          let body: { name?: string; message?: string } = {};
+          if (rawBody) {
+            try {
+              body = JSON.parse(rawBody) as { name?: string; message?: string };
+            } catch {
+              error(res, 400, "body must be JSON");
+              return;
+            }
+          }
+          const name = body.name != null ? validateName(body.name) : undefined;
+          if (body.message != null && typeof body.message !== "string") {
+            error(res, 400, "message must be a string");
+            return;
+          }
+          const successor = await agentManager.handoffAgent(agentId, {
+            name,
+            message: body.message,
+          });
+          broadcast({ kind: "agent_created", agent: successor });
+          json(res, 201, successor);
+        } catch (err) {
+          error(res, 400, err instanceof Error ? err.message : String(err));
         }
         return;
       }

@@ -57,6 +57,28 @@ port = 7777
 # `tailscale serve`, ...).
 bind_host = "127.0.0.1"
 
+[defaults.compaction]
+# Auto-compaction threshold for the agents this host runs, as a fraction of
+# the model's context window. Pi's own default only compacts when the window
+# is nearly full (16k of headroom left), which on a million-token model means
+# the agent hauls an enormous context around for hours and then summarizes
+# all of it in one go. Setting `auto_compact_at = 0.4` compacts once the
+# context passes 40% of the window instead.
+#
+# 0 (the default) leaves pi's behaviour untouched. Percentages work too:
+# `40` means the same as `0.4`. Read on the host, so put your real values in
+# the host's ~/.pirouette/config.toml (or set PIROUETTE_AUTO_COMPACT_AT).
+auto_compact_at = 0
+# Models the threshold applies to, as `provider/id` globs matched against
+# both the qualified and bare model id. Empty = every model. Useful when
+# only some of your models have windows big enough for the default to be a
+# problem, e.g. ["myprovider/claude-opus-*", "gpt-5*"].
+auto_compact_models = []
+# How much recent conversation survives a compaction, in tokens. 0 = derive
+# it from the threshold (a quarter of it), which scales with the window
+# instead of always dropping back to pi's 20k.
+keep_recent_tokens = 0
+
 [defaults.dotfiles]
 # Optional. If set, `pru setup` runs `yadm clone <url>` on the host on first
 # setup. SSH-form URLs work if your ssh-agent is forwarded to the host. Leave
