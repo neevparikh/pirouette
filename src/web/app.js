@@ -799,7 +799,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeAllDrawers();
 });
 
-// --- Esc = interrupt the current turn -------------------------------------
+// --- Esc (or Cmd/Ctrl+.) = interrupt the current turn -----------------------
 //
 // Mirrors pi's TUI, where Escape aborts the in-flight turn (and puts any
 // queued steering text back in the editor). Escape is heavily overloaded in
@@ -815,20 +815,36 @@ document.addEventListener("keydown", (e) => {
 // later in the chain -- so a flag here means something outside the page
 // (a browser extension) claimed the key. That's not a reason to leave a
 // runaway agent running.
+//
+// `Cmd+.` / `Ctrl+.` does the same thing, for the browsers where Escape
+// never arrives at all. Extensions that implement modal editing (Vimium and
+// friends) bind Escape to "leave insert mode", which blurs the focused
+// field and swallows the key at window-capture -- earlier than any listener
+// a page can register, so there is nothing to out-argue. The signature in
+// the wild is an Escape that appears to do nothing except take the caret
+// out of the composer, and then a *second* Escape that works, because by
+// then focus is on <body> and the extension isn't in insert mode any more.
+// Those extensions pass modified keys straight through, so a chord gets a
+// reliable interrupt back. `Cmd+.` is also the Mac's traditional "cancel".
 const ESC_LOG_LIMIT = 20;
-/** Rolling record of every Escape keydown the page actually sees, with what
- *  we did about it. "Esc does nothing" is ambiguous between "the dashboard
- *  declined" and "the dashboard was never asked" -- extensions that
- *  implement their own modal editing swallow the key at window-capture,
- *  before any page listener runs. `window.__pirouetteEsc` in the console
+/** Rolling record of every interrupt keypress the page actually sees, with
+ *  what we did about it. "Esc does nothing" is ambiguous between "the
+ *  dashboard declined" and "the dashboard was never asked" -- see the
+ *  window-capture note above. `window.__pirouetteEsc` in the console
  *  distinguishes the two: entries with a `reason` mean we saw the press,
  *  an empty array means we never did. */
 const escLog = [];
 window.__pirouetteEsc = escLog;
+/** True for the `Cmd+.` / `Ctrl+.` interrupt chord. */
+function isInterruptChord(e) {
+  return (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key === ".";
+}
 document.addEventListener(
   "keydown",
   (e) => {
-    if (e.key !== "Escape") return;
+    const isEscape = e.key === "Escape";
+    const isChord = !isEscape && isInterruptChord(e);
+    if (!isEscape && !isChord) return;
     const { action, reason } = escapeAction({
       extUiModalOpen: !$extUiModal.classList.contains("hidden"),
       projectModalOpen: Boolean($projModal) && !$projModal.classList.contains("hidden"),
@@ -841,12 +857,17 @@ document.addEventListener(
         ($modelPicker && !$modelPicker.classList.contains("hidden")) ||
         ($thinkingPicker && !$thinkingPicker.classList.contains("hidden")) ||
         ($themePicker && !$themePicker.classList.contains("hidden")),
+      // The chord isn't a vim key, so vim has no claim on it.
       vimInsertMode:
-        vim.isEnabled() && document.activeElement === $input && vim.mode === "insert",
+        isEscape &&
+        vim.isEnabled() &&
+        document.activeElement === $input &&
+        vim.mode === "insert",
       canInterrupt: canInterruptSelected(),
     });
     escLog.push({
       at: new Date().toISOString(),
+      key: isEscape ? "Escape" : "Cmd/Ctrl+.",
       action,
       reason,
       focus: document.activeElement?.id || document.activeElement?.tagName || null,
@@ -858,6 +879,9 @@ document.addEventListener(
     if (escLog.length > ESC_LOG_LIMIT) escLog.shift();
     console.debug("[esc]", action, reason, escLog[escLog.length - 1]);
     if (action !== "interrupt") return;
+    // The chord has no useful default (and on some browsers a stale one:
+    // Cmd+. was "stop loading" on the Mac), so claim it outright.
+    if (isChord) e.preventDefault();
     void interruptAgent();
   },
   true,

@@ -238,8 +238,9 @@ in the input bar.
 aborts whatever the selected agent is doing right now — the in-flight LLM
 call, a running tool, a compaction, a `!bash` run — without tearing the
 session down. Any queued steering / follow-up messages are dropped and put
-back in the composer so you can edit and resend them. The header's
-`interrupt esc` pill and `/interrupt` do the same thing, as does
+back in the composer so you can edit and resend them.
+<kbd>Cmd</kbd>+<kbd>.</kbd> / <kbd>Ctrl</kbd>+<kbd>.</kbd>, the header's
+`interrupt esc` pill and `/interrupt` all do the same thing, as does
 `pru interrupt <agent>`. Use `stop` (not Escape) when you want the agent
 actually shut down; `resume` brings it back.
 
@@ -248,22 +249,31 @@ modal, the `@mention` / `/command` autocomplete, a mobile drawer or picker,
 and — with vim mode on — leaving insert mode. From normal mode a second
 Escape interrupts.
 
-If <kbd>Esc</kbd> appears to do nothing, the browser console tells you
-whether the dashboard ever saw the key:
+**When Escape never arrives.** Browser extensions that add modal editing
+(Vimium, Surfingkeys, Vim Vixen) bind <kbd>Esc</kbd> to "leave insert
+mode": they blur the focused field and swallow the key at window-capture,
+which is earlier than any listener a page is allowed to register. The
+symptom is an Escape that does nothing except take the caret out of the
+composer — followed by a *second* Escape that works, because by then focus
+is on the body and the extension is no longer in insert mode.
+
+<kbd>Cmd</kbd>+<kbd>.</kbd> / <kbd>Ctrl</kbd>+<kbd>.</kbd> interrupts too,
+and those extensions pass modified keys straight through. (Excluding the
+dashboard's URL in the extension's settings restores single-press Escape,
+if you'd rather.)
+
+The browser console says which case you're in:
 
 ```js
-__pirouetteEsc   // one entry per Escape keydown that reached the page
-// [{ action: "defer", reason: "vim-insert-mode", focus: "message-input", ... }]
+__pirouetteEsc   // one entry per interrupt keypress that reached the page
+// [{ key: "Escape", action: "defer", reason: "vim-insert-mode", focus: "message-input", ... }]
 ```
 
-An entry with a `reason` means the dashboard decided; an empty array means
-the press never arrived, which points at something outside the page —
-typically a browser extension with its own modal editing (Vimium and
-friends) binding Escape to "blur this field", or a password manager /
-writing assistant overlay. Those swallow the key before any page listener
-runs; the `interrupt esc` pill, `/interrupt` and `pru interrupt` still work.
-`defaultPrevented: true` on an entry means something outside the page
-claimed the key but let it through — the dashboard interrupts anyway.
+An entry with a `reason` means the dashboard decided and the reason says
+why; an empty array means the press never arrived at all. A `focus: ""` on
+the *next* press is the tell for the blur-and-swallow behaviour above.
+`defaultPrevented: true` means something outside the page claimed the key
+but let it through — the dashboard interrupts anyway.
 
 ### Long tasks: compaction and handoff
 

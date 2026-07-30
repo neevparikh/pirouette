@@ -214,6 +214,50 @@ await withDashboard({ agentState: "running", vim: false }, async (page, stub) =>
     window.__pirouetteEsc.at(-1).defaultPrevented), true);
 });
 
+console.log("cmd/ctrl+. interrupts:");
+await withDashboard({ agentState: "running", vim: false }, async (page, stub) => {
+  await press(page, "Control+.");
+  expect("interrupts", stub.interrupts.length, 1);
+  expect("logged as the chord", await page.evaluate(() => window.__pirouetteEsc.at(-1).key), "Cmd/Ctrl+.");
+  expect("focus stays in the composer", await focused(page), "message-input");
+});
+
+console.log("cmd/ctrl+. with vim in insert mode (vim has no claim on a chord):");
+await withDashboard({ agentState: "running", vim: true }, async (page, stub) => {
+  expect("in insert mode", await vimLabel(page), "INSERT");
+  await press(page, "Control+.");
+  expect("interrupts", stub.interrupts.length, 1);
+  expect("still in insert mode", await vimLabel(page), "INSERT");
+});
+
+// The reported environment: a modal-editing extension binds Escape to
+// "leave insert mode", which blurs the field and swallows the key at
+// window-capture -- earlier than any listener the page can register.
+console.log("a vimium-style extension swallowing Escape at window-capture:");
+await withDashboard({ agentState: "running", vim: false }, async (page, stub) => {
+  await page.addInitScript(() => {
+    window.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      document.activeElement?.blur?.();
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }, true);
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForSelector("[data-agent-id]");
+  await page.click("[data-agent-id]");
+  await page.focus("#message-input");
+  await press(page, "Escape");
+  expect("escape is lost, as it must be", stub.interrupts.length, 0);
+  expect("the page never saw it", await escLog(page), []);
+  // Empty string, not null: focus is on <body>, which has no id. That's the
+  // `focus: ""` you see in the console when this happens for real.
+  expect("and the caret was taken out of the composer", await focused(page), "");
+  // ...which is exactly why the chord exists.
+  await press(page, "Control+.");
+  expect("the chord still interrupts", stub.interrupts.length, 1);
+});
+
 if (failures.length > 0) {
   console.log("\n--- failures ---");
   for (const f of failures) console.log(`  ${f}`);

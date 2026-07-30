@@ -5,7 +5,8 @@
 // standing up the whole page.
 
 /**
- * Decide what the Escape key means right now.
+ * Decide what the Escape key (or the `Cmd+.` / `Ctrl+.` interrupt chord)
+ * means right now.
  *
  * Escape is heavily overloaded in the dashboard, so exactly one consumer
  * gets it per press. The rule, in order:
@@ -34,7 +35,9 @@
  * @param {boolean} [state.slashPopupOpen]   slash-command autocomplete is open
  * @param {boolean} [state.drawerOpen]       a mobile drawer is open
  * @param {boolean} [state.pickerOpen]       model / thinking / theme picker is open
- * @param {boolean} [state.vimInsertMode]    vim is on, focused, and in insert mode
+ * @param {boolean} [state.vimInsertMode]    vim is on, focused, and in insert
+ *   mode. Only ever set for Escape: the chord isn't a vim key, so vim has no
+ *   claim on it.
  * @param {boolean} [state.canInterrupt]     selected agent has an in-flight turn
  * @returns {{ action: "interrupt" | "defer", reason: string }}
  */
