@@ -80,8 +80,20 @@ follow [SemVer](https://semver.org).
   Escape is heavily overloaded in the dashboard, so the handler runs in the
   capture phase and explicitly yields to everything with a better claim on
   the key: the extension-UI modal, the new-project modal, the `@mention` /
-  slash autocomplete popups, open mobile drawers and pickers, and vim's
-  insert mode (a second Escape from normal mode interrupts). The `abort()`
+  slash autocomplete popups, and open mobile drawers and pickers. Those
+  precedence rules live in a pure `escapeAction()` (`src/web/keys.js`) so
+  they can be unit-tested. What does *not* outrank an in-flight turn is vim
+  mode: an earlier cut let insert mode eat the first press, which left the
+  agent running *and* the composer in normal mode — the key appeared to do
+  nothing except stop you typing. Escape now aborts on the first press from
+  anywhere, including mid-word in the composer, and is swallowed before it
+  reaches the textarea so the editor stays in insert mode, ready for the
+  next message; pi's TUI works the same way, with the editor never seeing
+  Escape while the session streams. `Ctrl+[` still reaches normal mode
+  mid-turn, and with nothing in flight Escape is vim's as usual. Verified
+  end-to-end by `scripts/check-escape.mjs`, a headless-Chromium harness that
+  serves the dashboard against a stub backend and asserts the key ordering
+  that unit tests can't see. The `abort()`
   wait is bounded at 10s so a wedged tool teardown can't hold the HTTP
   response open, and the state machine has a backstop for the case where
   pi's `agent_end` doesn't arrive — a no-longer-streaming agent must never

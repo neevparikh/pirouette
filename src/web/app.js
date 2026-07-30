@@ -22,6 +22,7 @@ import {
 } from "./transcript.js";
 import { renderMarkdownPi } from "./pi-markdown.js";
 import { VimMode } from "./vim.js";
+import { escapeAction } from "./keys.js";
 
 // --- state ---
 
@@ -803,41 +804,36 @@ document.addEventListener("keydown", (e) => {
 // Mirrors pi's TUI, where Escape aborts the in-flight turn (and puts any
 // queued steering text back in the editor). Escape is heavily overloaded in
 // this app, so this handler runs in the CAPTURE phase -- before the
-// textarea-level handlers -- and explicitly yields to everything with a
-// better claim on the key:
+// textarea-level handlers, vim's included -- and asks `escapeAction` who
+// owns the key right now (see src/web/keys.js for the precedence rules and
+// why a running turn outranks vim's insert mode).
 //
-//   1. the extension-UI modal (its own capture handler, registered earlier,
-//      answers the request and preventDefaults),
-//   2. the new-project modal,
-//   3. the @mention / slash autocomplete popups (closed by the $input
-//      keydown handler, which bubbles later),
-//   4. an open mobile drawer or model/thinking/theme picker (closed by the
-//      drawer handler above),
-//   5. vim insert mode -- Escape means "go to normal mode" first. Hit it
-//      again from normal mode and you get the interrupt, which is the
-//      muscle memory a vim user already has.
-//
-// Only when none of those apply, and the selected agent is actually
-// mid-turn, do we interrupt. We don't stopPropagation: closing state that
-// happens to also listen for Escape is harmless once the interrupt fired.
+// When the interrupt wins we swallow the event: `stopPropagation` from a
+// document-level capture listener keeps it from ever reaching the textarea,
+// so vim doesn't also drop the composer into normal mode on the way past --
+// which would leave the user unable to type right after they asked the
+// agent to stop.
 document.addEventListener(
   "keydown",
   (e) => {
     if (e.key !== "Escape" || e.defaultPrevented) return;
-    if (!$extUiModal.classList.contains("hidden")) return;
-    if ($projModal && !$projModal.classList.contains("hidden")) return;
-    if (!$mentionPopup.classList.contains("hidden")) return;
-    if (!$slashPopup.classList.contains("hidden")) return;
-    const drawerOpen =
-      ($chatSidebar && $chatSidebar.classList.contains("drawer-open")) ||
-      ($headerActions && $headerActions.classList.contains("drawer-open"));
-    const pickerOpen =
-      ($modelPicker && !$modelPicker.classList.contains("hidden")) ||
-      ($thinkingPicker && !$thinkingPicker.classList.contains("hidden")) ||
-      ($themePicker && !$themePicker.classList.contains("hidden"));
-    if (drawerOpen || pickerOpen) return;
-    if (vim.isEnabled() && document.activeElement === $input && vim.mode === "insert") return;
-    if (!canInterruptSelected()) return;
+    const action = escapeAction({
+      extUiModalOpen: !$extUiModal.classList.contains("hidden"),
+      projectModalOpen: Boolean($projModal) && !$projModal.classList.contains("hidden"),
+      mentionPopupOpen: !$mentionPopup.classList.contains("hidden"),
+      slashPopupOpen: !$slashPopup.classList.contains("hidden"),
+      drawerOpen:
+        ($chatSidebar && $chatSidebar.classList.contains("drawer-open")) ||
+        ($headerActions && $headerActions.classList.contains("drawer-open")),
+      pickerOpen:
+        ($modelPicker && !$modelPicker.classList.contains("hidden")) ||
+        ($thinkingPicker && !$thinkingPicker.classList.contains("hidden")) ||
+        ($themePicker && !$themePicker.classList.contains("hidden")),
+      canInterrupt: canInterruptSelected(),
+    });
+    if (action !== "interrupt") return;
+    e.preventDefault();
+    e.stopPropagation();
     void interruptAgent();
   },
   true,
