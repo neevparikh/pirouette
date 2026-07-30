@@ -3,35 +3,53 @@ import { escapeAction } from "../keys.js";
 
 describe("escapeAction", () => {
   it("does nothing when there's no in-flight turn", () => {
-    expect(escapeAction({})).toBe("defer");
-    expect(escapeAction({ canInterrupt: false })).toBe("defer");
+    expect(escapeAction({})).toEqual({ action: "defer", reason: "nothing-in-flight" });
+    expect(escapeAction({ canInterrupt: false })).toEqual({
+      action: "defer",
+      reason: "nothing-in-flight",
+    });
   });
 
   it("interrupts a running turn", () => {
-    expect(escapeAction({ canInterrupt: true })).toBe("interrupt");
-  });
-
-  // The regression this file exists for: the composer is focused, vim mode
-  // may or may not be on, the agent is streaming. Escape has to stop the
-  // agent -- not silently flip the editor into normal mode and leave the
-  // turn running. vim's mode is intentionally not an input here.
-  it("interrupts regardless of the composer's editing mode", () => {
-    expect(escapeAction({ canInterrupt: true, vimMode: "insert" })).toBe("interrupt");
-    expect(escapeAction({ canInterrupt: true, vimMode: "normal" })).toBe("interrupt");
+    expect(escapeAction({ canInterrupt: true })).toEqual({
+      action: "interrupt",
+      reason: "interrupt",
+    });
   });
 
   it("yields to anything with a better claim on the key", () => {
-    const claims = [
-      "extUiModalOpen",
-      "projectModalOpen",
-      "mentionPopupOpen",
-      "slashPopupOpen",
-      "drawerOpen",
-      "pickerOpen",
-    ];
-    for (const claim of claims) {
-      expect(escapeAction({ canInterrupt: true, [claim]: true })).toBe("defer");
+    const claims = {
+      extUiModalOpen: "extension-ui-modal",
+      projectModalOpen: "project-modal",
+      mentionPopupOpen: "mention-popup",
+      slashPopupOpen: "slash-popup",
+      drawerOpen: "drawer-open",
+      pickerOpen: "picker-open",
+      vimInsertMode: "vim-insert-mode",
+    };
+    for (const [claim, reason] of Object.entries(claims)) {
+      expect(escapeAction({ canInterrupt: true, [claim]: true })).toEqual({
+        action: "defer",
+        reason,
+      });
     }
+  });
+
+  it("keeps vim's insert -> normal press, then interrupts from normal mode", () => {
+    const running = { canInterrupt: true };
+    expect(escapeAction({ ...running, vimInsertMode: true }).action).toBe("defer");
+    expect(escapeAction({ ...running, vimInsertMode: false }).action).toBe("interrupt");
+  });
+
+  it("reports the highest-priority claim when several are open", () => {
+    expect(
+      escapeAction({
+        canInterrupt: true,
+        extUiModalOpen: true,
+        slashPopupOpen: true,
+        drawerOpen: true,
+      }).reason,
+    ).toBe("extension-ui-modal");
   });
 
   it("treats every overlay independently (one open is enough to defer)", () => {
@@ -44,7 +62,8 @@ describe("escapeAction", () => {
         slashPopupOpen: true,
         drawerOpen: false,
         pickerOpen: false,
+        vimInsertMode: false,
       }),
-    ).toBe("defer");
+    ).toEqual({ action: "defer", reason: "slash-popup" });
   });
 });

@@ -248,6 +248,23 @@ modal, the `@mention` / `/command` autocomplete, a mobile drawer or picker,
 and — with vim mode on — leaving insert mode. From normal mode a second
 Escape interrupts.
 
+If <kbd>Esc</kbd> appears to do nothing, the browser console tells you
+whether the dashboard ever saw the key:
+
+```js
+__pirouetteEsc   // one entry per Escape keydown that reached the page
+// [{ action: "defer", reason: "vim-insert-mode", focus: "message-input", ... }]
+```
+
+An entry with a `reason` means the dashboard decided; an empty array means
+the press never arrived, which points at something outside the page —
+typically a browser extension with its own modal editing (Vimium and
+friends) binding Escape to "blur this field", or a password manager /
+writing assistant overlay. Those swallow the key before any page listener
+runs; the `interrupt esc` pill, `/interrupt` and `pru interrupt` still work.
+`defaultPrevented: true` on an entry means something outside the page
+claimed the key but let it through — the dashboard interrupts anyway.
+
 ### Long tasks: compaction and handoff
 
 Two ways to deal with a chat that has outgrown its context.

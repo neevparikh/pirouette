@@ -804,20 +804,32 @@ document.addEventListener("keydown", (e) => {
 // Mirrors pi's TUI, where Escape aborts the in-flight turn (and puts any
 // queued steering text back in the editor). Escape is heavily overloaded in
 // this app, so this handler runs in the CAPTURE phase -- before the
-// textarea-level handlers, vim's included -- and asks `escapeAction` who
-// owns the key right now (see src/web/keys.js for the precedence rules and
-// why a running turn outranks vim's insert mode).
+// textarea-level handlers -- and defers to everything with a better claim on
+// the key. `escapeAction` (src/web/keys.js) owns that precedence list.
 //
-// When the interrupt wins we swallow the event: `stopPropagation` from a
-// document-level capture listener keeps it from ever reaching the textarea,
-// so vim doesn't also drop the composer into normal mode on the way past --
-// which would leave the user unable to type right after they asked the
-// agent to stop.
+// We don't stopPropagation: closing state that happens to also listen for
+// Escape is harmless once the interrupt fired.
+//
+// Note we do NOT bail on `e.defaultPrevented`. Nothing of ours can have set
+// it this early -- our own Escape consumers are either checked above or run
+// later in the chain -- so a flag here means something outside the page
+// (a browser extension) claimed the key. That's not a reason to leave a
+// runaway agent running.
+const ESC_LOG_LIMIT = 20;
+/** Rolling record of every Escape keydown the page actually sees, with what
+ *  we did about it. "Esc does nothing" is ambiguous between "the dashboard
+ *  declined" and "the dashboard was never asked" -- extensions that
+ *  implement their own modal editing swallow the key at window-capture,
+ *  before any page listener runs. `window.__pirouetteEsc` in the console
+ *  distinguishes the two: entries with a `reason` mean we saw the press,
+ *  an empty array means we never did. */
+const escLog = [];
+window.__pirouetteEsc = escLog;
 document.addEventListener(
   "keydown",
   (e) => {
-    if (e.key !== "Escape" || e.defaultPrevented) return;
-    const action = escapeAction({
+    if (e.key !== "Escape") return;
+    const { action, reason } = escapeAction({
       extUiModalOpen: !$extUiModal.classList.contains("hidden"),
       projectModalOpen: Boolean($projModal) && !$projModal.classList.contains("hidden"),
       mentionPopupOpen: !$mentionPopup.classList.contains("hidden"),
@@ -829,17 +841,35 @@ document.addEventListener(
         ($modelPicker && !$modelPicker.classList.contains("hidden")) ||
         ($thinkingPicker && !$thinkingPicker.classList.contains("hidden")) ||
         ($themePicker && !$themePicker.classList.contains("hidden")),
+      vimInsertMode:
+        vim.isEnabled() && document.activeElement === $input && vim.mode === "insert",
       canInterrupt: canInterruptSelected(),
     });
+    escLog.push({
+      at: new Date().toISOString(),
+      action,
+      reason,
+      focus: document.activeElement?.id || document.activeElement?.tagName || null,
+      // True means a listener that ran before ours -- i.e. not ours -- had
+      // already claimed the key.
+      defaultPrevented: e.defaultPrevented,
+      agentState: agents.find((a) => a.id === selectedAgentId)?.state ?? null,
+    });
+    if (escLog.length > ESC_LOG_LIMIT) escLog.shift();
+    console.debug("[esc]", action, reason, escLog[escLog.length - 1]);
     if (action !== "interrupt") return;
-    e.preventDefault();
-    e.stopPropagation();
     void interruptAgent();
   },
   true,
 );
 window.addEventListener("resize", () => {
   updateInputPlaceholder();
+  // Drawers are a mobile affordance, and `drawer-open` is a class that
+  // outlives the viewport that justified it: open the sidebar on a narrow
+  // window, widen it, and the class stays set on an element the desktop
+  // layout renders inline. Nothing looks wrong, but every Escape from then
+  // on is spent "closing" an invisible drawer instead of interrupting.
+  if (!isMobileViewport()) closeAllDrawers();
 });
 
 // --- pi-md ResizeObserver ---

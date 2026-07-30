@@ -14,18 +14,18 @@
  *   2. An autocomplete popup is open (`@mention` / slash) — Escape closes it.
  *   3. A mobile drawer or a picker (model / thinking / theme) is open —
  *      Escape closes that.
- *   4. Otherwise, if the selected agent is mid-turn, Escape interrupts it.
- *   5. Otherwise Escape belongs to whoever else wants it (notably vim's
- *      insert → normal transition).
+ *   4. vim insert mode — Escape means "go to normal mode" first. Hit it
+ *      again from normal mode to interrupt, which is the muscle memory a
+ *      vim user already has.
+ *   5. Otherwise, if the selected agent is mid-turn, Escape interrupts it.
+ *   6. Otherwise Escape does nothing here.
  *
- * Note what is deliberately absent: vim's mode. While a turn is in flight
- * the interrupt outranks vim, mirroring pi's TUI, where the editor never
- * sees Escape while the session is streaming — the abort handler takes it
- * first. Letting insert mode win instead produced the worst of both worlds:
- * the agent kept running *and* the composer dropped into normal mode, so
- * the key appeared to do nothing except make the box unusable. Vim users
- * mid-turn can still reach normal mode with `Ctrl+[`, which this handler
- * ignores.
+ * Returning a reason as well as an action isn't decoration: Escape is the
+ * key most likely to be intercepted before the page ever sees it (browser
+ * extensions with their own modal editing bind it), so "Esc does nothing"
+ * is ambiguous between "we declined" and "we were never asked". The caller
+ * records these decisions on `window.__pirouetteEsc` so the console can
+ * tell the two apart.
  *
  * @param {object} state
  * @param {boolean} [state.extUiModalOpen]   extension-UI modal is showing
@@ -34,18 +34,18 @@
  * @param {boolean} [state.slashPopupOpen]   slash-command autocomplete is open
  * @param {boolean} [state.drawerOpen]       a mobile drawer is open
  * @param {boolean} [state.pickerOpen]       model / thinking / theme picker is open
+ * @param {boolean} [state.vimInsertMode]    vim is on, focused, and in insert mode
  * @param {boolean} [state.canInterrupt]     selected agent has an in-flight turn
- * @returns {"interrupt" | "defer"} `"interrupt"` when this press should
- *   abort the current turn (and be swallowed so nothing else reacts to it),
- *   `"defer"` when Escape belongs to another consumer.
+ * @returns {{ action: "interrupt" | "defer", reason: string }}
  */
 export function escapeAction(state = {}) {
-  if (state.extUiModalOpen) return "defer";
-  if (state.projectModalOpen) return "defer";
-  if (state.mentionPopupOpen) return "defer";
-  if (state.slashPopupOpen) return "defer";
-  if (state.drawerOpen) return "defer";
-  if (state.pickerOpen) return "defer";
-  if (state.canInterrupt) return "interrupt";
-  return "defer";
+  if (state.extUiModalOpen) return { action: "defer", reason: "extension-ui-modal" };
+  if (state.projectModalOpen) return { action: "defer", reason: "project-modal" };
+  if (state.mentionPopupOpen) return { action: "defer", reason: "mention-popup" };
+  if (state.slashPopupOpen) return { action: "defer", reason: "slash-popup" };
+  if (state.drawerOpen) return { action: "defer", reason: "drawer-open" };
+  if (state.pickerOpen) return { action: "defer", reason: "picker-open" };
+  if (state.vimInsertMode) return { action: "defer", reason: "vim-insert-mode" };
+  if (!state.canInterrupt) return { action: "defer", reason: "nothing-in-flight" };
+  return { action: "interrupt", reason: "interrupt" };
 }

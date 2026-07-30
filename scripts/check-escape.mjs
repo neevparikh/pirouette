@@ -3,7 +3,7 @@
 //
 // End-to-end check for the dashboard's Escape key, run against a real
 // browser. Unit tests can cover the precedence rules (src/web/keys.js), but
-// not the thing that actually broke here: WHO gets the keydown first when a
+// not the thing they exist to arbitrate: WHO gets the keydown first when a
 // document-level capture listener and the composer's own vim layer both
 // want Escape. That only shows up in a browser.
 //
@@ -149,6 +149,7 @@ async function withDashboard({ agentState, vim }, body) {
 
 const vimLabel = (page) => page.locator("#vim-mode-label").textContent();
 const focused = (page) => page.evaluate(() => document.activeElement?.id ?? null);
+const escLog = (page) => page.evaluate(() => window.__pirouetteEsc.map((e) => e.reason));
 const press = async (page, key) => {
   await page.keyboard.press(key);
   await page.waitForTimeout(250);
@@ -160,28 +161,57 @@ await withDashboard({ agentState: "running", vim: false }, async (page, stub) =>
   await press(page, "Escape");
   expect("interrupts", stub.interrupts.length, 1);
   expect("focus stays in the composer", await focused(page), "message-input");
+  expect("records the decision", await escLog(page), ["interrupt"]);
 });
 
 console.log("escape, vim on, agent running:");
 await withDashboard({ agentState: "running", vim: true }, async (page, stub) => {
   expect("starts in insert mode", await vimLabel(page), "INSERT");
   await press(page, "Escape");
-  // The bug: the first Escape used to be eaten by vim's insert -> normal
-  // transition, leaving the turn running and the composer unusable.
-  expect("interrupts on the first press", stub.interrupts.length, 1);
-  expect("stays in insert mode", await vimLabel(page), "INSERT");
-  expect("focus stays in the composer", await focused(page), "message-input");
-  // Ctrl+[ is the escape hatch for reaching normal mode mid-turn.
-  await press(page, "Control+[");
-  expect("ctrl-[ reaches normal mode", await vimLabel(page), "NORMAL");
-  expect("ctrl-[ does not interrupt", stub.interrupts.length, 1);
+  // vim keeps the first press: insert -> normal, muscle memory intact.
+  expect("first press goes to vim", stub.interrupts.length, 0);
+  expect("now in normal mode", await vimLabel(page), "NORMAL");
+  await press(page, "Escape");
+  expect("second press interrupts", stub.interrupts.length, 1);
+  expect("reasons recorded", await escLog(page), ["vim-insert-mode", "interrupt"]);
 });
 
-console.log("escape, vim on, agent idle:");
-await withDashboard({ agentState: "waiting_input", vim: true }, async (page, stub) => {
+console.log("escape, vim off, agent idle:");
+await withDashboard({ agentState: "waiting_input", vim: false }, async (page, stub) => {
   await press(page, "Escape");
   expect("no interrupt when nothing is in flight", stub.interrupts.length, 0);
-  expect("vim gets the key", await vimLabel(page), "NORMAL");
+  expect("reason recorded", await escLog(page), ["nothing-in-flight"]);
+});
+
+// A drawer is a mobile affordance whose class outlives the viewport: open
+// it narrow, widen the window, and Escape used to be spent closing an
+// invisible drawer forever after.
+console.log("escape after a mobile drawer was opened, then the window widened:");
+await withDashboard({ agentState: "running", vim: false }, async (page, stub) => {
+  await page.setViewportSize({ width: 420, height: 900 });
+  await page.click("#mobile-menu-btn");
+  await page.waitForTimeout(200);
+  expect("drawer opened", await page.evaluate(() =>
+    document.getElementById("chat-sidebar").classList.contains("drawer-open")), true);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.waitForTimeout(300);
+  expect("drawer state cleared on the way back to desktop", await page.evaluate(() =>
+    document.getElementById("chat-sidebar").classList.contains("drawer-open")), false);
+  await page.focus("#message-input");
+  await press(page, "Escape");
+  expect("interrupts", stub.interrupts.length, 1);
+});
+
+// An extension that calls preventDefault() on Escape without stopping
+// propagation must not be able to keep a runaway agent running.
+console.log("escape after another listener called preventDefault:");
+await withDashboard({ agentState: "running", vim: false }, async (page, stub) => {
+  await page.evaluate(() =>
+    window.addEventListener("keydown", (e) => e.key === "Escape" && e.preventDefault(), true));
+  await press(page, "Escape");
+  expect("still interrupts", stub.interrupts.length, 1);
+  expect("and says the key was already claimed", await page.evaluate(() =>
+    window.__pirouetteEsc.at(-1).defaultPrevented), true);
 });
 
 if (failures.length > 0) {

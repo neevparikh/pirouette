@@ -80,20 +80,24 @@ follow [SemVer](https://semver.org).
   Escape is heavily overloaded in the dashboard, so the handler runs in the
   capture phase and explicitly yields to everything with a better claim on
   the key: the extension-UI modal, the new-project modal, the `@mention` /
-  slash autocomplete popups, and open mobile drawers and pickers. Those
-  precedence rules live in a pure `escapeAction()` (`src/web/keys.js`) so
-  they can be unit-tested. What does *not* outrank an in-flight turn is vim
-  mode: an earlier cut let insert mode eat the first press, which left the
-  agent running *and* the composer in normal mode — the key appeared to do
-  nothing except stop you typing. Escape now aborts on the first press from
-  anywhere, including mid-word in the composer, and is swallowed before it
-  reaches the textarea so the editor stays in insert mode, ready for the
-  next message; pi's TUI works the same way, with the editor never seeing
-  Escape while the session streams. `Ctrl+[` still reaches normal mode
-  mid-turn, and with nothing in flight Escape is vim's as usual. Verified
-  end-to-end by `scripts/check-escape.mjs`, a headless-Chromium harness that
-  serves the dashboard against a stub backend and asserts the key ordering
-  that unit tests can't see. The `abort()`
+  slash autocomplete popups, open mobile drawers and pickers, and vim's
+  insert mode (a second Escape from normal mode interrupts). Those
+  precedence rules now live in a pure `escapeAction()` (`src/web/keys.js`)
+  with unit tests, and `scripts/check-escape.mjs` drives the real dashboard
+  in headless Chromium against a stub backend — which listener wins a
+  keydown is exactly the part unit tests can't see. Two ways the key could
+  be lost are fixed along the way: a `drawer-open` class left behind by a
+  mobile drawer after the window was widened used to swallow every
+  subsequent Escape into closing an invisible drawer (drawers are now
+  dismissed when the viewport goes back to desktop), and an
+  already-`defaultPrevented` event no longer makes the handler bail —
+  nothing of ours can have set that flag at capture time, so it means an
+  extension claimed the key, which is not a reason to leave a runaway agent
+  running. For the cases we genuinely can't win — an extension that
+  swallows Escape outright at window-capture, as Vimium-style modal editing
+  does — every Escape the page sees is recorded on `window.__pirouetteEsc`
+  with the decision and its reason, so the console can distinguish "the
+  dashboard declined" from "the dashboard was never asked". The `abort()`
   wait is bounded at 10s so a wedged tool teardown can't hold the HTTP
   response open, and the state machine has a backstop for the case where
   pi's `agent_end` doesn't arrive — a no-longer-streaming agent must never
