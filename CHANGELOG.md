@@ -48,6 +48,16 @@ follow [SemVer](https://semver.org).
   JSON with fields missing — nothing detected it and there was no backup to
   restore from.
 
+- **The browser tab title names the chat you're looking at**:
+  `pirouette—<project>—<chat>`, instead of a constant `pirouette` on every
+  tab. With half a dozen dashboards open you had to click through them to
+  find the one you meant; now the tab strip (and window switcher, and
+  bookmark) says which chat is on screen. The title follows selection,
+  renames and project switches over the WS — it's recomputed wherever the
+  agent list or agent header renders — and degrades gracefully to
+  `pirouette—<project>` with no chat open and plain `pirouette` before the
+  first project list arrives.
+
 ### Changed
 
 - **Sending a message to an archived chat un-archives it.** Archiving is a

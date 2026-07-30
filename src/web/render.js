@@ -485,3 +485,17 @@ export function pickFastModeState(snapshot, model) {
   }
   return snapshot.global ?? null;
 }
+
+/** Build the browser tab title: `pirouette—<project>—<chat>`.
+ *
+ *  Both trailing segments are optional and dropped when unknown, so the
+ *  title degrades to `pirouette—<project>` (a project picked in the
+ *  sidebar but no chat open) and finally to plain `pirouette`. */
+export function formatDocumentTitle(projectName, agentName) {
+  const parts = ["pirouette"];
+  const project = typeof projectName === "string" ? projectName.trim() : "";
+  const agent = typeof agentName === "string" ? agentName.trim() : "";
+  if (project) parts.push(project);
+  if (project && agent) parts.push(agent);
+  return parts.join("\u2014");
+}
