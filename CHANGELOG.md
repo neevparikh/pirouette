@@ -9,6 +9,60 @@ follow [SemVer](https://semver.org).
 
 ### Added
 
+- **Auto-compaction can fire at a fraction of the context window.** Pi's
+  built-in trigger is `contextTokens > contextWindow - 16384`: a safety net
+  against overflow, not a strategy. On a million-token model that means an
+  agent drags a huge context around for hours, pays for it on every turn, and
+  then summarizes ~1M tokens in a single call. `[defaults.compaction]` in the
+  host's config (or `PIROUETTE_AUTO_COMPACT_AT` in the server's environment)
+  moves the trigger to `auto_compact_at` × the window, optionally restricted
+  to `auto_compact_models` globs so a 1M-token model can compact at 40% while
+  a 128k one keeps pi's default. Unset, nothing changes.
+
+  The fraction is translated into the only knob pi exposes, `reserveTokens`,
+  which also budgets the summary itself — raising it can't starve the
+  summariser, because that budget is clamped to the model's `maxTokens`
+  anyway. `keepRecentTokens` defaults to a quarter of the trigger rather than
+  pi's flat 20k, so compacting a 400k context doesn't amputate everything but
+  the last few turns. Settings are re-derived on a model switch: a threshold
+  computed for a 1M window would otherwise mean a reserve larger than the
+  whole window after switching to a 200k model — i.e. compaction on every
+  turn. And because pi rebuilds its merged settings from the global layer on
+  any unrelated `save()` (a model or thinking-level change is enough), the
+  values are written into that layer too, not just applied as overrides;
+  there's a test that fails if a future pi version stops honouring it.
+
+- **`pru handoff` — replace an agent with a fresh one in the same worktree.**
+  The successor inherits the project, worktree, branch, uncommitted changes,
+  model and thinking level, and starts with an *empty* context plus whatever
+  briefing it is given; the outgoing chat is archived and stopped a few
+  seconds later. That grace period is load-bearing: the caller is usually the
+  outgoing agent itself, mid-tool-call, and an immediate teardown would kill
+  the very command that asked for the handoff.
+
+  This is the escape hatch compaction can't be. Compaction summarizes a long
+  conversation; a handoff admits the conversation is the problem and keeps
+  only the work. It is also not a fork — forking copies the history and
+  branches the worktree, which is the opposite of what a stale context needs.
+  Surfaced as `pru handoff [agent] [--name] [--message|--message-file]`,
+  `/handoff [briefing]` in the dashboard (which follows the successor), and
+  `POST /api/agents/:id/handoff`. Agents can hand *themselves* off: with no
+  argument the CLI recovers the caller's id from `PI_SESSION_FILE`. Deleting
+  either agent with `--worktree` now leaves the directory alone while the
+  other still points at it.
+
+- **A packaged `handoff` skill**, loaded from the pirouette package itself
+  (`skills/`) alongside the user's `~/.pi/agent/skills`. It tells an agent
+  when handing off beats compacting, what has to be committed or written down
+  before the context is thrown away, and how to write a briefing for someone
+  who knows the codebase but has never seen the task. Without it agents have
+  no way to discover the workflow — an endpoint is not a procedure.
+
+- **`PIROUETTE_URL` is exported to everything the server spawns**, pointing at
+  its own loopback address. `pru` inside an agent used to fail with "No
+  pirouette server URL" because URL resolution falls back to the selected
+  host's `public_url`, which is a laptop-side setting the host doesn't have.
+
 - **<kbd>Esc</kbd> interrupts the current turn**, the way it does in pi's TUI.
   Until now the only way to stop a runaway agent from the dashboard was
   `stop`, which disposes the pi session entirely and parks the agent until

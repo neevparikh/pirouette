@@ -17,6 +17,7 @@
   "files": [
     "dist/",
     "scripts/",
+    "skills/",
     "pirouette.toml",
     "README.md",
     "CHANGELOG.md"

@@ -14,6 +14,7 @@ import { ssh } from "./commands/ssh.js";
 import { send } from "./commands/send.js";
 import { stop } from "./commands/stop.js";
 import { interrupt } from "./commands/interrupt.js";
+import { handoff } from "./commands/handoff.js";
 import { rm } from "./commands/rm.js";
 import { server } from "./commands/server.js";
 import { configShow, configPath, configEdit } from "./commands/config.js";
@@ -101,6 +102,17 @@ program
   .alias("esc")
   .description("Cancel an agent's current turn (session stays alive) — same as Escape in the dashboard")
   .action(interrupt);
+
+program
+  .command("handoff [agent]")
+  .description(
+    "Hand an agent's work to a fresh agent in the same worktree (archives the old one). " +
+      "Defaults to the agent running the command.",
+  )
+  .option("-n, --name <name>", "Name for the successor (default: <agent>-2, -3, ...)")
+  .option("-m, --message <text>", "Briefing sent to the successor as its first message")
+  .option("-f, --message-file <path>", "Read the briefing from a file")
+  .action(handoff);
 
 program
   .command("stop <agent>")

@@ -22,6 +22,10 @@ import { fileURLToPath } from "node:url";
 
 import { parse as parseToml } from "smol-toml";
 
+import type { CompactionConfig } from "./server/compaction-policy.js";
+
+export type { CompactionConfig };
+
 /** Dotfiles bootstrap inputs. Shared `[defaults.dotfiles]` with optional
  *  `[hosts.<name>.dotfiles]` overrides. */
 export interface DotfilesConfig {
@@ -62,6 +66,9 @@ export interface DefaultsConfig {
    *  serve`, ...). */
   bind_host: string;
   dotfiles: DotfilesConfig;
+  /** Auto-compaction policy applied to every agent the server starts.
+   *  Server-side only (the host reads it), so there is no per-host block. */
+  compaction: CompactionConfig;
 }
 
 /** Per-host config as written in TOML (`[hosts.<name>]`). All fields except
@@ -121,6 +128,7 @@ const BUILTIN_DEFAULTS: PirouetteConfig = {
     port: 7777,
     bind_host: "127.0.0.1",
     dotfiles: { clone_url: "", authorized_keys_url: "" },
+    compaction: {},
   },
   hosts: {},
 };
