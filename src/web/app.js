@@ -22,6 +22,7 @@ import {
 } from "./transcript.js";
 import { renderMarkdownPi } from "./pi-markdown.js";
 import { VimMode } from "./vim.js";
+import { escapeAction } from "./keys.js";
 
 // --- state ---
 
@@ -798,52 +799,101 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeAllDrawers();
 });
 
-// --- Esc = interrupt the current turn -------------------------------------
+// --- Esc (or Cmd/Ctrl+.) = interrupt the current turn -----------------------
 //
 // Mirrors pi's TUI, where Escape aborts the in-flight turn (and puts any
 // queued steering text back in the editor). Escape is heavily overloaded in
 // this app, so this handler runs in the CAPTURE phase -- before the
-// textarea-level handlers -- and explicitly yields to everything with a
-// better claim on the key:
+// textarea-level handlers -- and defers to everything with a better claim on
+// the key. `escapeAction` (src/web/keys.js) owns that precedence list.
 //
-//   1. the extension-UI modal (its own capture handler, registered earlier,
-//      answers the request and preventDefaults),
-//   2. the new-project modal,
-//   3. the @mention / slash autocomplete popups (closed by the $input
-//      keydown handler, which bubbles later),
-//   4. an open mobile drawer or model/thinking/theme picker (closed by the
-//      drawer handler above),
-//   5. vim insert mode -- Escape means "go to normal mode" first. Hit it
-//      again from normal mode and you get the interrupt, which is the
-//      muscle memory a vim user already has.
+// We don't stopPropagation: closing state that happens to also listen for
+// Escape is harmless once the interrupt fired.
 //
-// Only when none of those apply, and the selected agent is actually
-// mid-turn, do we interrupt. We don't stopPropagation: closing state that
-// happens to also listen for Escape is harmless once the interrupt fired.
+// Note we do NOT bail on `e.defaultPrevented`. Nothing of ours can have set
+// it this early -- our own Escape consumers are either checked above or run
+// later in the chain -- so a flag here means something outside the page
+// (a browser extension) claimed the key. That's not a reason to leave a
+// runaway agent running.
+//
+// `Cmd+.` / `Ctrl+.` does the same thing, for the browsers where Escape
+// never arrives at all. Extensions that implement modal editing (Vimium and
+// friends) bind Escape to "leave insert mode", which blurs the focused
+// field and swallows the key at window-capture -- earlier than any listener
+// a page can register, so there is nothing to out-argue. The signature in
+// the wild is an Escape that appears to do nothing except take the caret
+// out of the composer, and then a *second* Escape that works, because by
+// then focus is on <body> and the extension isn't in insert mode any more.
+// Those extensions pass modified keys straight through, so a chord gets a
+// reliable interrupt back. `Cmd+.` is also the Mac's traditional "cancel".
+const ESC_LOG_LIMIT = 20;
+/** Rolling record of every interrupt keypress the page actually sees, with
+ *  what we did about it. "Esc does nothing" is ambiguous between "the
+ *  dashboard declined" and "the dashboard was never asked" -- see the
+ *  window-capture note above. `window.__pirouetteEsc` in the console
+ *  distinguishes the two: entries with a `reason` mean we saw the press,
+ *  an empty array means we never did. */
+const escLog = [];
+window.__pirouetteEsc = escLog;
+/** True for the `Cmd+.` / `Ctrl+.` interrupt chord. */
+function isInterruptChord(e) {
+  return (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key === ".";
+}
 document.addEventListener(
   "keydown",
   (e) => {
-    if (e.key !== "Escape" || e.defaultPrevented) return;
-    if (!$extUiModal.classList.contains("hidden")) return;
-    if ($projModal && !$projModal.classList.contains("hidden")) return;
-    if (!$mentionPopup.classList.contains("hidden")) return;
-    if (!$slashPopup.classList.contains("hidden")) return;
-    const drawerOpen =
-      ($chatSidebar && $chatSidebar.classList.contains("drawer-open")) ||
-      ($headerActions && $headerActions.classList.contains("drawer-open"));
-    const pickerOpen =
-      ($modelPicker && !$modelPicker.classList.contains("hidden")) ||
-      ($thinkingPicker && !$thinkingPicker.classList.contains("hidden")) ||
-      ($themePicker && !$themePicker.classList.contains("hidden"));
-    if (drawerOpen || pickerOpen) return;
-    if (vim.isEnabled() && document.activeElement === $input && vim.mode === "insert") return;
-    if (!canInterruptSelected()) return;
+    const isEscape = e.key === "Escape";
+    const isChord = !isEscape && isInterruptChord(e);
+    if (!isEscape && !isChord) return;
+    const { action, reason } = escapeAction({
+      extUiModalOpen: !$extUiModal.classList.contains("hidden"),
+      projectModalOpen: Boolean($projModal) && !$projModal.classList.contains("hidden"),
+      mentionPopupOpen: !$mentionPopup.classList.contains("hidden"),
+      slashPopupOpen: !$slashPopup.classList.contains("hidden"),
+      drawerOpen:
+        ($chatSidebar && $chatSidebar.classList.contains("drawer-open")) ||
+        ($headerActions && $headerActions.classList.contains("drawer-open")),
+      pickerOpen:
+        ($modelPicker && !$modelPicker.classList.contains("hidden")) ||
+        ($thinkingPicker && !$thinkingPicker.classList.contains("hidden")) ||
+        ($themePicker && !$themePicker.classList.contains("hidden")),
+      // The chord isn't a vim key, so vim has no claim on it.
+      vimInsertMode:
+        isEscape &&
+        vim.isEnabled() &&
+        document.activeElement === $input &&
+        vim.mode === "insert",
+      canInterrupt: canInterruptSelected(),
+    });
+    escLog.push({
+      at: new Date().toISOString(),
+      key: isEscape ? "Escape" : "Cmd/Ctrl+.",
+      action,
+      reason,
+      focus: document.activeElement?.id || document.activeElement?.tagName || null,
+      // True means a listener that ran before ours -- i.e. not ours -- had
+      // already claimed the key.
+      defaultPrevented: e.defaultPrevented,
+      agentState: agents.find((a) => a.id === selectedAgentId)?.state ?? null,
+    });
+    if (escLog.length > ESC_LOG_LIMIT) escLog.shift();
+    console.debug("[esc]", action, reason, escLog[escLog.length - 1]);
+    if (action !== "interrupt") return;
+    // The chord has no useful default (and on some browsers a stale one:
+    // Cmd+. was "stop loading" on the Mac), so claim it outright.
+    if (isChord) e.preventDefault();
     void interruptAgent();
   },
   true,
 );
 window.addEventListener("resize", () => {
   updateInputPlaceholder();
+  // Drawers are a mobile affordance, and `drawer-open` is a class that
+  // outlives the viewport that justified it: open the sidebar on a narrow
+  // window, widen it, and the class stays set on an element the desktop
+  // layout renders inline. Nothing looks wrong, but every Escape from then
+  // on is spent "closing" an invisible drawer instead of interrupting.
+  if (!isMobileViewport()) closeAllDrawers();
 });
 
 // --- pi-md ResizeObserver ---
