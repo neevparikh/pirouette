@@ -412,12 +412,12 @@ describe("pickFastModeState", () => {
 
 describe("formatDocumentTitle", () => {
   it("joins project and chat onto the app name", () => {
-    expect(formatDocumentTitle("pirouette", "title-fix")).toBe("pirouette--pirouette--title-fix");
+    expect(formatDocumentTitle("pirouette", "title-fix")).toBe("pirouette—pirouette—title-fix");
   });
 
   it("drops the chat segment when no chat is open", () => {
-    expect(formatDocumentTitle("scratchpad", null)).toBe("pirouette--scratchpad");
-    expect(formatDocumentTitle("scratchpad", "  ")).toBe("pirouette--scratchpad");
+    expect(formatDocumentTitle("scratchpad", null)).toBe("pirouette—scratchpad");
+    expect(formatDocumentTitle("scratchpad", "  ")).toBe("pirouette—scratchpad");
   });
 
   it("falls back to the bare app name without a project", () => {
