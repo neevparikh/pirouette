@@ -7,6 +7,7 @@ import {
   describeToolResult,
   enhanceImagePaths,
   escHtml,
+  formatDocumentTitle,
   looksLikeImagePathRef,
   normalizeModelId,
   parseToolArgs,
@@ -406,5 +407,22 @@ describe("pickFastModeState", () => {
     expect(pickFastModeState({ global: null, byModel: {} }, "claude-opus-5")).toBeNull();
     expect(pickFastModeState(null, "claude-opus-5")).toBeNull();
     expect(pickFastModeState(undefined, null)).toBeNull();
+  });
+});
+
+describe("formatDocumentTitle", () => {
+  it("joins project and chat onto the app name", () => {
+    expect(formatDocumentTitle("pirouette", "title-fix")).toBe("pirouette--pirouette--title-fix");
+  });
+
+  it("drops the chat segment when no chat is open", () => {
+    expect(formatDocumentTitle("scratchpad", null)).toBe("pirouette--scratchpad");
+    expect(formatDocumentTitle("scratchpad", "  ")).toBe("pirouette--scratchpad");
+  });
+
+  it("falls back to the bare app name without a project", () => {
+    expect(formatDocumentTitle(null, null)).toBe("pirouette");
+    expect(formatDocumentTitle("", "orphan")).toBe("pirouette");
+    expect(formatDocumentTitle(undefined, undefined)).toBe("pirouette");
   });
 });

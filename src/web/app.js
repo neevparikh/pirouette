@@ -10,6 +10,7 @@
 import {
   describeToolCall,
   escHtml,
+  formatDocumentTitle,
   pickFastModeState,
   relTime,
   shortenPath,
@@ -1613,6 +1614,9 @@ function orderAgentsAsTree(projectAgents) {
 }
 
 function renderAgentList() {
+  // Cheap enough to redo here: keeps the tab title fresh when a rename or
+  // project switch arrives over the WS without touching the header.
+  updateDocumentTitle();
   if (projects.length === 0) {
     $agentList.innerHTML =
       '<div class="text-base16-500 text-sm italic px-1 py-1.5">no projects yet</div>';
@@ -1769,6 +1773,17 @@ function selectProject(name) {
   selectedProjectName = name;
   renderAgentList();
   updateInputPlaceholder();
+  updateDocumentTitle();
+}
+
+/** Keep the browser tab title in sync with what's on screen:
+ *  `pirouette--<project>--<chat>`. Called from renderAgentHeader (which
+ *  runs on selection, rename and agent-list refreshes) and selectProject. */
+function updateDocumentTitle() {
+  const agent = agents.find((a) => a.id === selectedAgentId);
+  document.title = agent
+    ? formatDocumentTitle(agent.projectName, agent.name)
+    : formatDocumentTitle(selectedProjectName, null);
 }
 
 /** Format token counts like pi's footer: 0–1k raw, 1–10k `1.2k`, 10k–999k
@@ -1859,6 +1874,7 @@ function statsColorClass(pct) {
 
 function renderAgentHeader() {
   const agent = agents.find((a) => a.id === selectedAgentId);
+  updateDocumentTitle();
   // The badge is per-model, so it follows the selected agent (and its live
   // model) rather than only changing when a `fast_mode` envelope arrives.
   renderFastModeBadge();
