@@ -54,6 +54,21 @@
       })();
     </script>
 
+    <!-- Same reason as the theme block above, for the same reason it has to
+         be inline and synchronous: the chat sidebar's width is a user
+         preference, and applying it from app.js (a module, so deferred)
+         would paint the default 16rem column first and snap it wider a
+         frame later. app.js re-clamps this against the current viewport on
+         load; here we only need the number on screen before the paint. -->
+    <script>
+      (function () {
+        var saved = parseInt(localStorage.getItem("pirouette-sidebar-width"), 10);
+        if (saved > 0) {
+          document.documentElement.style.setProperty("--sidebar-width", saved + "px");
+        }
+      })();
+    </script>
+
     <script>
       // Inline Tailwind config with base16 CSS variable colors + font families
       // that match neevparikh.github.io.
@@ -740,6 +755,47 @@
         #mobile-backdrop {
           display: none !important;
         }
+
+        /* Resizable sidebar (desktop only -- below `md` the sidebar is a
+         * drawer with its own width, and there's no pointer to drag with).
+         *
+         * The width lives in a custom property rather than an inline style
+         * on the element: an inline style would outrank the drawer's width
+         * in the mobile media query above (inline beats any stylesheet
+         * rule without !important), so a desktop drag would follow you
+         * down to a phone viewport. The ID selector here still outranks
+         * Tailwind's `w-64` class, which stays on the element as the
+         * default for a first-time visitor. */
+        #chat-sidebar {
+          width: var(--sidebar-width, 16rem);
+        }
+      }
+
+      /* The drag handle itself. Sits between the sidebar and <main> as a
+       * flex sibling, so widening the sidebar narrows the chat column and
+       * nothing overlaps. Invisible until hovered, focused or dragged. */
+      #sidebar-resizer {
+        flex: none;
+        width: 5px;
+        cursor: col-resize;
+        background: transparent;
+        transition: background 0.12s ease;
+        touch-action: none;
+      }
+      #sidebar-resizer:hover,
+      #sidebar-resizer:focus-visible,
+      #sidebar-resizer.dragging {
+        background: rgb(var(--color-base16-cyan) / 0.6);
+        outline: none;
+      }
+      @media (max-width: 767px) {
+        #sidebar-resizer { display: none; }
+      }
+      /* While dragging, keep the col-resize cursor everywhere the pointer
+       * may wander and stop the drag from selecting chat text. */
+      body.sidebar-resizing {
+        cursor: col-resize;
+        user-select: none;
       }
     </style>
   </head>
@@ -771,6 +827,18 @@
         <div class="text-base16-500 text-sm italic px-1">loading…</div>
       </div>
     </aside>
+
+    <!-- Drag handle for the sidebar width. Keyboard-reachable: focus it and
+         use ←/→ (Home resets), which is also the only way to resize it
+         without a mouse. Hidden below `md`, where the sidebar is a drawer. -->
+    <div
+      id="sidebar-resizer"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="resize the chat sidebar"
+      tabindex="0"
+      title="drag to resize the sidebar (double-click to reset)"
+    ></div>
 
     <!-- Main content -->
     <main class="flex-1 flex flex-col min-w-0 overflow-hidden">

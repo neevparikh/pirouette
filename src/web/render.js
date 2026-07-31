@@ -499,3 +499,31 @@ export function formatDocumentTitle(projectName, agentName) {
   if (project && agent) parts.push(agent);
   return parts.join("\u2014");
 }
+
+// --- sidebar width ---
+
+/** Narrowest useful sidebar: below this the chat rows stop being readable
+ *  at all and the header's "+ project" button starts clipping. */
+export const SIDEBAR_MIN_WIDTH = 176;
+/** Tailwind's `w-64` — what the markup ships with, and what a
+ *  double-click on the drag handle goes back to. */
+export const SIDEBAR_DEFAULT_WIDTH = 256;
+/** Widest sidebar we'll allow on a very large screen. */
+export const SIDEBAR_MAX_WIDTH = 640;
+
+/** Clamp a requested sidebar width (px) to something the current viewport
+ *  can actually show.
+ *
+ *  The upper bound is the smaller of `SIDEBAR_MAX_WIDTH` and half the
+ *  viewport, so a width dragged out on a wide monitor doesn't swallow the
+ *  chat column on a laptop later — but it's never allowed below the
+ *  minimum, so even an absurdly narrow window keeps a usable sidebar
+ *  rather than collapsing it to nothing. Junk input (NaN, a corrupted
+ *  localStorage value) falls back to the default. */
+export function clampSidebarWidth(width, viewportWidth) {
+  const n = typeof width === "number" ? width : Number.parseInt(width, 10);
+  const requested = Number.isFinite(n) ? n : SIDEBAR_DEFAULT_WIDTH;
+  const half = Number.isFinite(viewportWidth) ? Math.round(viewportWidth / 2) : SIDEBAR_MAX_WIDTH;
+  const max = Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, half));
+  return Math.round(Math.min(Math.max(requested, SIDEBAR_MIN_WIDTH), max));
+}

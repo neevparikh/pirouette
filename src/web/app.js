@@ -8,12 +8,14 @@
 //   - Pure rendering helpers live in render.js / transcript.js
 
 import {
+  clampSidebarWidth,
   describeToolCall,
   escHtml,
   formatDocumentTitle,
   pickFastModeState,
   relTime,
   shortenPath,
+  SIDEBAR_DEFAULT_WIDTH,
 } from "./render.js";
 import {
   initialTranscriptState,
@@ -799,6 +801,95 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeAllDrawers();
 });
 
+// --- resizable chat sidebar (desktop) ---
+//
+// The sidebar is the only place a chat's full name is visible, and the
+// names got longer once chats could be renamed after the fact, so the
+// column has to be the user's call rather than a constant. Width is a
+// CSS custom property on <html> (see the `#chat-sidebar` rule in
+// index.html for why it isn't an inline style on the element) and is
+// remembered in localStorage; index.html applies the saved value before
+// first paint so the column doesn't snap after load.
+//
+// Only meaningful on desktop: below `md` the sidebar is a drawer whose
+// width is set by the mobile media query, and the handle is hidden.
+const SIDEBAR_WIDTH_KEY = "pirouette-sidebar-width";
+const SIDEBAR_KEY_STEP = 16;
+const $sidebarResizer = document.getElementById("sidebar-resizer");
+
+/** The stored preference, or the default if nothing (or nonsense) is
+ *  stored. Not clamped -- callers do that against the live viewport, so a
+ *  width dragged out on a big monitor comes back in full when you return
+ *  to it rather than being permanently shrunk by a small window. */
+function storedSidebarWidth() {
+  const saved = Number.parseInt(localStorage.getItem(SIDEBAR_WIDTH_KEY) ?? "", 10);
+  return Number.isFinite(saved) ? saved : SIDEBAR_DEFAULT_WIDTH;
+}
+
+/** Apply a width to the sidebar, clamped to the viewport. `persist: false`
+ *  is for the transient applications -- every pointermove of a drag, and
+ *  re-fitting after a window resize -- which must not overwrite the
+ *  preference. Returns the width actually applied. */
+function applySidebarWidth(width, { persist = true } = {}) {
+  const px = clampSidebarWidth(width, window.innerWidth);
+  document.documentElement.style.setProperty("--sidebar-width", `${px}px`);
+  if (persist) localStorage.setItem(SIDEBAR_WIDTH_KEY, String(px));
+  return px;
+}
+
+applySidebarWidth(storedSidebarWidth(), { persist: false });
+
+if ($sidebarResizer && $chatSidebar) {
+  let dragFromX = 0;
+  let dragFromWidth = 0;
+  let dragging = false;
+
+  const endDrag = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    if (e && $sidebarResizer.hasPointerCapture?.(e.pointerId)) {
+      $sidebarResizer.releasePointerCapture(e.pointerId);
+    }
+    $sidebarResizer.classList.remove("dragging");
+    document.body.classList.remove("sidebar-resizing");
+    // Persist what's on screen, not what the pointer asked for: the two
+    // differ whenever the drag ran into a clamp.
+    applySidebarWidth($chatSidebar.getBoundingClientRect().width);
+  };
+
+  $sidebarResizer.addEventListener("pointerdown", (e) => {
+    if (isMobileViewport() || e.button !== 0) return;
+    dragging = true;
+    dragFromX = e.clientX;
+    dragFromWidth = $chatSidebar.getBoundingClientRect().width;
+    $sidebarResizer.setPointerCapture(e.pointerId);
+    $sidebarResizer.classList.add("dragging");
+    document.body.classList.add("sidebar-resizing");
+    // Otherwise the drag starts a text selection in the chat behind it.
+    e.preventDefault();
+  });
+  $sidebarResizer.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    applySidebarWidth(dragFromWidth + (e.clientX - dragFromX), { persist: false });
+  });
+  $sidebarResizer.addEventListener("pointerup", endDrag);
+  $sidebarResizer.addEventListener("pointercancel", endDrag);
+  $sidebarResizer.addEventListener("lostpointercapture", endDrag);
+  // Double-click the handle to go back to the stock width.
+  $sidebarResizer.addEventListener("dblclick", () => {
+    applySidebarWidth(SIDEBAR_DEFAULT_WIDTH);
+  });
+  // Keyboard: the handle is focusable, so arrows have to work too.
+  $sidebarResizer.addEventListener("keydown", (e) => {
+    const current = $chatSidebar.getBoundingClientRect().width;
+    if (e.key === "ArrowLeft") applySidebarWidth(current - SIDEBAR_KEY_STEP);
+    else if (e.key === "ArrowRight") applySidebarWidth(current + SIDEBAR_KEY_STEP);
+    else if (e.key === "Home") applySidebarWidth(SIDEBAR_DEFAULT_WIDTH);
+    else return;
+    e.preventDefault();
+  });
+}
+
 // --- Esc (or Cmd/Ctrl+.) = interrupt the current turn -----------------------
 //
 // Mirrors pi's TUI, where Escape aborts the in-flight turn (and puts any
@@ -888,6 +979,9 @@ document.addEventListener(
 );
 window.addEventListener("resize", () => {
   updateInputPlaceholder();
+  // Re-fit the saved width to the new viewport (never persisting: a
+  // temporarily narrow window shouldn't cost the user their preference).
+  applySidebarWidth(storedSidebarWidth(), { persist: false });
   // Drawers are a mobile affordance, and `drawer-open` is a class that
   // outlives the viewport that justified it: open the sidebar on a narrow
   // window, widen it, and the class stays set on an element the desktop
