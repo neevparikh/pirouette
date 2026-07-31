@@ -9,6 +9,35 @@ follow [SemVer](https://semver.org).
 
 ### Added
 
+- **Agent `bash` calls have a deadline (30s by default).** Pi's bash tool
+  takes an optional `timeout` and waits forever without one, and models
+  almost never pass one. A `find /` across a big box, an install against a
+  dead mirror, a `--watch` on a queue that never starts — the agent sits in
+  the tool call indefinitely, looking "running" while nothing happens, until
+  a human notices and interrupts. Every agent bash call now runs under
+  `[defaults.bash_timeout].default_seconds` (30) when the model doesn't ask
+  for a timeout, and an explicit one is capped at `max_seconds` (600).
+  `PIROUETTE_BASH_TIMEOUT_SECONDS` / `PIROUETTE_BASH_MAX_TIMEOUT_SECONDS`
+  override; `0` on either restores pi's behaviour.
+
+  A deadline alone would just relocate the problem into a retry loop, so the
+  policy comes with the way out. The system prompt says up front that long
+  work belongs in the background (`setsid bash -c '...' > /tmp/x.log 2>&1 &`,
+  then poll with `tail`) and that searches should be scoped, and a killed
+  call comes back with the partial output plus the three options — narrow it,
+  background it, or re-run with an explicit `timeout` — at the moment the
+  agent needs them. Backgrounded work is also strictly better for the agent:
+  it keeps working while the build runs, and a detached job survives both the
+  deadline and an interrupted tool call.
+
+  Enforcement is an inline pi extension registered on the shared resource
+  loader, patching `input.timeout` in `tool_call` (pi's documented way to
+  adjust tool arguments) and appending the recovery hint in `tool_result`.
+  Timeouts are recognised by pi's own message text, so there's a test that
+  runs pi's bash tool, lets it time out for real, and fails if that wording
+  ever drifts. `!` commands the operator runs from the dashboard are
+  untouched.
+
 - **Documented that a host needs swap, and why.** An agent process can grow to
   tens of gigabytes. With no swap the kernel cannot degrade gracefully: the
   OOM killer chooses by score, not by blame, and it will happily take

@@ -258,6 +258,8 @@ your override file in `$EDITOR`.
 | `defaults.compaction.auto_compact_at` | defaults | Compact at this fraction of the context window (0 = pi's default) |
 | `defaults.compaction.auto_compact_models` | defaults | Model globs the threshold applies to (empty = all) |
 | `defaults.compaction.keep_recent_tokens` | defaults | Tokens kept verbatim after a compaction (0 = a quarter of the threshold) |
+| `defaults.bash_timeout.default_seconds` | defaults | Deadline on an agent `bash` call that doesn't ask for one (default 30, 0 = unbounded) |
+| `defaults.bash_timeout.max_seconds` | defaults | Cap on an explicit `timeout` (default 600, 0 = uncapped) |
 | `hosts.<name>.ssh_alias` | host | `~/.ssh/config` alias (required) |
 | `hosts.<name>.user` | host | SSH login user (required) |
 | `hosts.<name>.persistent_root` | host | Mount-point of the persistent volume (required) |
@@ -369,6 +371,40 @@ conversation, which is the point — use `/fork` when you want the history.
 
 Deleting either agent with `--worktree` leaves the shared worktree alone as
 long as the other still points at it.
+
+### Runaway commands: the bash deadline
+
+Pi's `bash` tool has an optional `timeout` and waits forever without one.
+Models almost never pass it, so a `find /`, an install against a dead
+mirror, or a `--watch` on a queue that never starts leaves the agent parked
+in a tool call: the turn says "running", no tokens move, and only a human
+hitting interrupt ends it.
+
+Pirouette gives every agent `bash` call a deadline — 30s unless the model
+asks for more, and never more than 600s:
+
+```toml
+[defaults.bash_timeout]
+default_seconds = 30   # 0 restores pi's unbounded behaviour
+max_seconds     = 600  # 0 = let the model ask for any timeout
+```
+
+That lives in the *host's* `~/.pirouette/config.toml`, or as
+`PIROUETTE_BASH_TIMEOUT_SECONDS` / `PIROUETTE_BASH_MAX_TIMEOUT_SECONDS` in
+the server's environment. The agent is told about the rule in its system
+prompt, and a killed command comes back with the partial output plus the
+three ways out: narrow the command, background it and poll, or re-run with
+an explicit `timeout`. The point of the cap is to make backgrounding the
+normal shape for long work:
+
+```bash
+setsid bash -c 'make build' > /tmp/build.log 2>&1 & echo started
+tail -n 40 /tmp/build.log   # in a later tool call
+```
+
+`setsid` detaches the job, so it survives both the deadline and an
+interrupted tool call. `!`-prefixed commands you run yourself from the
+dashboard are never timed out.
 
 ### Host
 
@@ -515,6 +551,8 @@ The details that make this hold up in practice:
 | `PIROUETTE_AUTO_COMPACT_AT` | `0` | Compact at this fraction of the context window (overrides config) |
 | `PIROUETTE_AUTO_COMPACT_MODELS` | — | Comma-separated model globs the threshold applies to |
 | `PIROUETTE_AUTO_COMPACT_KEEP_RECENT_TOKENS` | — | Tokens kept verbatim after a compaction |
+| `PIROUETTE_BASH_TIMEOUT_SECONDS` | `30` | Deadline on an agent `bash` call with no explicit `timeout` (`0` = unbounded) |
+| `PIROUETTE_BASH_MAX_TIMEOUT_SECONDS` | `600` | Cap on an explicit `timeout` (`0` = uncapped) |
 | `PIROUETTE_RESUME_AUTOCONTINUE` | `1` | `0` leaves restart-interrupted agents parked at `waiting_input` |
 | `PIROUETTE_RESUME_CONTINUE_MESSAGE` | see above | Nudge sent to an agent whose turn a restart cut short |
 | `PIROUETTE_SELF_UPDATE_RESUME_MESSAGE` | see above | Nudge sent to the agent that ran `pru self-update` |
