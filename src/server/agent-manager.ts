@@ -595,6 +595,30 @@ export class AgentManager {
     return this.stateManager.getAgent(id);
   }
 
+  /** Rename a chat. Display-only: the agent keeps its id, worktree,
+   *  branch and session directory, all of which were slugged from the
+   *  ORIGINAL name at creation time and are load-bearing (git worktrees
+   *  are registered by path, session files by directory). So
+   *  `agent/flaky-test-hunt-ab12cd34` stays put while the sidebar starts
+   *  saying `pr-42`.
+   *
+   *  Names are not unique — two projects can both have a `review` chat.
+   *  `resolveAgentRef` already reports that as ambiguous and asks for an
+   *  id, so we don't reject collisions here. Returns the updated config,
+   *  or null if the agent is unknown. */
+  renameAgent(id: string, name: string): AgentConfig | null {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error("agent name is required");
+    const config = this.stateManager.getAgent(id);
+    if (!config) return null;
+    const previous = config.name;
+    this.stateManager.updateAgentState(id, { name: trimmed });
+    const handle = this.handles.get(id);
+    if (handle) handle.config.name = trimmed;
+    console.log(`[agent-manager] renamed ${previous} (${id}) -> ${trimmed}`);
+    return this.stateManager.getAgent(id) ?? null;
+  }
+
   /** Mark an agent archived / unarchived. Archived agents remain fully
    *  functional and on disk; the dashboard hides them from the default
    *  listing. Purely a metadata flag. */

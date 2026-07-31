@@ -286,12 +286,23 @@ overridden per host under `[hosts.<name>.dotfiles]`.
 | `pru send <agent> <msg>` | Send a message to an agent |
 | `pru interrupt <agent>` | Cancel the agent's current turn; the session stays alive |
 | `pru handoff [agent]` | Replace an agent with a fresh one in the same worktree (defaults to self) |
+| `pru rename <agent> <name>` | Rename a chat (display name only; one argument renames self) |
 | `pru stop <agent>` | Stop an agent (keeps its state) |
 | `pru rm <agent>` | Remove an agent; `--all` also deletes its worktree + session files |
 | `pru status` | Show host + server health |
 
 You can also create agents from the web UI by typing `@<newname> message`
 in the input bar.
+
+**Renaming a chat.** A chat gets its name before anyone knows what the work
+will become, and the name you want ("pr-42") usually only exists later. Click
+the chat name in the header, hit the ✎ next to it in the sidebar, or run
+`/rename <new name>`; from a shell it's `pru rename <agent> <new-name>`, and
+`pru rename <new-name>` renames the chat you're running inside. The rename is
+display-only: the agent id, its git worktree, its branch and its session
+files keep the slug they were created with, so renaming mid-turn disturbs
+nothing. Names aren't unique across projects — if a name matches two chats,
+commands that take an agent reference ask you to use the id.
 
 **Interrupting a turn.** Just like pi's TUI, <kbd>Esc</kbd> in the dashboard
 aborts whatever the selected agent is doing right now — the in-flight LLM

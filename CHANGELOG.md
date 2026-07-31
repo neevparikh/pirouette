@@ -38,6 +38,23 @@ follow [SemVer](https://semver.org).
   ever drifts. `!` commands the operator runs from the dashboard are
   untouched.
 
+- **Chats can be renamed.** A chat is named before the work exists, so the
+  sidebar fills up with names like `flaky-test-hunt` while the thing
+  you actually want to look them up by — the PR they're driving — is only
+  discoverable by opening each one. `POST /api/agents/:id/rename` renames a
+  chat, exposed as a click on the chat name in the header, a ✎ button on the
+  sidebar row, `/rename [new name]` in the composer, and
+  `pru rename <agent> <new-name>` (one argument renames the chat the command
+  is running inside, so an agent can label itself once it knows its PR
+  number).
+
+  The rename is display-only. The agent id, its git worktree, its branch and
+  its session directory were all slugged from the original name at creation
+  time and are load-bearing — git registers worktrees by path, pi finds
+  history by session dir — so they stay exactly as they were, and renaming
+  mid-turn is safe. Broadcasts the existing `agent_updated` envelope, so
+  every open dashboard follows without a refresh.
+
 - **Documented that a host needs swap, and why.** An agent process can grow to
   tens of gigabytes. With no swap the kernel cannot degrade gracefully: the
   OOM killer chooses by score, not by blame, and it will happily take

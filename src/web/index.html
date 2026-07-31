@@ -798,7 +798,10 @@
         <!-- Mobile: hamburger opens the left chat sidebar drawer. Hidden
              on md+ where the sidebar is always visible. -->
         <button id="mobile-menu-btn" class="text-base16-600 text-xl px-2 py-1 rounded hover:bg-base16-300/40 cursor-pointer font-mono leading-none flex-none" aria-label="open chats menu">☰</button>
-        <span id="agent-title" class="text-base font-bold text-base16-600 font-mono flex-none truncate"></span>
+        <!-- Click the chat name to rename it (display name only; the
+             worktree, branch and session files keep their original
+             slug). Same action as the ✎ in the sidebar and `/rename`. -->
+        <span id="agent-title" class="text-base font-bold text-base16-600 font-mono flex-none truncate cursor-pointer hover:text-base16-cyan" title="click to rename this chat" role="button" tabindex="0"></span>
         <!-- v0.13.8: agent name + status removed from the header. Agent
              identity lives in the footer's info line; the top now just
              carries the brand + per-agent action buttons. Header is

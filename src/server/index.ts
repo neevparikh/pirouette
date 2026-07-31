@@ -920,6 +920,42 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
         return;
       }
 
+      // Rename a chat. Body: { name: string }. Display-only -- the id,
+      // worktree, branch and session dir are all derived from the name at
+      // creation time and deliberately stay as they are, so renaming is
+      // cheap and safe mid-turn. Broadcasts the same `agent_updated`
+      // envelope as /archive, which clients already merge into their
+      // local record.
+      if (method === "POST" && sub === "/rename") {
+        try {
+          const rawBody = await readBody(req).catch(() => "");
+          let body: { name?: unknown } = {};
+          if (rawBody) {
+            try {
+              body = JSON.parse(rawBody) as { name?: unknown };
+            } catch {
+              error(res, 400, "body must be JSON");
+              return;
+            }
+          }
+          const name = validateName(body.name);
+          const updated = agentManager.renameAgent(agentId, name);
+          if (!updated) {
+            error(res, 404, "Agent not found");
+            return;
+          }
+          broadcast({
+            kind: "agent_updated",
+            agentId,
+            agent: { ...updated, running: agentManager.isRunning(agentId) },
+          });
+          json(res, 200, updated);
+        } catch (err) {
+          error(res, 400, err instanceof Error ? err.message : String(err));
+        }
+        return;
+      }
+
       // Archive / unarchive an agent. Archived agents stay on disk and
       // remain fully functional; the dashboard just hides them from the
       // default listing so long-running / finished chats can be tucked
