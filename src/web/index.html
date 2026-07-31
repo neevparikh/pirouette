@@ -775,12 +775,21 @@
        * flex sibling, so widening the sidebar narrows the chat column and
        * nothing overlaps. Invisible until hovered, focused or dragged. */
       #sidebar-resizer {
+        position: relative;
         flex: none;
         width: 5px;
         cursor: col-resize;
         background: transparent;
         transition: background 0.12s ease;
         touch-action: none;
+      }
+      /* Grab area a few px wider than the visible line, so the handle can
+       * be caught without pixel-hunting. Overlaps the sidebar's border and
+       * the chat's left padding, neither of which wants the click. */
+      #sidebar-resizer::before {
+        content: "";
+        position: absolute;
+        inset: 0 -3px;
       }
       #sidebar-resizer:hover,
       #sidebar-resizer:focus-visible,
