@@ -3,11 +3,15 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import {
+  clampSidebarWidth,
   describeToolCall,
   describeToolResult,
   enhanceImagePaths,
   escHtml,
   formatDocumentTitle,
+  SIDEBAR_DEFAULT_WIDTH,
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH,
   looksLikeImagePathRef,
   normalizeModelId,
   parseToolArgs,
@@ -424,5 +428,41 @@ describe("formatDocumentTitle", () => {
     expect(formatDocumentTitle(null, null)).toBe("pirouette");
     expect(formatDocumentTitle("", "orphan")).toBe("pirouette");
     expect(formatDocumentTitle(undefined, undefined)).toBe("pirouette");
+  });
+});
+
+describe("clampSidebarWidth", () => {
+  it("passes a sensible width through untouched", () => {
+    expect(clampSidebarWidth(320, 1440)).toBe(320);
+  });
+
+  it("holds the floor so the sidebar can't be dragged away", () => {
+    expect(clampSidebarWidth(40, 1440)).toBe(SIDEBAR_MIN_WIDTH);
+    expect(clampSidebarWidth(-100, 1440)).toBe(SIDEBAR_MIN_WIDTH);
+  });
+
+  it("caps at the smaller of the hard max and half the viewport", () => {
+    expect(clampSidebarWidth(5000, 3840)).toBe(SIDEBAR_MAX_WIDTH);
+    expect(clampSidebarWidth(5000, 1000)).toBe(500);
+  });
+
+  it("keeps the minimum even when half the viewport is less than it", () => {
+    // A 320px-wide desktop window is silly, but the sidebar staying usable
+    // beats it collapsing to a 160px sliver.
+    expect(clampSidebarWidth(300, 320)).toBe(SIDEBAR_MIN_WIDTH);
+  });
+
+  it("falls back to the default for a corrupted stored value", () => {
+    expect(clampSidebarWidth(Number.NaN, 1440)).toBe(SIDEBAR_DEFAULT_WIDTH);
+    expect(clampSidebarWidth("not-a-number", 1440)).toBe(SIDEBAR_DEFAULT_WIDTH);
+    expect(clampSidebarWidth(undefined, 1440)).toBe(SIDEBAR_DEFAULT_WIDTH);
+  });
+
+  it("reads a stored string width", () => {
+    expect(clampSidebarWidth("420", 1440)).toBe(420);
+  });
+
+  it("survives an unknown viewport", () => {
+    expect(clampSidebarWidth(700, undefined)).toBe(SIDEBAR_MAX_WIDTH);
   });
 });

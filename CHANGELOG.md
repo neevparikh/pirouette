@@ -9,6 +9,26 @@ follow [SemVer](https://semver.org).
 
 ### Added
 
+- **The chat sidebar can be resized, and remembers how wide you left it.**
+  It was a fixed 16rem column, which is narrower than the names chats
+  actually end up with — the sidebar is the only place a chat's full name
+  is shown, and it was truncating most of them. Drag the edge between the
+  sidebar and the chat (double-click it to go back to the default; it's
+  focusable, so ←/→ and Home work too), and the width is kept in
+  localStorage under `pirouette-sidebar-width` and applied before the first
+  paint, so a reload doesn't flash the old column and snap.
+
+  Bounds are 176px to the smaller of 640px and half the window, re-fitted
+  when the window is resized — but the *stored* preference is never
+  narrowed by a temporarily small window, so a width dragged out on a big
+  monitor comes back in full when you return to it. The width is applied as
+  a custom property consumed by a desktop-only rule rather than as an
+  inline style on the sidebar, so it can't outrank the mobile drawer's own
+  width; below `md` the sidebar is still a `min(85vw, 320px)` drawer and
+  the handle is hidden. `scripts/check-sidebar.mjs` drives a real browser
+  through the drag, the reload, the clamps, the keyboard path and the trip
+  down to a phone viewport and back.
+
 - **Agent `bash` calls have a deadline (30s by default).** Pi's bash tool
   takes an optional `timeout` and waits forever without one, and models
   almost never pass one. A `find /` across a big box, an install against a
