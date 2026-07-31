@@ -9,6 +9,18 @@ follow [SemVer](https://semver.org).
 
 ### Added
 
+- **Documented that a host needs swap, and why.** An agent process can grow to
+  tens of gigabytes. With no swap the kernel cannot degrade gracefully: the
+  OOM killer chooses by score, not by blame, and it will happily take
+  `tailscaled` or `sshd` before the agent that caused the pressure — which
+  removes the operator's way onto the box while the runaway process keeps
+  going, leaving an out-of-band reboot as the only recovery. "Requirements for
+  a host" now lists swap, and a new *Swap and OOM protection* section gives
+  the swapfile recipe (addable without a reboot), a low `vm.swappiness` so
+  swap stays an emergency buffer rather than a routine page-cache trade, and
+  the `OOMScoreAdjust=-1000` systemd drop-ins for `tailscaled` and `ssh` that
+  keep access alive when memory runs out.
+
 - **Auto-compaction can fire at a fraction of the context window.** Pi's
   built-in trigger is `contextTokens > contextWindow - 16384`: a safety net
   against overflow, not a strategy. On a million-token model that means an

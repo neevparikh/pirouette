@@ -50,9 +50,66 @@ Any host you target needs:
 - `git`, `tmux`, `curl`, an OpenSSH server
 - a non-root user with passwordless `sudo`
 - a persistent directory (survives host recreate) for pirouette's state
+- swap configured — see [Swap and OOM protection](#swap-and-oom-protection)
 - (optional) `yadm` for dotfiles
 
 You also need an `~/.ssh/config` entry for the host so `ssh <alias>` works.
+
+### Swap and OOM protection
+
+Agent processes are long-lived and can balloon to tens of gigabytes — one run
+that loads a large dataset or drags a big context around can approach the
+host's physical RAM. On a host with **no swap** the kernel has no way to
+degrade gracefully: the OOM killer picks a victim by score, and that is not
+reliably the process that is actually at fault. It can reap `tailscaled` or
+`sshd` first, which removes your way onto the box while the runaway agent
+keeps running — leaving an out-of-band reboot as the only way back in.
+
+So a pirouette host wants two things.
+
+**1. Swap, as an emergency buffer.** Enough to absorb one runaway agent;
+16–32GB is a reasonable range on a 32GB host. A swapfile is fine — no
+repartitioning, and it can be added and activated **without a reboot**:
+
+```bash
+sudo fallocate -l 32G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab   # persist
+```
+
+Keep `vm.swappiness` low so the host only dips into swap under real pressure
+instead of trading away page cache during normal work:
+
+```bash
+echo 'vm.swappiness=10' | sudo tee /etc/sysctl.d/60-pirouette-swap.conf
+sudo sysctl -p /etc/sysctl.d/60-pirouette-swap.conf
+```
+
+Swap here turns a hard kill into a slowdown you can notice and act on. It is
+not extra RAM, and a host deep into swap is a host to investigate.
+
+**2. Protect the daemons that get you onto the box.** Give the SSH server and
+Tailscale a strongly negative OOM score, so under memory pressure the kernel
+takes the agent and not your access:
+
+```bash
+for svc in tailscaled ssh; do
+  sudo mkdir -p "/etc/systemd/system/$svc.service.d"
+  printf '[Service]\nOOMScoreAdjust=-1000\n' |
+    sudo tee "/etc/systemd/system/$svc.service.d/oom.conf"
+done
+sudo systemctl daemon-reload
+sudo systemctl restart tailscaled ssh
+```
+
+`-1000` makes a process effectively ineligible for the OOM killer, so the
+agent is reaped first and the host stays reachable.
+
+Verify all of it with `swapon --show`, `free -h`, and
+`systemctl show tailscaled -p OOMScoreAdjust`. A pirouette host that reports
+nothing for `swapon --show` is one runaway agent away from going dark.
 
 ## Quick start
 
