@@ -15,6 +15,7 @@ import { send } from "./commands/send.js";
 import { stop } from "./commands/stop.js";
 import { interrupt } from "./commands/interrupt.js";
 import { handoff } from "./commands/handoff.js";
+import { rename } from "./commands/rename.js";
 import { rm } from "./commands/rm.js";
 import { server } from "./commands/server.js";
 import { configShow, configPath, configEdit } from "./commands/config.js";
@@ -113,6 +114,14 @@ program
   .option("-m, --message <text>", "Briefing sent to the successor as its first message")
   .option("-f, --message-file <path>", "Read the briefing from a file")
   .action(handoff);
+
+program
+  .command("rename <agent> [new-name]")
+  .description(
+    "Rename a chat (display name only — worktree, branch and sessions are untouched). " +
+      "With one argument, renames the agent running the command.",
+  )
+  .action(rename);
 
 program
   .command("stop <agent>")

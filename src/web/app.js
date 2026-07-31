@@ -1601,8 +1601,8 @@ function renderAgentRow(a, _depth = 0) {
   // "?" glyph: an extension fired AskUserQuestion (or similar) for this
   // agent and is waiting for the user to answer. Pulses to draw the eye.
   const needsAnswer = agentHasPendingExtensionUI(a.id);
-  // Vertical row: full-width, chat name on its own line, with an
-  // archive/unarchive toggle that appears on hover. Archived chats are
+  // Vertical row: full-width, chat name on its own line, with rename and
+  // archive/unarchive toggles that appear on hover. Archived chats are
   // dimmed so it's clear they're tucked away.
   const archiveLabel = a.archived ? "unarchive" : "archive";
   const archiveGlyph = a.archived ? "↩" : "✕";
@@ -1619,6 +1619,12 @@ function renderAgentRow(a, _depth = 0) {
         <span class="truncate">${escHtml(a.name)}</span>
         ${needsAnswer ? '<span class="text-base16-yellow text-xs pulse-dot flex-none">?</span>' : ""}
       </button>
+      <button
+        class="flex-none px-1 py-1 text-xs text-base16-500 hover:text-base16-cyan cursor-pointer md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
+        data-agent-rename="${a.id}"
+        title="rename this chat"
+        aria-label="rename chat"
+      >✎</button>
       <button
         class="flex-none px-1.5 py-1 text-xs text-base16-500 hover:text-base16-orange cursor-pointer md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
         data-agent-archive="${a.id}"
@@ -1758,6 +1764,12 @@ function renderAgentList() {
   $agentList.querySelectorAll("[data-agent-id]").forEach((btn) => {
     btn.addEventListener("click", () => selectAgent(btn.dataset.agentId));
   });
+  $agentList.querySelectorAll("[data-agent-rename]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      promptRenameAgent(btn.dataset.agentRename);
+    });
+  });
   $agentList.querySelectorAll("[data-agent-archive]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1809,6 +1821,47 @@ async function setAgentArchived(id, archived) {
     if (agent) agent.archived = !archived;
     renderAgentList();
     alert("Failed to update archive state: " + err.message);
+  }
+}
+
+/** Ask for a new chat name and push it to the server.
+ *
+ *  Renaming is display-only server-side: the worktree, branch, session
+ *  files and id all keep the slug they were created with. That's the
+ *  point -- "flaky-test-hunt" can become "pr-42" once you know
+ *  what the chat is actually about, without touching the work in flight.
+ *
+ *  `newName` (from `/rename <name>`) skips the prompt. */
+async function promptRenameAgent(id, newName) {
+  const agent = agents.find((a) => a.id === id);
+  if (!agent) return;
+  const name = (newName ?? window.prompt("Rename chat to:", agent.name) ?? "").trim();
+  if (!name || name === agent.name) return;
+
+  // Optimistic: the WS `agent_updated` broadcast keeps other tabs in sync,
+  // and re-renders this one with the server's canonical value.
+  const previous = agent.name;
+  agent.name = name;
+  renderAgentList();
+  if (id === selectedAgentId) renderAgentHeader();
+  try {
+    const res = await fetch(`/api/agents/${id}/rename`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      agent.name = previous;
+      renderAgentList();
+      if (id === selectedAgentId) renderAgentHeader();
+      alert(data.error || "Failed to rename chat");
+    }
+  } catch (err) {
+    agent.name = previous;
+    renderAgentList();
+    if (id === selectedAgentId) renderAgentHeader();
+    alert("Failed to rename chat: " + err.message);
   }
 }
 
@@ -2841,6 +2894,7 @@ const SLASH_COMMANDS = [
   { name: "new", description: "Discard history and start a fresh session for this agent", kind: "api", endpoint: "new", takesArgs: false },
   { name: "compact", description: "Manually compact session context", argLabel: "[instructions]", kind: "api", endpoint: "compact", takesArgs: true },
   { name: "handoff", description: "Hand this agent's work to a fresh agent in the same worktree", argLabel: "[briefing]", kind: "client", takesArgs: true },
+  { name: "rename", description: "Rename this chat (display name only)", argLabel: "[new name]", kind: "client", takesArgs: true },
   { name: "interrupt", description: "Interrupt the current turn, keep the session alive (Esc)", kind: "client", takesArgs: false },
   { name: "stop", description: "Stop the running agent (disposes its session)", kind: "client", takesArgs: false },
   { name: "resume", description: "Resume a stopped agent", kind: "client", takesArgs: false },
@@ -3118,6 +3172,13 @@ async function executeSlashCommand(name, args) {
         break;
       case "handoff":
         await handoffAgent(args);
+        break;
+      case "rename":
+        if (!selectedAgentId) {
+          alert("/rename requires a selected agent.");
+          break;
+        }
+        await promptRenameAgent(selectedAgentId, args || undefined);
         break;
       case "interrupt":
         await interruptAgent();
@@ -3514,6 +3575,18 @@ $stopBtn.addEventListener("click", stopAgent);
 $resumeBtn.addEventListener("click", resumeAgent);
 $deleteBtn.addEventListener("click", deleteAgent);
 $forkBtn.addEventListener("click", forkAgent);
+// The header title doubles as a rename affordance (keyboard-reachable:
+// it's role=button tabindex=0, so Enter/Space fire it too).
+if ($agentTitle) {
+  $agentTitle.addEventListener("click", () => {
+    if (selectedAgentId) void promptRenameAgent(selectedAgentId);
+  });
+  $agentTitle.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    if (selectedAgentId) void promptRenameAgent(selectedAgentId);
+  });
+}
 
 // Global raw-view toggle — flips `rawView`, persists, re-renders so every
 // assistant bubble in the current transcript updates. The button's style
