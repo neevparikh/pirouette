@@ -3158,7 +3158,27 @@ async function tryDispatchSlash(text) {
   const cmd = SLASH_COMMANDS.find((c) => c.name === name);
   if (!cmd) return false; // unknown — let sendMessage handle it (pi may know)
 
-  return await executeSlashCommand(name, args);
+  // Empty the composer BEFORE running the command, for the same reason
+  // applySlashSelection() does: a dispatched command is the whole user
+  // action, so its text has already been consumed. Doing it first (rather
+  // than after the await) matters for the commands that block this frame
+  // on a modal — `/rename` sits inside window.prompt() until the user
+  // answers, and `/model` hands the page to a picker — where clearing
+  // afterwards would leave the command text sitting in the box for as
+  // long as the modal is up, and forever if the user then switches chats.
+  //
+  // Only restore it if the command turns out to be unhandled, so the
+  // caller's sendMessage() fallback still has something to send.
+  const typed = $input.value;
+  $input.value = "";
+  closeSlashPopup();
+  autoResize();
+  const dispatched = await executeSlashCommand(name, args);
+  if (!dispatched) {
+    $input.value = typed;
+    autoResize();
+  }
+  return dispatched;
 }
 
 async function executeSlashCommand(name, args) {

@@ -213,6 +213,20 @@ follow [SemVer](https://semver.org).
 
 ### Fixed
 
+- **A slash command typed out in full left its text in the composer.** Enter
+  on `/rename pr-42` renamed the chat and then put the caret back in a box
+  that still said `/rename pr-42`, so the next thing you did — click another
+  chat, start typing — began with a stale command in the way, and you had to
+  clear it by hand. Only the typed-in-full path was affected: dispatching the
+  same command off the autocomplete popup has always emptied the box, which
+  is why this survived so long. The composer is now cleared before the
+  command runs, not after, so commands that block the frame on a modal
+  (`/rename`'s prompt, `/model`'s picker) don't leave their text on screen
+  for as long as the modal is up; if the command turns out to be one the
+  dashboard doesn't own, the text goes back so it can still be sent to the
+  agent. `scripts/check-slash.mjs` drives a real browser through the typed,
+  popup, unknown-command and plain-prose paths.
+
 - **The fast-mode badge (`↯`) flickered off after almost every tool call.**
   Fast-mode-capable providers emit a `pi:fast-mode` event on *every* request
   they route, and pirouette stored the last one as a single global value — but
