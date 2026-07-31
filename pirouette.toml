@@ -79,6 +79,18 @@ auto_compact_models = []
 # instead of always dropping back to pi's 20k.
 keep_recent_tokens = 0
 
+[defaults.bash_timeout]
+# Deadline on every `bash` tool call an agent makes, in seconds. Pi's tool
+# takes an optional `timeout` and waits forever when the model omits it —
+# which models nearly always do, so one `find /` or one `--watch` on a queue
+# that never starts parks the agent in a tool call until a human interrupts.
+# 0 restores pi's unbounded behaviour.
+default_seconds = 30
+# Ceiling on an explicit `timeout` the model asks for. Work that genuinely
+# takes longer belongs in the background (`setsid ... &` plus polling), which
+# is what the cap pushes agents towards. 0 = uncapped.
+max_seconds = 600
+
 [defaults.dotfiles]
 # Optional. If set, `pru setup` runs `yadm clone <url>` on the host on first
 # setup. SSH-form URLs work if your ssh-agent is forwarded to the host. Leave

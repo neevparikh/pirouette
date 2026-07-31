@@ -22,9 +22,10 @@ import { fileURLToPath } from "node:url";
 
 import { parse as parseToml } from "smol-toml";
 
+import type { BashTimeoutConfig } from "./server/bash-timeout.js";
 import type { CompactionConfig } from "./server/compaction-policy.js";
 
-export type { CompactionConfig };
+export type { BashTimeoutConfig, CompactionConfig };
 
 /** Dotfiles bootstrap inputs. Shared `[defaults.dotfiles]` with optional
  *  `[hosts.<name>.dotfiles]` overrides. */
@@ -69,6 +70,9 @@ export interface DefaultsConfig {
   /** Auto-compaction policy applied to every agent the server starts.
    *  Server-side only (the host reads it), so there is no per-host block. */
   compaction: CompactionConfig;
+  /** Deadline applied to every agent `bash` tool call. Server-side only,
+   *  like `compaction`. */
+  bash_timeout: BashTimeoutConfig;
 }
 
 /** Per-host config as written in TOML (`[hosts.<name>]`). All fields except
@@ -129,6 +133,7 @@ const BUILTIN_DEFAULTS: PirouetteConfig = {
     bind_host: "127.0.0.1",
     dotfiles: { clone_url: "", authorized_keys_url: "" },
     compaction: {},
+    bash_timeout: {},
   },
   hosts: {},
 };

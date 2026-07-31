@@ -24,6 +24,13 @@ import {
 
 import { getConfig } from "../config.js";
 import {
+  bashTimeoutGuidance,
+  createBashTimeoutExtension,
+  isInertBashTimeoutPolicy,
+  resolveBashTimeoutPolicy,
+  type BashTimeoutPolicy,
+} from "./bash-timeout.js";
+import {
   applyCompactionSettings,
   compactionSettingsFor,
   resolveCompactionPolicy,
@@ -247,6 +254,12 @@ export class AgentManager {
    *  Resolved once on first use; warnings are logged once, not per agent. */
   private compactionPolicy: CompactionPolicy | null = null;
 
+  /** Deadline for agent `bash` calls (`[defaults.bash_timeout]` +
+   *  PIROUETTE_BASH_*_TIMEOUT_SECONDS). Resolved once, before the resource
+   *  loader is built — the inline extension that enforces it is registered
+   *  there. */
+  private bashTimeoutPolicy: BashTimeoutPolicy | null = null;
+
   constructor(
     private readonly stateManager: StateManager,
     private readonly projectManager: ProjectManager,
@@ -308,6 +321,17 @@ export class AgentManager {
           cwd: this.dataDir,
           agentDir: getAgentDir(),
           eventBus,
+          // Give every agent bash call a deadline. Pi's bash tool waits
+          // forever when the model omits `timeout`, which it nearly always
+          // does — one `find /` and the agent is wedged in a tool call with
+          // nothing to show for it until a human interrupts.
+          extensionFactories: isInertBashTimeoutPolicy(this.getBashTimeoutPolicy())
+            ? []
+            : [
+                createBashTimeoutExtension(this.getBashTimeoutPolicy(), (msg) =>
+                  console.log(`[agent-manager] ${msg}`),
+                ),
+              ],
           // Skills that ship with pirouette itself (skills/<name>/SKILL.md
           // in the package). They document pirouette-specific workflows
           // — handing off to a fresh agent, for one — that an agent can't
@@ -2336,7 +2360,14 @@ export class AgentManager {
         agentsFiles: loadProjectContextFiles({ cwd: config.worktreePath, agentDir }),
       }),
       getSystemPrompt: () => resourceLoader.getSystemPrompt(),
-      getAppendSystemPrompt: () => resourceLoader.getAppendSystemPrompt(),
+      // Tell the agent about the bash deadline up front. Without this it
+      // only learns the rule by having a command killed, and the tool
+      // description still advertises "no default timeout".
+      getAppendSystemPrompt: () => {
+        const base = resourceLoader.getAppendSystemPrompt();
+        const guidance = bashTimeoutGuidance(this.getBashTimeoutPolicy());
+        return guidance ? [...base, guidance] : base;
+      },
       extendResources: (paths) => resourceLoader.extendResources(paths),
       reload: () => resourceLoader.reload(),
     };
@@ -2389,6 +2420,28 @@ export class AgentManager {
     // existing history are already in a user-turn, so they're "waiting_input".
     const hasHistory = session.messages.length > 0;
     this.setAgentState(config.id, resume && hasHistory ? "waiting_input" : "idle");
+  }
+
+  /** Effective bash-timeout policy, resolved once per server process. */
+  private getBashTimeoutPolicy(): BashTimeoutPolicy {
+    if (!this.bashTimeoutPolicy) {
+      let configured;
+      try {
+        configured = getConfig().defaults?.bash_timeout;
+      } catch (err) {
+        console.error(`[agent-manager] could not read bash_timeout config: ${err}`);
+      }
+      const { policy, warnings } = resolveBashTimeoutPolicy(configured);
+      for (const w of warnings) console.warn(`[agent-manager] bash timeout config: ${w}`);
+      console.log(
+        isInertBashTimeoutPolicy(policy)
+          ? `[agent-manager] bash timeouts disabled (pi's unbounded default)`
+          : `[agent-manager] bash timeout: ${policy.defaultSeconds || "none"}s by default, ` +
+              `${policy.maxSeconds > 0 ? `${policy.maxSeconds}s` : "no"} cap on explicit timeouts`,
+      );
+      this.bashTimeoutPolicy = policy;
+    }
+    return this.bashTimeoutPolicy;
   }
 
   /** Effective auto-compaction policy, resolved once per server process. */
