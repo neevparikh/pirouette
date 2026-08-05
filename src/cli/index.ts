@@ -77,7 +77,11 @@ program
   .command("launch <name>")
   .description("Launch a new pi agent in a project (defaults to `scratchpad`)")
   .option("-p, --project <name>", "Project this agent belongs to (default: scratchpad)")
-  .option("-m, --model <model>", "Model to use (e.g. anthropic/claude-sonnet-4-20250514)")
+  .option(
+    "-m, --model <model>",
+    "Model as <provider>/<id>, from a provider this host is logged into " +
+      "(omit to use the host's default model)",
+  )
   .option("-t, --thinking <level>", "Thinking level (off, minimal, low, medium, high)", "off")
   .action(launch);
 

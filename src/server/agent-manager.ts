@@ -37,6 +37,7 @@ import {
   type CompactionPolicy,
 } from "./compaction-policy.js";
 import { createWorktree, removeWorktree } from "./git.js";
+import { resolveAgentModel } from "./model-resolution.js";
 import { setupWorktreeDataTools } from "./worktree-setup.js";
 import { ProjectManager } from "./project-manager.js";
 import { StateManager } from "./state.js";
@@ -1877,11 +1878,32 @@ export class AgentManager {
         console.log(`[agent-manager] prompt resolved for ${id}`);
       } catch (err) {
         console.log(`[agent-manager] prompt rejected for ${id}: ${err}`);
+        this.markPromptFailure(id, err);
         throw err;
       }
     } else {
       console.log(`[agent-manager] ${mode} enqueued for ${id}`);
     }
+  }
+
+  /** A `prompt()` that rejected without the turn ever starting (bad auth,
+   *  an extension throwing in `before_agent_start`, ...) never produces an
+   *  `agent_end` event, so nothing else moves the agent off the `running`
+   *  state we set when the message was accepted. The agent then sits in the
+   *  dashboard looking busy forever, having done nothing — and whoever sent
+   *  the message (often another agent, via `pru send`) has no way to tell.
+   *
+   *  Park it in `error` with the reason instead. The next message clears it. */
+  private markPromptFailure(id: string, err: unknown): void {
+    const config = this.getAgent(id);
+    if (!config) return;
+    // Another turn is genuinely in flight (this rejection raced with a
+    // steer that started a new one) — `running` is the honest state.
+    if (this.handles.get(id)?.session.isStreaming) return;
+    // Pi already ended the turn (`agent_end` → waiting_input): the turn did
+    // run, so don't overwrite what the event stream reported.
+    if (config.state !== "running") return;
+    this.markError(config, err instanceof Error ? err.message : String(err));
   }
 
   /** Interrupt whatever the agent is doing right now, WITHOUT tearing the
@@ -2305,27 +2327,21 @@ export class AgentManager {
       );
     }
     const requested = config.model ?? envDefault!;
-    const [provider, modelId] = requested.includes("/")
-      ? (requested.split("/", 2) as [string, string])
-      : ["anthropic", requested];
 
-    let model = this.modelRegistry.find(provider, modelId) ?? undefined;
-
-    // Custom providers (e.g. `hawk`) often have `models: []` in models.json,
-    // so `find()` returns undefined. Build a minimal model record manually
-    // so we can still route through them. The pi SDK does this internally
-    // via buildFallbackModel; we replicate a simpler version here.
-    if (!model) {
-      const available = await this.modelRegistry.getAvailable();
-      model = available.find((m) => m.provider === provider && m.id === modelId);
-    }
-
-    if (!model) {
-      throw new Error(
-        `Model "${requested}" not found. Check ~/.pi/agent/models.json and /login for available providers. " +
-          "Available: ${(await this.modelRegistry.getAvailable()).map((m) => `${m.provider}/${m.id}`).slice(0, 8).join(", ")}...`,
-      );
-    }
+    // Resolve against the registry *and* pre-flight the provider's
+    // credentials. Both failures throw, which surfaces at `pru launch` /
+    // the dashboard and parks the agent in `error` — see model-resolution.ts
+    // for why an unauthenticated provider must not be allowed this far.
+    const model = await resolveAgentModel(requested, {
+      // Custom providers (e.g. `hawk`) often have `models: []` in
+      // models.json, so `find()` misses them and the available list is
+      // the only place they show up.
+      find: (p, id) => this.modelRegistry.find(p, id),
+      // The runtime's async getAvailable() refreshes the availability
+      // snapshot; the synchronous registry facade only reads it.
+      getAvailable: () => this.modelRuntime.getAvailable(),
+      checkAuth: (m) => this.checkProviderAuth(m.provider),
+    });
 
     // Persist the actual resolved model string so the UI can display what's
     // really being used (not just what was requested — which may have been
@@ -2466,6 +2482,31 @@ export class AgentManager {
       this.bashTimeoutPolicy = policy;
     }
     return this.bashTimeoutPolicy;
+  }
+
+  /** Is `provider` usable for a turn right now?
+   *
+   *  Deliberately the same question pi's `AgentSession.prompt()` asks
+   *  before it starts a turn (configured auth, or a credential that
+   *  resolves on demand) — a model that fails here is one whose first
+   *  prompt would throw "No API key found". Asking it at session start
+   *  turns that into a launch-time error. */
+  private async checkProviderAuth(
+    provider: string,
+  ): Promise<{ ok: boolean; error?: string }> {
+    try {
+      if (this.modelRuntime.hasConfiguredAuth(provider)) return { ok: true };
+      if ((await this.modelRuntime.checkAuth(provider)) !== undefined) return { ok: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: `auth check for provider "${provider}" failed: ${msg}` };
+    }
+    return {
+      ok: false,
+      error: this.modelRuntime.isUsingOAuth(provider)
+        ? `credentials for provider "${provider}" have expired — log in again on the host`
+        : `no API key for provider "${provider}" on this host`,
+    };
   }
 
   /** Effective auto-compaction policy, resolved once per server process. */
