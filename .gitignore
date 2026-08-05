@@ -224,3 +224,7 @@ docs/
 
 # Git worktrees (used for parallel feature work).
 .worktrees/
+
+# Local spend-report output (scripts/spend-by-day.mjs) — never committed.
+spend-by-day.svg
+spend-by-day.csv

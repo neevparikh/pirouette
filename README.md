@@ -550,6 +550,28 @@ The details that make this hold up in practice:
 | `pru config path` | Print config file search paths |
 | `pru config edit` | Open `~/.pirouette/config.toml` in `$EDITOR` |
 
+### Spend report
+
+`pru list` shows a lifetime cost per agent, which can't tell you what a given
+day cost: an agent that ran for a week reports its whole bill against the day it
+was created. The session transcripts timestamp every priced assistant message,
+so the answer is already on disk — `scripts/spend-by-day.mjs` buckets those
+messages into calendar days and draws them:
+
+```sh
+node scripts/spend-by-day.mjs \
+  --data-dir /path/to/pirouette/data \   # default: $PIROUETTE_DATA_DIR
+  --out spend-by-day.svg \               # stacked bar chart, one bar per day
+  --csv spend-by-day.csv                 # optional: the same numbers as data
+```
+
+It prints an ASCII version of the same chart plus a per-project ranking, and
+writes a standalone SVG (no JS, no fonts to fetch) you can open in a browser or
+reference from a message so the dashboard renders it inline. `--by project`
+(default), `--by model`, or `--by none` choose the stacking; `--since` /
+`--until` clip the range; `--tz local` buckets by the host's local day instead of
+UTC.
+
 ### Environment variables
 
 | var | default | purpose |
