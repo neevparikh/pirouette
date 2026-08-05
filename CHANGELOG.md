@@ -233,6 +233,29 @@ follow [SemVer](https://semver.org).
 
 ### Fixed
 
+- **An agent launched on a model this host has no credentials for sat in
+  `running` forever without doing anything.** Pi resolves provider
+  credentials at the first LLM call, not at session start, so
+  `pru launch --model anthropic/claude-opus-5` on a box whose only
+  authenticated provider is a different one created the worktree, created
+  the session, reported `idle`, accepted the first message, flipped to
+  `running` — and then the prompt died on "No API key found for anthropic".
+  No `agent_end` event ever came, so nothing moved the agent off `running`:
+  the dashboard showed a busy agent with an empty session dir and zero
+  tokens, indefinitely. Painful when the launcher is another agent handing
+  off a task, since `pru send` had already told it "✓ message sent".
+
+  Two fixes. Session start now pre-flights the model's credentials
+  (`src/server/model-resolution.ts`) and refuses a model whose provider
+  can't be reached, so the launch itself fails with the reason and the list
+  of models that would have worked — the check is pi's own auth resolution,
+  so providers that legitimately need no API key are unaffected. And a
+  `prompt()` that rejects before any turn runs now parks the agent in
+  `error` with the message instead of leaving the stale `running` behind;
+  a turn that did run is still left to the event stream. As a side effect,
+  model ids containing a slash (`openrouter/meta/llama-4`) resolve properly
+  instead of being truncated at the second segment.
+
 - **A slash command typed out in full left its text in the composer.** Enter
   on `/rename pr-42` renamed the chat and then put the caret back in a box
   that still said `/rename pr-42`, so the next thing you did — click another
