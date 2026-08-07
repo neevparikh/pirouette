@@ -148,6 +148,86 @@ describe("reduceEvent", () => {
     expect(s.messages[0].isError).toBe(true);
   });
 
+  it("appends user messages streamed from the server", () => {
+    // A message sent by anyone but this browser tab (`pru send`, another
+    // agent, a second tab) only ever reaches the UI as an event.
+    const s = reduceEvent(
+      initialTranscriptState(),
+      { type: "message_end", role: "user", text: "start on the refactor" },
+      7,
+    );
+    expect(s.messages).toEqual([
+      { role: "user", content: "start on the refactor", ts: 7 },
+    ]);
+  });
+
+  it("carries image attachments on streamed user messages", () => {
+    const images = [{ dataUrl: "data:image/png;base64,AAA", mimeType: "image/png" }];
+    const s = reduceEvent(
+      initialTranscriptState(),
+      { type: "message_end", role: "user", text: "look", images },
+      7,
+    );
+    expect(s.messages[0]).toEqual({ role: "user", content: "look", ts: 7, images });
+  });
+
+  it("ignores an empty user message rather than drawing a blank row", () => {
+    const s0 = initialTranscriptState();
+    const s1 = reduceEvent(s0, { type: "message_end", role: "user", text: "" }, 7);
+    expect(s1.messages).toEqual([]);
+  });
+
+  it("confirms an optimistic pending message instead of duplicating it", () => {
+    const s0 = {
+      ...initialTranscriptState(),
+      messages: [{ role: "user", content: "hi", ts: 1, pending: true }],
+    };
+    const s1 = reduceEvent(s0, { type: "message_end", role: "user", text: "hi" }, 7);
+    expect(s1.messages).toEqual([{ role: "user", content: "hi", ts: 1 }]);
+  });
+
+  it("confirms one pending message per echo when the same text is sent twice", () => {
+    const s0 = {
+      ...initialTranscriptState(),
+      messages: [
+        { role: "user", content: "continue", ts: 1, pending: true },
+        { role: "user", content: "continue", ts: 2, pending: true },
+      ],
+    };
+    const s1 = reduceEvent(s0, { type: "message_end", role: "user", text: "continue" }, 7);
+    expect(s1.messages.map((m) => m.pending)).toEqual([undefined, true]);
+    const s2 = reduceEvent(s1, { type: "message_end", role: "user", text: "continue" }, 8);
+    expect(s2.messages.map((m) => m.pending)).toEqual([undefined, undefined]);
+    expect(s2.messages).toHaveLength(2);
+  });
+
+  it("appends a streamed user message that doesn't match any pending one", () => {
+    const s0 = {
+      ...initialTranscriptState(),
+      messages: [{ role: "user", content: "mine", ts: 1, pending: true }],
+    };
+    const s1 = reduceEvent(s0, { type: "message_end", role: "user", text: "theirs" }, 7);
+    expect(s1.messages).toEqual([
+      { role: "user", content: "mine", ts: 1, pending: true },
+      { role: "user", content: "theirs", ts: 7 },
+    ]);
+  });
+
+  it("keeps in-flight assistant streaming intact around a user message", () => {
+    // A steering message is consumed mid-turn: the partial assistant text
+    // must survive so the live bubble doesn't blank out.
+    const s0 = reduceEvents(
+      [
+        { type: "message_start", role: "assistant" },
+        { type: "message_update", updateType: "text_delta", delta: "working" },
+      ],
+      initialTranscriptState(),
+    );
+    const s1 = reduceEvent(s0, { type: "message_end", role: "user", text: "stop" }, 7);
+    expect(s1.streamingText).toBe("working");
+    expect(s1.messages).toEqual([{ role: "user", content: "stop", ts: 7 }]);
+  });
+
   it("is pure (doesn't mutate input state)", () => {
     const s0 = initialTranscriptState();
     const frozen = Object.freeze({ ...s0, messages: Object.freeze([...s0.messages]) });

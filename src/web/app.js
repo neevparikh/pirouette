@@ -2567,6 +2567,12 @@ async function sendMessage() {
   renderAttachmentStrip();
 
   // Optimistic local append so the user sees their message immediately.
+  //
+  // `pending` marks it as not-yet-confirmed by the server. Pi echoes every
+  // user turn back as a `message_end` event, which the transcript reducer
+  // renders (that's how messages from `pru send` and from other tabs show
+  // up). Without the flag, our own message would land twice: once here,
+  // once off the event. reduceEvent clears it when the echo arrives.
   const prev = stateFor(targetId);
   transcriptByAgent[targetId] = {
     ...prev,
@@ -2575,6 +2581,7 @@ async function sendMessage() {
       {
         role: "user",
         content: body,
+        pending: true,
         ts: Date.now(),
         ...(imagesForThisSend.length > 0
           ? { images: imagesForThisSend.map((i) => ({ dataUrl: i.dataUrl, mimeType: i.mimeType })) }

@@ -264,6 +264,32 @@ follow [SemVer](https://semver.org).
 
 ### Fixed
 
+- **A message sent to a chat from anywhere but the dashboard never appeared
+  in the transcript.** `pru send`, an agent briefing an agent it just
+  launched, a handoff note, the post-restart nudge, or simply a second
+  browser tab: none of them showed up. The chat flipped to `running` and
+  started producing tool calls and prose with no visible prompt above them,
+  and the message only materialised once the turn ended and the dashboard
+  refetched history — which it does only for the chat you're looking at.
+  Mid-turn sends were worse: the message showed as a queue chip, then the
+  chip vanished when the turn consumed it and nothing took its place.
+
+  The dashboard was rendering user messages from exactly one source — an
+  optimistic local append in the tab that typed them — while pi has been
+  emitting `message_end` for every user turn all along. The transcript
+  reducer now renders those events, so a message shows up wherever it came
+  from, and the optimistic append is tagged `pending` so the echo confirms
+  it in place instead of drawing it twice (two identical sends still give
+  two rows: one confirmation each). Image attachments come through the
+  event as data URLs, matching the history payload; previously a user
+  message's image blocks were `JSON.stringify`d into the message text,
+  which no one noticed only because that text was being thrown away.
+
+  `scripts/check-user-messages.mjs` drives a real browser through the
+  cases: a message from elsewhere, one typed locally, the same text sent
+  twice, one landing mid-turn without disturbing the in-flight response,
+  and attachments.
+
 - **An agent launched on a model this host has no credentials for sat in
   `running` forever without doing anything.** Pi resolves provider
   credentials at the first LLM call, not at session start, so
