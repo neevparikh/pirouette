@@ -107,6 +107,65 @@ export const WIDGET_FG_CLASS = {
   bashMode: "text-base16-pink",
 };
 
+/** Leading glyphs a todo widget uses per item state. Covers this family of
+ *  extensions plus the obvious variants (filled/hollow circles, ballot
+ *  boxes) so a differently-styled todo list still counts. */
+const TODO_GLYPHS = {
+  "\u2713": "done", // ✓
+  "\u2714": "done", // ✔
+  "\u2611": "done", // ☑
+  "\u25c9": "active", // ◉
+  "\u25cf": "active", // ●
+  "\u25b6": "active", // ▶
+  "\u25cb": "todo", // ○
+  "\u25ef": "todo", // ◯
+  "\u2610": "todo", // ☐
+};
+
+/** "— 2/5 completed", "3/7 done" — the summary line these widgets put in
+ *  their header. Used as a fallback, and as the signal that a widget is a
+ *  todo list at all when its key doesn't say so. */
+const TODO_HEADER_RE = /(\d+)\s*\/\s*(\d+)\s+(?:completed|done)/i;
+
+const spansText = (line) =>
+  (Array.isArray(line) ? line : []).map((s) => String(s.text ?? "")).join("");
+
+/**
+ * Read todo progress out of a rendered widget.
+ *
+ * Widgets are pre-rendered text by the time they reach us — the structured
+ * list lives in the extension's own memory — so this reads the glyphs the
+ * widget drew. To avoid inventing a count for some unrelated widget that
+ * happens to draw bullets, we only accept a widget that either names
+ * itself a todo list in its key or carries an "N/M completed" header.
+ *
+ * @returns {{done: number, active: number, total: number} | null}
+ */
+export function todoProgress(widget) {
+  if (!widget || !Array.isArray(widget.lines)) return null;
+  const lines = widget.lines.map(spansText);
+  const header = lines.map((l) => l.match(TODO_HEADER_RE)).find(Boolean);
+  const named = /todo/i.test(String(widget.key ?? ""));
+  if (!header && !named) return null;
+
+  let done = 0;
+  let active = 0;
+  let todo = 0;
+  for (const line of lines) {
+    const kind = TODO_GLYPHS[line.trimStart()[0]];
+    if (kind === "done") done++;
+    else if (kind === "active") active++;
+    else if (kind === "todo") todo++;
+  }
+  const total = done + active + todo;
+  if (total > 0) return { done, active, total };
+
+  // No per-item glyphs (a widget that only prints a summary): trust the
+  // header. We can't know how many of the remainder are in progress.
+  if (header) return { done: Number(header[1]), active: 0, total: Number(header[2]) };
+  return null;
+}
+
 export const WIDGET_BG_CLASS = {
   selectedBg: "bg-base16-300/40",
   userMessageBg: "bg-base16-200",
@@ -197,9 +256,10 @@ export class ExtensionUISurface {
     this.statuses = new Map();
     /** @type {Map<string, Map<string, object>>} agentId -> key -> widget */
     this.widgets = new Map();
-    /** Called after anything that changes `pendingFor()`, so the host can
-     *  repaint its chat list. */
-    this.onPendingChange = null;
+    /** Called after anything the chat list shows about an agent changes:
+     *  queued notifications (`pendingFor`) and todo progress
+     *  (`todoProgressFor`). The host repaints the list. */
+    this.onChatListChange = null;
   }
 
   // --- envelope entry point -------------------------------------------
@@ -239,7 +299,7 @@ export class ExtensionUISurface {
     while (queue.length > this.queueLimit) queue.shift();
     this.queues.set(agentId, queue);
     this.pump();
-    this.notifyPendingChange();
+    this.notifyChatListChange();
   }
 
   /** Move queued entries for the selected agent onto the screen, up to the
@@ -380,7 +440,7 @@ export class ExtensionUISurface {
     if (this.visible.length === 0) this.toastHost.classList.add("hidden");
     // A slot just freed up: let the next queued notification through.
     this.pump();
-    this.notifyPendingChange();
+    this.notifyChatListChange();
   }
 
   /** Tear down every on-screen toast (they belong to the agent we're
@@ -420,8 +480,8 @@ export class ExtensionUISurface {
     return { count: fresh.length, severity };
   }
 
-  notifyPendingChange() {
-    if (typeof this.onPendingChange === "function") this.onPendingChange();
+  notifyChatListChange() {
+    if (typeof this.onChatListChange === "function") this.onChatListChange();
   }
 
   // --- status -----------------------------------------------------------
@@ -489,6 +549,23 @@ export class ExtensionUISurface {
     if (byKey.size === 0) this.widgets.delete(agentId);
     else this.widgets.set(agentId, byKey);
     if (agentId === this.selectedAgentId) this.renderWidgets();
+    // The chat list shows a todo count per chat, including chats you're
+    // not looking at, so any widget change can change what it draws.
+    this.notifyChatListChange();
+  }
+
+  /** Todo progress for an agent, from whichever of its widgets looks like
+   *  a todo list. Drives the count in the chat list, so it's answered for
+   *  every agent, not just the selected one.
+   *  @returns {{done: number, active: number, total: number} | null} */
+  todoProgressFor(agentId) {
+    const byKey = this.widgets.get(agentId);
+    if (!byKey) return null;
+    for (const key of [...byKey.keys()].sort()) {
+      const progress = todoProgress(byKey.get(key));
+      if (progress) return progress;
+    }
+    return null;
   }
 
   /** Widgets for an agent, sorted by key — stable ordering so several
@@ -565,7 +642,7 @@ export class ExtensionUISurface {
     this.renderStatus();
     this.renderWidgets();
     this.pump();
-    this.notifyPendingChange();
+    this.notifyChatListChange();
   }
 
   /** Agent deleted / session gone — drop everything we hold for it. */
@@ -580,6 +657,6 @@ export class ExtensionUISurface {
       this.renderStatus();
       this.renderWidgets();
     }
-    this.notifyPendingChange();
+    this.notifyChatListChange();
   }
 }

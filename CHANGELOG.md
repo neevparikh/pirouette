@@ -40,6 +40,21 @@ follow [SemVer](https://semver.org).
   `scripts/check-extension-ui.mjs` drives a real browser through both
   envelope types end to end.
 
+- **Each chat shows how far through its todo list it is.** The chat list now
+  carries a `2/5` next to any chat whose agent keeps a todo list — green once
+  everything is ticked off, yellow while something is in progress, muted
+  otherwise, with the breakdown in the row's tooltip. The point is the chats
+  you *aren't* looking at: with a dozen agents running, this is how you tell
+  the one that's nearly done from the one that has barely started, without
+  opening each in turn.
+
+  It reads the same widget the strip draws (`extension-ui.js`'s
+  `todoProgress`), counting per-item status glyphs and falling back to an
+  "N/M completed" header, so it needs no extra server data — widgets are
+  already broadcast for every chat. A widget that neither names itself a todo
+  list nor carries such a header is left alone rather than being counted as
+  one.
+
 - **Extension widgets show up in the dashboard.** `ctx.ui.setWidget(key, …)`
   was a no-op, so anything an extension pinned around the editor — a todo
   list's progress checklist, say — existed only in a terminal nobody was
