@@ -308,6 +308,31 @@ follow [SemVer](https://semver.org).
 
 ### Fixed
 
+- **A chat that one restart brought back was silently orphaned by the
+  next one.** The symptom is a chat that comes back from a restart with a
+  transcript ending in an aborted command and then just sits there, at
+  `waiting_input`, with nobody to restart it — while every other chat
+  resumes normally. It needs two restarts close together, which is why it
+  only showed up around back-to-back `pru self-update`s.
+
+  `interruptedTurn` is the durable record that a chat had work in flight
+  when the server went down; the next boot reads it and injects the
+  "continue from where you left off" nudge. The nudge path cleared the
+  flag when its `prompt()` settled — but pi *resolves* an in-flight prompt
+  when the turn is aborted rather than rejecting it, and `shutdown()`
+  aborts every live session. So a nudge turn that the shutdown had just
+  killed was indistinguishable from one that ran to completion, and the
+  flag was cleared moments after `shutdown()` had recorded the correct
+  value. Only chats still working on the previous restart's nudge could be
+  hit.
+
+  Nothing may now clear `interruptedTurn` while a shutdown is in progress,
+  and `shutdown()` re-asserts its snapshot of every chat's state after the
+  teardown, so no side effect of the teardown can overwrite what was
+  decided before it started. A pending nudge that never got delivered
+  (every attempt failed last boot) also survives a shutdown now instead of
+  being dropped because the chat looked idle at the time.
+
 - **A message sent to a chat from anywhere but the dashboard never appeared
   in the transcript.** `pru send`, an agent briefing an agent it just
   launched, a handoff note, the post-restart nudge, or simply a second

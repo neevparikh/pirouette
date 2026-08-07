@@ -234,6 +234,35 @@ interface FakeSession {
   dispose(): void;
 }
 
+/** A session whose `prompt()` stays pending until the turn is aborted,
+ *  and then *resolves* — which is what pi does: an aborted turn is not a
+ *  rejected promise. Models an agent still working when the server is
+ *  told to shut down. */
+function makeAbortableSession(opts: { onAbort?: () => void } = {}): FakeSession {
+  let settle: (() => void) | null = null;
+  const session: FakeSession = {
+    messages: new Array(3).fill({}),
+    isStreaming: false,
+    prompts: [],
+    failuresLeft: 0,
+    prompt(message: string) {
+      session.prompts.push(message);
+      session.isStreaming = true;
+      return new Promise<void>((resolve) => {
+        settle = resolve;
+      });
+    },
+    async abort() {
+      session.isStreaming = false;
+      opts.onAbort?.();
+      settle?.();
+      settle = null;
+    },
+    dispose() {},
+  };
+  return session;
+}
+
 function makeFakeSession(opts: { history?: number; failures?: number } = {}): FakeSession {
   const session: FakeSession = {
     messages: new Array(opts.history ?? 3).fill({}),
@@ -455,5 +484,105 @@ describe("post-restart nudges", () => {
     expect(calls).toBe(2);
     expect(sessions.get("late")?.prompts).toHaveLength(1);
     expect(stateManager.getAgent("late")?.errorMessage).toBeNull();
+  });
+});
+
+/**
+ * Regression: an agent auto-continued by one restart was silently
+ * orphaned by the next one.
+ *
+ * `deliverResumeNudge` clears `interruptedTurn` when its `prompt()`
+ * settles. But pi *resolves* an in-flight prompt when the turn is
+ * aborted, and `shutdown()` aborts every live session — so a nudge turn
+ * the shutdown just killed looked exactly like one that ran to
+ * completion. The flag was cleared after `shutdown()` had already
+ * snapshotted the correct value, and the next boot resumed the session
+ * without nudging it: the agent came back with a transcript ending in an
+ * aborted command, parked at `waiting_input` with nobody to restart it.
+ *
+ * Only agents still working on the *previous* restart's nudge could hit
+ * this, which is why it took back-to-back restarts to show up.
+ */
+describe("shutdown while a post-restart nudge is still in flight", () => {
+  it("keeps interruptedTurn set when the shutdown aborts the nudge turn", async () => {
+    const agent = makeAgent("mid", "shutdown");
+    agent.interruptedTurn = true;
+    const { manager, stateManager } = await makeManager([agent]);
+    const session = makeAbortableSession();
+    stubResumeWithSessions(manager, new Map([["mid", session]]));
+
+    await manager.resumeAll();
+    await new Promise((r) => setTimeout(r, 0));
+    // The nudge went out and is still running.
+    expect(session.prompts).toHaveLength(1);
+    expect(stateManager.getAgent("mid")?.interruptedTurn).toBe(true);
+
+    await manager.shutdown();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(stateManager.getAgent("mid")?.state).toBe("shutdown");
+    expect(stateManager.getAgent("mid")?.interruptedTurn).toBe(true);
+  });
+
+  it("survives teardown side effects that write agent state", async () => {
+    // Aborting a real session emits `agent_end`, which the event handler
+    // turns into `waiting_input` — a write that lands *after* shutdown()
+    // recorded its snapshot.
+    const agent = makeAgent("mid", "shutdown");
+    agent.interruptedTurn = true;
+    const { manager, stateManager } = await makeManager([agent]);
+    const session = makeAbortableSession({
+      onAbort: () => {
+        stateManager.updateAgentState("mid", { state: "waiting_input" });
+      },
+    });
+    stubResumeWithSessions(manager, new Map([["mid", session]]));
+
+    await manager.resumeAll();
+    await new Promise((r) => setTimeout(r, 0));
+    await manager.shutdown();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(stateManager.getAgent("mid")?.state).toBe("shutdown");
+    expect(stateManager.getAgent("mid")?.interruptedTurn).toBe(true);
+  });
+
+  it("the next boot nudges the agent again, reading state back off disk", async () => {
+    const agent = makeAgent("mid", "shutdown");
+    agent.interruptedTurn = true;
+    const { manager, dir } = await makeManager([agent]);
+    stubResumeWithSessions(manager, new Map([["mid", makeAbortableSession()]]));
+
+    await manager.resumeAll();
+    await new Promise((r) => setTimeout(r, 0));
+    await manager.shutdown();
+    await new Promise((r) => setTimeout(r, 0));
+
+    // A brand-new process over the same data dir.
+    const nextState = new StateManager(dir);
+    await nextState.load();
+    const nextManager = new AgentManager(nextState, new ProjectManager(nextState, dir), dir);
+    const nextSessions = new Map<string, FakeSession>();
+    stubResumeWithSessions(nextManager, nextSessions);
+
+    await nextManager.resumeAll();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(nextSessions.get("mid")?.prompts).toHaveLength(1);
+    expect(nextState.getAgent("mid")?.interruptedTurn).toBe(false);
+  });
+
+  it("preserves an undelivered nudge across a shutdown of an idle agent", async () => {
+    // Every nudge attempt failed last boot, so the agent is parked at
+    // waiting_input with the flag kept for a retry. A shutdown must not
+    // read "not running" and throw that retry away.
+    const agent = makeAgent("pending", "waiting_input");
+    agent.interruptedTurn = true;
+    const { manager, stateManager } = await makeManager([agent]);
+    addFakeHandle(manager, agent);
+
+    await manager.shutdown();
+
+    expect(stateManager.getAgent("pending")?.interruptedTurn).toBe(true);
   });
 });
