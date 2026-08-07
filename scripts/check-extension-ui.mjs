@@ -9,7 +9,9 @@
 // reaches app.js's handler and paints something, that a wall of JSON is
 // readable rather than truncated, that a burst never covers the composer,
 // that one chat's notifications don't surface while you're reading another,
-// and that a pinned widget stays put without pushing the composer around.
+// that a pinned widget stays put without pushing the composer around, and
+// that a chat's todo count shows in the chat list even while you're reading
+// a different chat.
 //
 // Serves src/web/ over a stub backend (one project, two agents) and drives
 // Chromium:
@@ -183,27 +185,39 @@ const widgetText = (page, host = "extension-widgets") =>
   page.$$eval(`#${host} [data-widget-key]`, (els) => els.map((el) => el.textContent));
 
 /** A todo-list widget in the shape server/widget-render.ts emits: lines of
- *  spans carrying pi's semantic colour names. */
-const todoWidget = (done, total, placement = "aboveEditor") => ({
-  key: "todo-list",
-  placement,
-  lines: [
-    [
-      { text: " Todo List ", color: "accent", bold: true },
-      { text: `— ${done}/${total} completed`, color: "muted" },
+ *  spans carrying pi's semantic colour names. `done` items are ticked off,
+ *  the next one is in progress, the rest are pending — so the glyphs and
+ *  the header agree, the way a real extension's widget does. */
+const todoWidget = (done, total, placement = "aboveEditor") => {
+  const line = (n) => {
+    if (n <= done) {
+      return [
+        { text: "  ✓ " },
+        { text: `${n}.`, color: "accent" },
+        { text: ` finished task ${n}`, color: "dim", strikethrough: true },
+      ];
+    }
+    if (n === done + 1) {
+      return [
+        { text: "  ◉ " },
+        { text: `${n}.`, color: "accent" },
+        { text: ` task ${n} in progress`, color: "warning" },
+      ];
+    }
+    return [{ text: "  ○ " }, { text: `${n}.`, color: "accent" }, { text: ` task ${n}` }];
+  };
+  return {
+    key: "todo-list",
+    placement,
+    lines: [
+      [
+        { text: " Todo List ", color: "accent", bold: true },
+        { text: `— ${done}/${total} completed`, color: "muted" },
+      ],
+      ...Array.from({ length: total }, (_, i) => line(i + 1)),
     ],
-    [
-      { text: "  ✓ " },
-      { text: "1.", color: "accent" },
-      { text: " wire up setWidget", color: "dim", strikethrough: true },
-    ],
-    [
-      { text: "  ◉ " },
-      { text: "2.", color: "accent" },
-      { text: " render it in the dashboard", color: "warning" },
-    ],
-  ],
-});
+  };
+};
 const widgetEnvelope = (agentId, widget, widgetKey = "todo-list") => ({
   kind: "extension_ui_widget",
   agentId,
@@ -438,6 +452,40 @@ await withDashboard(async (page, stub) => {
     await page.$eval("#extension-widgets", (el) => el.classList.contains("hidden")),
     true,
   );
+});
+
+console.log("the chat list shows each chat's todo progress:");
+await withDashboard(async (page, stub) => {
+  const counts = () =>
+    page.$$eval("[data-todo-progress]", (els) =>
+      els.map((el) => `${el.dataset.todoProgress}:${el.textContent.trim()}`),
+    );
+  expect("no count before any widget", await counts(), []);
+
+  // The chat you're NOT looking at is the interesting case: its progress
+  // has to come from the widget the server primed, not from anything the
+  // transcript loaded.
+  stub.broadcast(widgetEnvelope("agent-2", todoWidget(1, 3)));
+  await settle(page);
+  expect("counts the other chat's todos", await counts(), ["agent-2:1/3"]);
+
+  stub.broadcast(widgetEnvelope("agent-1", todoWidget(2, 3)));
+  await settle(page);
+  expect("and this chat's, from the same source", (await counts()).sort(), [
+    "agent-1:2/3",
+    "agent-2:1/3",
+  ]);
+  expect(
+    "in progress reads as yellow",
+    await page.$eval('[data-todo-progress="agent-1"]', (el) =>
+      el.className.includes("text-base16-yellow"),
+    ),
+    true,
+  );
+
+  stub.broadcast(widgetEnvelope("agent-1", null));
+  await settle(page);
+  expect("clearing the widget drops the count", await counts(), ["agent-2:1/3"]);
 });
 
 console.log("widgets are per chat, and can sit below the composer:");

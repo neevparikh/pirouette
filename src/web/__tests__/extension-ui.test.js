@@ -18,6 +18,7 @@ import {
   normalizeNotifyType,
   splitMessage,
   toastDurationMs,
+  todoProgress,
 } from "../extension-ui.js";
 
 /** Build the host elements the surface paints into, mirroring the
@@ -293,10 +294,10 @@ describe("per-agent routing", () => {
     expect(toastText()[0]).toContain("chat-agent-1");
   });
 
-  it("fires onPendingChange so the chat list can repaint", () => {
+  it("fires onChatListChange so the chat list can repaint", () => {
     const surface = setup({ selected: "agent-1" });
     const spy = vi.fn();
-    surface.onPendingChange = spy;
+    surface.onChatListChange = spy;
     surface.handleEnvelope(notifyEnvelope("agent-2", "ping", "info"));
     expect(spy).toHaveBeenCalled();
   });
@@ -451,6 +452,91 @@ describe("widget envelopes", () => {
   });
 });
 
+describe("todo progress", () => {
+  /** The shape the todo extension's widget renders to. */
+  const list = (items, header = null) =>
+    widget("todo-list", [
+      [{ text: header ?? ` Todo List — ${items.filter((i) => i === "✓").length}/${items.length} completed` }],
+      ...items.map((glyph, i) => [{ text: `  ${glyph} ${i + 1}. item ${i + 1}` }]),
+    ]);
+
+  it("counts items by their status glyph", () => {
+    expect(todoProgress(list(["✓", "✓", "◉", "○", "○"]))).toEqual({
+      done: 2,
+      active: 1,
+      total: 5,
+    });
+  });
+
+  it("recognises the common glyph variants", () => {
+    expect(todoProgress(list(["✔", "☑", "●", "◯", "☐"]))).toEqual({
+      done: 2,
+      active: 1,
+      total: 5,
+    });
+  });
+
+  it("falls back to the header when a widget only prints a summary", () => {
+    const summary = widget("todo-list", [[{ text: "todos: 3/8 completed" }]]);
+    expect(todoProgress(summary)).toEqual({ done: 3, active: 0, total: 8 });
+  });
+
+  it("reads a todo widget that doesn't say 'todo' in its key", () => {
+    const w = widget("tasks", [
+      [{ text: "2/3 done" }],
+      [{ text: "  ✓ a" }],
+      [{ text: "  ✓ b" }],
+      [{ text: "  ○ c" }],
+    ]);
+    expect(todoProgress(w)).toEqual({ done: 2, active: 0, total: 3 });
+  });
+
+  it("ignores a widget that is not a todo list at all", () => {
+    const w = widget("weather", [[{ text: "● heavy rain" }], [{ text: "○ clearing later" }]]);
+    expect(todoProgress(w)).toBeNull();
+  });
+
+  it("ignores junk", () => {
+    expect(todoProgress(null)).toBeNull();
+    expect(todoProgress({ key: "todo-list" })).toBeNull();
+    expect(todoProgress(widget("todo-list", []))).toBeNull();
+  });
+
+  it("answers for any agent, not just the selected one", () => {
+    const surface = setup({ selected: "agent-1" });
+    surface.handleEnvelope(widgetEnvelope("agent-2", "todo-list", list(["✓", "◉", "○"])));
+    expect(surface.todoProgressFor("agent-2")).toEqual({ done: 1, active: 1, total: 3 });
+    expect(surface.todoProgressFor("agent-1")).toBeNull();
+  });
+
+  it("tracks updates and clearing", () => {
+    const surface = setup({ selected: "agent-1" });
+    surface.handleEnvelope(widgetEnvelope("agent-1", "todo-list", list(["✓", "○"])));
+    expect(surface.todoProgressFor("agent-1")).toEqual({ done: 1, active: 0, total: 2 });
+    surface.handleEnvelope(widgetEnvelope("agent-1", "todo-list", list(["✓", "✓"])));
+    expect(surface.todoProgressFor("agent-1")).toEqual({ done: 2, active: 0, total: 2 });
+    surface.handleEnvelope(widgetEnvelope("agent-1", "todo-list", null));
+    expect(surface.todoProgressFor("agent-1")).toBeNull();
+  });
+
+  it("skips a non-todo widget to find the todo one", () => {
+    const surface = setup({ selected: "agent-1" });
+    surface.handleEnvelope(
+      widgetEnvelope("agent-1", "aaa-weather", widget("aaa-weather", [[{ text: "● rain" }]])),
+    );
+    surface.handleEnvelope(widgetEnvelope("agent-1", "todo-list", list(["✓", "○", "○"])));
+    expect(surface.todoProgressFor("agent-1")).toEqual({ done: 1, active: 0, total: 3 });
+  });
+
+  it("repaints the chat list when a widget changes", () => {
+    const surface = setup({ selected: "agent-1" });
+    const spy = vi.fn();
+    surface.onChatListChange = spy;
+    surface.handleEnvelope(widgetEnvelope("agent-2", "todo-list", list(["○"])));
+    expect(spy).toHaveBeenCalled();
+  });
+});
+
 describe("lifecycle", () => {
   it("forgetAgent drops toasts, queue and status for a removed agent", () => {
     const surface = setup({ selected: "agent-1" });
@@ -505,6 +591,13 @@ describe("dashboard wiring", () => {
     // The old behaviour was a console.log and nothing else. Pin that it
     // stays gone, so the signal can't quietly go back to devtools-only.
     expect(app).not.toMatch(/console\.log\(\s*\n?\s*`\[extension:/);
+  });
+
+  it("app.js paints the todo count into the chat list", () => {
+    const app = read("app.js");
+    expect(app).toContain("extensionUI.todoProgressFor(a.id)");
+    expect(app).toContain("data-todo-progress=");
+    expect(app).toContain("extensionUI.onChatListChange = () => renderAgentList()");
   });
 
   it("app.js follows the chat selection and forgets removed agents", () => {

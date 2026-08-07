@@ -165,7 +165,7 @@ const extensionUI = new ExtensionUISurface({
 });
 // Queued notifications for a background agent show up as a dot in the
 // chat list, so they aren't invisible until you happen to switch.
-extensionUI.onPendingChange = () => renderAgentList();
+extensionUI.onChatListChange = () => renderAgentList();
 
 // --- vim mode ---
 //
@@ -1718,6 +1718,17 @@ function renderAgentRow(a, _depth = 0) {
     pendingNotify?.severity === "error" ? "text-base16-red"
     : pendingNotify?.severity === "warn" ? "text-base16-yellow"
     : "text-base16-blue";
+  // "2/5": how far through its todo list this chat is, for chats that keep
+  // one (a todo extension's widget — see extension-ui.js todoProgress).
+  // Shown for every chat, not just the open one, which is the point: it's
+  // how you tell at a glance which of a dozen agents is nearly done and
+  // which has barely started. Yellow while something is in progress, green
+  // once everything is ticked off.
+  const todos = extensionUI.todoProgressFor(a.id);
+  const todoColor =
+    todos && todos.done === todos.total ? "text-base16-green"
+    : todos && todos.active > 0 ? "text-base16-yellow"
+    : "text-base16-500";
   // Vertical row: full-width, chat name on its own line, with rename and
   // archive/unarchive toggles that appear on hover. Archived chats are
   // dimmed so it's clear they're tucked away.
@@ -1732,7 +1743,11 @@ function renderAgentRow(a, _depth = 0) {
         title="${escHtml(
           titleParts.join(" — ") +
             (needsAnswer ? " — waiting on you" : "") +
-            (pendingNotify ? ` — ${pendingNotify.count} notification(s) waiting` : ""),
+            (pendingNotify ? ` — ${pendingNotify.count} notification(s) waiting` : "") +
+            (todos
+              ? ` — todos: ${todos.done}/${todos.total} done` +
+                (todos.active > 0 ? `, ${todos.active} in progress` : "")
+              : ""),
         )}"
       >
         <span class="w-2 h-2 rounded-full flex-none ${dot}"></span>
@@ -1740,6 +1755,7 @@ function renderAgentRow(a, _depth = 0) {
         <span class="truncate">${escHtml(a.name)}</span>
         ${needsAnswer ? '<span class="text-base16-yellow text-xs pulse-dot flex-none">?</span>' : ""}
         ${pendingNotify ? `<span class="${notifyColor} text-xs flex-none" aria-hidden="true">•</span>` : ""}
+        ${todos ? `<span class="${todoColor} text-[10px] flex-none ml-auto tabular-nums" data-todo-progress="${a.id}">${todos.done}/${todos.total}</span>` : ""}
       </button>
       <button
         class="flex-none px-1 py-1 text-xs text-base16-500 hover:text-base16-cyan cursor-pointer md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
