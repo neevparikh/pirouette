@@ -404,6 +404,35 @@ describe("renderMessage", () => {
     expect(html).not.toContain("bg-base16-blue/15");
   });
 
+  it("todo tool_result drops the boilerplate body but keeps the progress", () => {
+    const html = renderMessage(
+      {
+        role: "tool_result",
+        toolName: "manage_todo_list",
+        content:
+          "Todos have been modified successfully. 1/3 completed. Ensure that you continue to use the todo list to track your progress.",
+        ts: 0,
+      },
+      0,
+    );
+    expect(html).toContain("1/3 completed");
+    expect(html).not.toContain("Ensure that you continue");
+  });
+
+  it("a failed todo tool_result still shows its body", () => {
+    const html = renderMessage(
+      {
+        role: "tool_result",
+        toolName: "manage_todo_list",
+        content: "Validation failed: id must be a number",
+        isError: true,
+        ts: 0,
+      },
+      0,
+    );
+    expect(html).toContain("Validation failed");
+  });
+
   it("tool_result with images renders them under the expand chevron", () => {
     const html = renderMessage(
       {

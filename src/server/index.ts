@@ -1126,6 +1126,19 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
       } satisfies WsEnvelope);
     }
 
+    // Same for extension widgets (setWidget): they're set once, early in
+    // a session, and then only when their content changes — so a client
+    // that joins later would otherwise show an empty strip until the
+    // next update.
+    for (const { agentId, widget } of agentManager.snapshotAllWidgets()) {
+      safeSend({
+        kind: "extension_ui_widget",
+        agentId,
+        widgetKey: widget.key,
+        widget,
+      } satisfies WsEnvelope);
+    }
+
     ws.on("message", (raw) => {
       // We accept very small JSON payloads — the only inbound kinds are
       // user dialog answers. Cap the body size defensively so a hostile

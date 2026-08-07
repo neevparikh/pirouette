@@ -16,13 +16,14 @@ import {
   type PendingUIRequest,
   type UIContextHost,
 } from "../pirouette-ui-context.js";
-import type { WsEnvelope } from "../types.js";
+import type { AgentWidget, WsEnvelope } from "../types.js";
 
 /** Build a fake UIContextHost that records broadcasts and stashes the
  *  pending entry so the test can resolve / reject manually. */
 function makeHost() {
   const broadcasts: WsEnvelope[] = [];
   const pending: PendingUIRequest[] = [];
+  const widgets: Array<{ key: string; widget: AgentWidget | null }> = [];
   let idCounter = 0;
   const host: UIContextHost = {
     registerRequest(entry) {
@@ -40,8 +41,11 @@ function makeHost() {
       idCounter++;
       return `req-${idCounter}`;
     },
+    setWidget(key, widget) {
+      widgets.push({ key, widget });
+    },
   };
-  return { host, broadcasts, pending };
+  return { host, broadcasts, pending, widgets };
 }
 
 describe("createPirouetteUIContext.select", () => {

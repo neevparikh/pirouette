@@ -54,6 +54,7 @@ import {
   emptyUsage,
   type AgentConfig,
   type AgentState,
+  type AgentWidget,
   type ChatImage,
   type ChatMessage,
   type DeleteAgentOptions,
@@ -225,6 +226,13 @@ export class AgentManager {
    *  answers, the request is cancelled (by AbortSignal / agent stop /
    *  server shutdown), or another client wins the race. */
   private pendingUIRequests = new Map<string, PendingUIRequest>();
+
+  /** Latest widget per agent per `setWidget` key (see widget-render.ts).
+   *  Held here rather than only broadcast so a browser that connects or
+   *  refreshes mid-session is primed with widgets set before it joined.
+   *  Cleared when the agent's session goes away — a widget describes
+   *  live session state, so a stale one would outlive its meaning. */
+  private widgets = new Map<string, Map<string, AgentWidget>>();
 
   /** Canonical model/auth runtime. Created once during resource-loader init
    *  (async, so it can't live in the constructor). Shared with every session
@@ -472,7 +480,44 @@ export class AgentManager {
       },
       broadcast: (envelope) => this.broadcastWs(envelope),
       newRequestId: () => randomUUID(),
+      setWidget: (key, widget) => {
+        let forAgent = this.widgets.get(agentId);
+        if (widget === null) {
+          forAgent?.delete(key);
+          if (forAgent?.size === 0) this.widgets.delete(agentId);
+        } else {
+          if (!forAgent) {
+            forAgent = new Map<string, AgentWidget>();
+            this.widgets.set(agentId, forAgent);
+          }
+          forAgent.set(key, widget);
+        }
+        this.broadcastWs({ kind: "extension_ui_widget", agentId, widgetKey: key, widget });
+      },
     };
+  }
+
+  /** Every widget currently set, across all agents — the initial prime
+   *  for a new WS connection. */
+  snapshotAllWidgets(): Array<{ agentId: string; widget: AgentWidget }> {
+    const out: Array<{ agentId: string; widget: AgentWidget }> = [];
+    for (const [agentId, forAgent] of this.widgets) {
+      for (const widget of forAgent.values()) out.push({ agentId, widget });
+    }
+    return out;
+  }
+
+  /** Drop every widget for an agent and tell clients to clear them.
+   *  Called when the session is torn down (stop / new session / remove);
+   *  extensions re-publish their widgets on the next `session_start`. */
+  private clearWidgetsForAgent(agentId: string): void {
+    const forAgent = this.widgets.get(agentId);
+    if (!forAgent) return;
+    const keys = [...forAgent.keys()];
+    this.widgets.delete(agentId);
+    for (const key of keys) {
+      this.broadcastWs({ kind: "extension_ui_widget", agentId, widgetKey: key, widget: null });
+    }
   }
 
   /** Browser posted back an answer. Resolves the awaiting Promise and
@@ -2078,6 +2123,8 @@ export class AgentManager {
       // SDK's canUseTool Promise unblocks (degrading to the cancel
       // sentinel) instead of hanging on a session that's gone.
       this.cancelAllUIRequestsForAgent(id, "agent stopped");
+      // Widgets belong to the session that published them.
+      this.clearWidgetsForAgent(id);
       this.setAgentState(id, finalState);
     });
   }

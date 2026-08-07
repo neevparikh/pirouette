@@ -2,13 +2,14 @@
 // scripts/check-extension-ui.mjs
 //
 // End-to-end check for the extension UI surfaces — the toast deck fed by
-// `extension_ui_notify` and the header status strip fed by
-// `extension_ui_status`. Both arrive over the WebSocket, so the parts worth
-// checking are the ones a unit test can't reach: that a real envelope
+// `extension_ui_notify`, the header status strip fed by
+// `extension_ui_status`, and the widget strips fed by
+// `extension_ui_widget`. All three arrive over the WebSocket, so the parts
+// worth checking are the ones a unit test can't reach: that a real envelope
 // reaches app.js's handler and paints something, that a wall of JSON is
 // readable rather than truncated, that a burst never covers the composer,
-// and that one chat's notifications don't surface while you're reading
-// another.
+// that one chat's notifications don't surface while you're reading another,
+// and that a pinned widget stays put without pushing the composer around.
 //
 // Serves src/web/ over a stub backend (one project, two agents) and drives
 // Chromium:
@@ -176,6 +177,39 @@ const toastTexts = (page) =>
 const toastCount = (page) => page.$$eval("[data-toast-id]", (els) => els.length);
 const statusTexts = (page) =>
   page.$$eval("[data-status-key]", (els) => els.map((el) => el.textContent.trim()));
+const widgetKeys = (page, host = "extension-widgets") =>
+  page.$$eval(`#${host} [data-widget-key]`, (els) => els.map((el) => el.dataset.widgetKey));
+const widgetText = (page, host = "extension-widgets") =>
+  page.$$eval(`#${host} [data-widget-key]`, (els) => els.map((el) => el.textContent));
+
+/** A todo-list widget in the shape server/widget-render.ts emits: lines of
+ *  spans carrying pi's semantic colour names. */
+const todoWidget = (done, total, placement = "aboveEditor") => ({
+  key: "todo-list",
+  placement,
+  lines: [
+    [
+      { text: " Todo List ", color: "accent", bold: true },
+      { text: `— ${done}/${total} completed`, color: "muted" },
+    ],
+    [
+      { text: "  ✓ " },
+      { text: "1.", color: "accent" },
+      { text: " wire up setWidget", color: "dim", strikethrough: true },
+    ],
+    [
+      { text: "  ◉ " },
+      { text: "2.", color: "accent" },
+      { text: " render it in the dashboard", color: "warning" },
+    ],
+  ],
+});
+const widgetEnvelope = (agentId, widget, widgetKey = "todo-list") => ({
+  kind: "extension_ui_widget",
+  agentId,
+  widgetKey,
+  widget,
+});
 
 /** Wait for the notification to make it across the socket and paint. */
 const settle = (page) => page.waitForTimeout(250);
@@ -350,6 +384,80 @@ await withDashboard(async (page, stub) => {
   await page.click('[data-agent-id="agent-2"]');
   await settle(page);
   expect("shown once you switch", await statusTexts(page), ["other chat only"]);
+});
+
+console.log("a widget pinned above the composer:");
+await withDashboard(async (page, stub) => {
+  const composerBefore = await page.$eval("#message-input", (el) => el.getBoundingClientRect().top);
+  stub.broadcast(widgetEnvelope("agent-1", todoWidget(1, 3)));
+  await settle(page);
+  expect("shows the widget", await widgetKeys(page), ["todo-list"]);
+  expect(
+    "with the extension's own lines",
+    (await widgetText(page))[0].includes("1/3 completed"),
+    true,
+  );
+  expect(
+    "themed by semantic colour, not raw ANSI",
+    await page.$eval("#extension-widgets [data-widget-key]", (el) =>
+      el.innerHTML.includes("text-base16-cyan"),
+    ),
+    true,
+  );
+  expect(
+    "no escape codes leak into the text",
+    (await widgetText(page))[0].includes("\u001b"),
+    false,
+  );
+  expect(
+    "it sits above the composer, not over it",
+    await page.evaluate(() => {
+      const strip = document.getElementById("extension-widgets").getBoundingClientRect();
+      const input = document.getElementById("message-input").getBoundingClientRect();
+      return strip.bottom <= input.top + 1 && strip.height > 0;
+    }),
+    true,
+  );
+  expect(
+    "and the composer is still reachable",
+    await page.evaluate((top) => document.getElementById("message-input").getBoundingClientRect().top <= top, composerBefore),
+    true,
+  );
+
+  // An update replaces the widget rather than stacking a second copy.
+  stub.broadcast(widgetEnvelope("agent-1", todoWidget(3, 3)));
+  await settle(page);
+  expect("an update replaces it", await widgetKeys(page), ["todo-list"]);
+  expect("with the new content", (await widgetText(page))[0].includes("3/3 completed"), true);
+
+  stub.broadcast(widgetEnvelope("agent-1", null));
+  await settle(page);
+  expect("null clears it", await widgetKeys(page), []);
+  expect(
+    "and the empty strip disappears",
+    await page.$eval("#extension-widgets", (el) => el.classList.contains("hidden")),
+    true,
+  );
+});
+
+console.log("widgets are per chat, and can sit below the composer:");
+await withDashboard(async (page, stub) => {
+  stub.broadcast(widgetEnvelope("agent-2", todoWidget(0, 2)));
+  await settle(page);
+  expect("nothing shows for the other chat", await widgetKeys(page), []);
+  await page.click('[data-agent-id="agent-2"]');
+  await settle(page);
+  expect("switching over reveals it", await widgetKeys(page), ["todo-list"]);
+  await page.click('[data-agent-id="agent-1"]');
+  await settle(page);
+  expect("and it doesn't follow you back", await widgetKeys(page), []);
+
+  stub.broadcast(widgetEnvelope("agent-1", todoWidget(1, 2, "belowEditor")));
+  await settle(page);
+  expect("belowEditor lands in the lower strip", await widgetKeys(page, "extension-widgets-below"), [
+    "todo-list",
+  ]);
+  expect("and not the upper one", await widgetKeys(page), []);
 });
 
 if (failures.length > 0) {

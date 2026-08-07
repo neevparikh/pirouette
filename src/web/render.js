@@ -353,6 +353,24 @@ export function describeToolCall(toolName, args) {
     };
   }
 
+  // Todo lists (pi-manage-todo-list and friends). The raw args are a
+  // wall of JSON — every item carries a multi-line `description` the
+  // model wrote for itself — so we render the checklist instead, the
+  // same shape the extension draws in the terminal.
+  if (name === "manage_todo_list" || name === "todo_write" || name === "todowrite") {
+    const op = typeof parsed.operation === "string" ? parsed.operation : "write";
+    const todos = normalizeTodos(parsed.todoList ?? parsed.todos);
+    if (op === "read" || todos.length === 0) {
+      return { header: "todos", subtitle: op, body: "", bodyIsRich: false };
+    }
+    return {
+      header: "todos",
+      subtitle: todoProgress(todos),
+      body: renderTodoList(todos),
+      bodyIsRich: true,
+    };
+  }
+
   if (name === "grep" || name === "find" || name === "glob") {
     const pattern = parsed.pattern || parsed.query || "";
     const pathPart = parsed.path ? ` in ${shortenPath(parsed.path)}` : "";
@@ -409,8 +427,81 @@ export function describeToolResult(toolName, content, isError) {
     return lines > 3 ? `${lines} lines of output` : null;
   }
 
+  if (BODYLESS_RESULT_TOOLS.has(name)) {
+    // The tool answers with a paragraph aimed at the model; the only
+    // part worth showing is the progress count buried in it.
+    const m = text.match(/(\d+)\s*\/\s*(\d+)\s+completed/i);
+    return m ? `${m[1]}/${m[2]} completed` : null;
+  }
+
   if (name === "write" || name === "edit") return null;
   return null;
+}
+
+/** Tools whose result text is boilerplate the call itself already shows.
+ *  The transcript renders the tool name + summary and drops the body.
+ *  (`manage_todo_list` answers every write with a paragraph of
+ *  instructions addressed to the model, not to the reader.) */
+const BODYLESS_RESULT_TOOLS = new Set(["manage_todo_list", "todo_write", "todowrite"]);
+
+/** Should the transcript suppress this tool result's body? */
+export function hidesToolResultBody(toolName, isError) {
+  if (isError) return false;
+  return BODYLESS_RESULT_TOOLS.has((toolName || "").toLowerCase());
+}
+
+// --- todo lists ---
+
+const TODO_ICONS = {
+  completed: "\u2713",
+  "in-progress": "\u25c9",
+  "not-started": "\u25cb",
+};
+
+/** Icon + title colors per status. Completed items are struck through and
+ *  dimmed, in-progress is the one thing you want to spot at a glance. */
+const TODO_CLASSES = {
+  completed: { icon: "text-base16-green", title: "text-base16-500 line-through" },
+  "in-progress": { icon: "text-base16-yellow", title: "text-base16-yellow" },
+  "not-started": { icon: "text-base16-500", title: "text-base16-600" },
+};
+
+/** Coerce whatever the tool was called with into a list of todo items,
+ *  dropping anything that doesn't look like one. */
+export function normalizeTodos(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const status = TODO_ICONS[item.status] ? item.status : "not-started";
+    out.push({
+      id: item.id,
+      title: typeof item.title === "string" ? item.title : "",
+      status,
+    });
+  }
+  return out;
+}
+
+/** "3/7 completed", or "all 7 done" when the list is finished. */
+export function todoProgress(todos) {
+  const total = todos.length;
+  const done = todos.filter((t) => t.status === "completed").length;
+  if (total > 0 && done === total) return `all ${total} done`;
+  return `${done}/${total} completed`;
+}
+
+/** Render a todo list as an HTML checklist (rich body). */
+export function renderTodoList(todos) {
+  let html = '<div class="font-mono text-[11px] leading-5">';
+  for (const todo of todos) {
+    const cls = TODO_CLASSES[todo.status];
+    const icon = TODO_ICONS[todo.status];
+    const label = todo.id === undefined || todo.id === null ? "" : `${todo.id}. `;
+    html += `<div><span class="${cls.icon}">${icon}</span> <span class="${cls.title}">${escHtml(label + todo.title)}</span></div>`;
+  }
+  html += "</div>";
+  return html;
 }
 
 // --- diff rendering ---

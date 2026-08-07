@@ -150,11 +150,14 @@ const $extUiSubmit = document.getElementById("ext-ui-submit");
 //
 // The fire-and-forget half of the same bridge: `ctx.ui.notify()` becomes a
 // toast in the deck overlaying the top of the transcript, `ctx.ui.setStatus()`
-// becomes a pill in the agent header. Both are per agent — the surface only
+// becomes a pill in the agent header, and `ctx.ui.setWidget()` becomes a
+// strip of monospace lines hugging the composer. Both are per agent — the surface only
 // paints the selected one and queues the rest. See extension-ui.js.
 const extensionUI = new ExtensionUISurface({
   toastHost: document.getElementById("extension-toasts"),
   statusHost: document.getElementById("extension-status"),
+  widgetHost: document.getElementById("extension-widgets"),
+  widgetHostBelow: document.getElementById("extension-widgets-below"),
   agentLabel: (agentId) => {
     const agent = agents.find((a) => a.id === agentId);
     return agent ? agent.name : agentId;
@@ -1439,6 +1442,7 @@ function handleWsMessage(envelope) {
 
     case "extension_ui_notify":
     case "extension_ui_status":
+    case "extension_ui_widget":
       // Fire-and-forget notification / persistent status set by an
       // extension. Rendered as a toast in the deck, or a pill in the
       // agent header, by ExtensionUISurface.

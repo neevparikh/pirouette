@@ -9,9 +9,7 @@ import {
   enhanceImagePaths,
   escHtml,
   formatDocumentTitle,
-  SIDEBAR_DEFAULT_WIDTH,
-  SIDEBAR_MAX_WIDTH,
-  SIDEBAR_MIN_WIDTH,
+  hidesToolResultBody,
   looksLikeImagePathRef,
   normalizeModelId,
   parseToolArgs,
@@ -20,6 +18,10 @@ import {
   renderDiff,
   renderMarkdown,
   shortenPath,
+  SIDEBAR_DEFAULT_WIDTH,
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH,
+  todoProgress,
 } from "../render.js";
 
 describe("escHtml", () => {
@@ -131,6 +133,39 @@ describe("describeToolCall", () => {
     expect(r.subtitle).toContain("in /proj/src");
     expect(r.subtitle).toContain("ts");
   });
+  it("manage_todo_list write → checklist, not JSON", () => {
+    const r = describeToolCall("manage_todo_list", {
+      operation: "write",
+      todoList: [
+        { id: 1, title: "ship it", description: "a very long note", status: "completed" },
+        { id: 2, title: "write tests", description: "…", status: "in-progress" },
+        { id: 3, title: "deploy", description: "…", status: "not-started" },
+      ],
+    });
+    expect(r.header).toBe("todos");
+    expect(r.subtitle).toBe("1/3 completed");
+    expect(r.bodyIsRich).toBe(true);
+    expect(r.body).toContain("ship it");
+    expect(r.body).toContain("line-through");
+    // The model-facing descriptions are noise in a transcript.
+    expect(r.body).not.toContain("a very long note");
+  });
+  it("manage_todo_list read → no body", () => {
+    const r = describeToolCall("manage_todo_list", { operation: "read" });
+    expect(r).toEqual({ header: "todos", subtitle: "read", body: "", bodyIsRich: false });
+  });
+  it("manage_todo_list escapes item titles", () => {
+    const r = describeToolCall("manage_todo_list", {
+      operation: "write",
+      todoList: [{ id: 1, title: "<img src=x>", description: "", status: "not-started" }],
+    });
+    expect(r.body).not.toContain("<img");
+    expect(r.body).toContain("&lt;img");
+  });
+  it("manage_todo_list tolerates a malformed list", () => {
+    const r = describeToolCall("manage_todo_list", { operation: "write", todoList: "nope" });
+    expect(r.body).toBe("");
+  });
   it("unknown tool falls back to JSON body", () => {
     const r = describeToolCall("my_custom_tool", { foo: 1 });
     expect(r.header).toBe("my_custom_tool");
@@ -168,6 +203,38 @@ describe("describeToolResult", () => {
   });
   it("returns null for empty content", () => {
     expect(describeToolResult("bash", "")).toBeNull();
+  });
+  it("manage_todo_list → progress pulled out of the boilerplate", () => {
+    expect(
+      describeToolResult(
+        "manage_todo_list",
+        "Todos have been modified successfully. 2/5 completed. Ensure that you continue…",
+      ),
+    ).toBe("2/5 completed");
+    expect(describeToolResult("manage_todo_list", "No todos.")).toBeNull();
+  });
+});
+
+describe("hidesToolResultBody", () => {
+  it("hides the todo tool's model-facing boilerplate", () => {
+    expect(hidesToolResultBody("manage_todo_list")).toBe(true);
+    expect(hidesToolResultBody("MANAGE_TODO_LIST")).toBe(true);
+  });
+  it("keeps errors and every other tool", () => {
+    expect(hidesToolResultBody("manage_todo_list", true)).toBe(false);
+    expect(hidesToolResultBody("bash")).toBe(false);
+    expect(hidesToolResultBody(undefined)).toBe(false);
+  });
+});
+
+describe("todoProgress", () => {
+  it("counts completed items", () => {
+    expect(todoProgress([{ status: "completed" }, { status: "not-started" }])).toBe(
+      "1/2 completed",
+    );
+  });
+  it("calls out a finished list", () => {
+    expect(todoProgress([{ status: "completed" }])).toBe("all 1 done");
   });
 });
 
