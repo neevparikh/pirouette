@@ -134,6 +134,9 @@ export function reduceEvent(state, event, now) {
     }
 
     case "message_end": {
+      if (event.role === "user") {
+        return appendUserMessage(state, event, ts);
+      }
       if (event.role === "assistant") {
         const newMsgs = [...messages];
         if (streamingThinking) {
@@ -202,6 +205,48 @@ export function reduceEvent(state, event, now) {
   }
 
   return { messages, streamingText, streamingThinking, queue: state.queue };
+}
+
+/** Fold a `message_end` event for a user message into the transcript.
+ *
+ *  Pi emits message_start/message_end for every user turn, whoever
+ *  authored it: the browser, `pru send` from a human shell, another agent
+ *  delegating work, or a steering message being consumed mid-turn. Before
+ *  we handled it here, only the browser tab that typed the message showed
+ *  it (via the optimistic append in app.js) — everything else stayed
+ *  invisible until the next history refetch on turn end, so an agent you
+ *  launched-and-briefed appeared to be working on nothing.
+ *
+ *  The optimistic append is why this can't be a plain push: the sending
+ *  tab already has the message on screen, tagged `pending`, and would
+ *  otherwise show it twice. Confirming the first pending user message with
+ *  matching text (rather than dropping any duplicate) keeps a deliberate
+ *  "continue" / "continue" pair intact — two pendings, two confirmations.
+ */
+function appendUserMessage(state, event, ts) {
+  const content = typeof event.text === "string" ? event.text : "";
+  const images = Array.isArray(event.images) ? event.images : [];
+  // Nothing to draw. Pi has no reason to emit this, but an empty row in
+  // the transcript would be worse than skipping it.
+  if (!content && images.length === 0) return state;
+
+  const pendingIdx = state.messages.findIndex(
+    (m) => m.role === "user" && m.pending && m.content === content,
+  );
+  if (pendingIdx !== -1) {
+    const messages = [...state.messages];
+    const { pending: _pending, ...confirmed } = messages[pendingIdx];
+    messages[pendingIdx] = confirmed;
+    return { ...state, messages };
+  }
+
+  return {
+    ...state,
+    messages: [
+      ...state.messages,
+      { role: "user", content, ts, ...(images.length > 0 ? { images } : {}) },
+    ],
+  };
 }
 
 /** Apply a sequence of events to an initial (or provided) state. */

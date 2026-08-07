@@ -33,6 +33,49 @@ function normalizeMessageText(content: unknown): string | undefined {
     .join("");
 }
 
+/** Text of a user message: the text blocks only. Deliberately NOT
+ *  `normalizeMessageText`, which falls back to `JSON.stringify(part)` for
+ *  anything it doesn't recognise — on a user message that means a whole
+ *  base64 image blob inlined into the transcript text. */
+function userMessageText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter(
+      (part): part is { type: "text"; text: string } =>
+        !!part &&
+        typeof part === "object" &&
+        "type" in part &&
+        part.type === "text" &&
+        "text" in part &&
+        typeof part.text === "string",
+    )
+    .map((part) => part.text)
+    .join("");
+}
+
+/** Image attachments on a user message, as data URLs — the same shape
+ *  `getMessages()` puts in the history payload, so a live-streamed user
+ *  message renders identically to the one that comes back from history. */
+function userMessageImages(content: unknown): Array<{ dataUrl: string; mimeType: string }> {
+  if (!Array.isArray(content)) return [];
+  const out: Array<{ dataUrl: string; mimeType: string }> = [];
+  for (const part of content) {
+    if (
+      part &&
+      typeof part === "object" &&
+      "type" in part &&
+      part.type === "image" &&
+      "data" in part &&
+      "mimeType" in part
+    ) {
+      const b = part as { data: string; mimeType: string };
+      out.push({ dataUrl: `data:${b.mimeType};base64,${b.data}`, mimeType: b.mimeType });
+    }
+  }
+  return out;
+}
+
 export function normalizeEvent(event: AgentSessionEvent): NormalizedEvent {
   switch (event.type) {
     case "agent_start":
@@ -48,14 +91,29 @@ export function normalizeEvent(event: AgentSessionEvent): NormalizedEvent {
         })),
       };
     case "message_start":
-    case "message_end":
+    case "message_end": {
+      const content = (event.message as { content?: unknown }).content;
+      if (event.message.role === "user") {
+        // User messages are rendered straight from the event stream (that's
+        // how a message from `pru send`, from another agent, or from a
+        // second browser tab shows up mid-turn), so they need the same
+        // text + images split the history endpoint does. Images ride on
+        // message_end only — message_start carries no extra information
+        // and there's no reason to put a base64 blob on the wire twice.
+        const images = event.type === "message_end" ? userMessageImages(content) : [];
+        return {
+          type: event.type,
+          role: event.message.role,
+          text: userMessageText(content),
+          ...(images.length > 0 ? { images } : {}),
+        };
+      }
       return {
         type: event.type,
         role: event.message.role,
-        text: normalizeMessageText(
-          (event.message as { content?: unknown }).content,
-        ),
+        text: normalizeMessageText(content),
       };
+    }
     case "message_update": {
       const ame = event.assistantMessageEvent;
       if (ame.type === "text_delta") {
