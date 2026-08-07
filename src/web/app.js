@@ -23,6 +23,7 @@ import {
   renderTranscriptBlocks,
 } from "./transcript.js";
 import { renderMarkdownPi } from "./pi-markdown.js";
+import { ExtensionUISurface } from "./extension-ui.js";
 import { VimMode } from "./vim.js";
 import { escapeAction } from "./keys.js";
 
@@ -144,6 +145,24 @@ const $extUiMessage = document.getElementById("ext-ui-message");
 const $extUiBody = document.getElementById("ext-ui-body");
 const $extUiCancel = document.getElementById("ext-ui-cancel");
 const $extUiSubmit = document.getElementById("ext-ui-submit");
+
+// --- extension notify / status surfaces ---
+//
+// The fire-and-forget half of the same bridge: `ctx.ui.notify()` becomes a
+// toast in the deck overlaying the top of the transcript, `ctx.ui.setStatus()`
+// becomes a pill in the agent header. Both are per agent — the surface only
+// paints the selected one and queues the rest. See extension-ui.js.
+const extensionUI = new ExtensionUISurface({
+  toastHost: document.getElementById("extension-toasts"),
+  statusHost: document.getElementById("extension-status"),
+  agentLabel: (agentId) => {
+    const agent = agents.find((a) => a.id === agentId);
+    return agent ? agent.name : agentId;
+  },
+});
+// Queued notifications for a background agent show up as a dot in the
+// chat list, so they aren't invisible until you happen to switch.
+extensionUI.onPendingChange = () => renderAgentList();
 
 // --- vim mode ---
 //
@@ -1339,6 +1358,7 @@ function handleWsMessage(envelope) {
       delete transcriptByAgent[envelope.agentId];
       delete currentActivity[envelope.agentId];
       delete statsByAgent[envelope.agentId];
+      extensionUI.forgetAgent(envelope.agentId);
       if (selectedAgentId === envelope.agentId) {
         selectedAgentId = null;
         renderAgentHeader();
@@ -1418,20 +1438,11 @@ function handleWsMessage(envelope) {
       break;
 
     case "extension_ui_notify":
-      // Fire-and-forget toast from an extension. We don't have a toast
-      // system yet — log to console for now so we don't drop the signal.
-      console.log(
-        `[extension:${envelope.agentId}] ${envelope.notifyType ?? "info"}: ${envelope.message}`,
-      );
-      break;
-
     case "extension_ui_status":
-      // Per-agent persistent status (footer/header badge). Not yet
-      // wired into a UI slot; logged so the data isn't lost during
-      // development. TODO: surface in agent header.
-      console.log(
-        `[extension:${envelope.agentId}] status[${envelope.statusKey}]=${envelope.statusText ?? "(cleared)"}`,
-      );
+      // Fire-and-forget notification / persistent status set by an
+      // extension. Rendered as a toast in the deck, or a pill in the
+      // agent header, by ExtensionUISurface.
+      extensionUI.handleEnvelope(envelope);
       break;
 
     case "fast_mode":
@@ -1695,6 +1706,14 @@ function renderAgentRow(a, _depth = 0) {
   // "?" glyph: an extension fired AskUserQuestion (or similar) for this
   // agent and is waiting for the user to answer. Pulses to draw the eye.
   const needsAnswer = agentHasPendingExtensionUI(a.id);
+  // "•" glyph: an extension sent this agent a notification while you were
+  // looking at another chat. Not blocking (unlike "?"), so it doesn't
+  // pulse — it just says "there's a toast waiting when you switch".
+  const pendingNotify = extensionUI.pendingFor(a.id);
+  const notifyColor =
+    pendingNotify?.severity === "error" ? "text-base16-red"
+    : pendingNotify?.severity === "warn" ? "text-base16-yellow"
+    : "text-base16-blue";
   // Vertical row: full-width, chat name on its own line, with rename and
   // archive/unarchive toggles that appear on hover. Archived chats are
   // dimmed so it's clear they're tucked away.
@@ -1706,12 +1725,17 @@ function renderAgentRow(a, _depth = 0) {
       <button
         class="flex items-center gap-1.5 px-2 py-1 flex-1 min-w-0 cursor-pointer text-sm font-mono text-left"
         data-agent-id="${a.id}"
-        title="${escHtml(titleParts.join(" — ") + (needsAnswer ? " — waiting on you" : ""))}"
+        title="${escHtml(
+          titleParts.join(" — ") +
+            (needsAnswer ? " — waiting on you" : "") +
+            (pendingNotify ? ` — ${pendingNotify.count} notification(s) waiting` : ""),
+        )}"
       >
         <span class="w-2 h-2 rounded-full flex-none ${dot}"></span>
         ${a.parentAgentId ? '<span class="text-base16-500 text-xs flex-none">↳</span>' : ""}
         <span class="truncate">${escHtml(a.name)}</span>
         ${needsAnswer ? '<span class="text-base16-yellow text-xs pulse-dot flex-none">?</span>' : ""}
+        ${pendingNotify ? `<span class="${notifyColor} text-xs flex-none" aria-hidden="true">•</span>` : ""}
       </button>
       <button
         class="flex-none px-1 py-1 text-xs text-base16-500 hover:text-base16-cyan cursor-pointer md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
@@ -2439,6 +2463,9 @@ function updateInputPlaceholder() {
 
 async function selectAgent(id) {
   selectedAgentId = id;
+  // Park the previous agent's toasts, paint this agent's status pills and
+  // release anything that queued up while we were looking elsewhere.
+  extensionUI.setSelectedAgent(id);
   // Also pin the sidebar selection to the agent's project so subsequent
   // @<newname> creates land where the user expects.
   const agent = agents.find((a) => a.id === id);

@@ -879,6 +879,11 @@
              worktree, branch and session files keep their original
              slug). Same action as the ✎ in the sidebar and `/rename`. -->
         <span id="agent-title" class="text-base font-bold text-base16-600 font-mono flex-none truncate cursor-pointer hover:text-base16-cyan" title="click to rename this chat" role="button" tabindex="0"></span>
+        <!-- Extension status strip: one quiet pill per `setStatus` key of
+             the selected agent (e.g. a provider reporting which model it
+             fell back to). Populated by ExtensionUISurface; hidden while
+             no extension has set a key. -->
+        <div id="extension-status" class="hidden flex items-center gap-1.5 min-w-0 overflow-hidden" aria-live="polite"></div>
         <!-- v0.13.8: agent name + status removed from the header. Agent
              identity lives in the footer's info line; the top now just
              carries the brand + per-agent action buttons. Header is
@@ -972,12 +977,30 @@
         </div>
       </header>
 
-      <!-- Messages -->
-      <!-- Flat pi-cli transcript: no `space-y-*` between rows so user/
-           assistant rows abut directly (matches the continuous terminal
-           feel of pi-cli). Padding moves to per-row `pi-row` CSS so
-           the bg-tint strips run the full container width. -->
-      <div id="messages" class="flex-1 overflow-y-auto px-0 py-2"></div>
+      <!-- Transcript, plus the extension toast deck overlaying its top
+           right. The wrapper is the deck's positioning context, so the
+           toasts always start just below the header whatever height it
+           wraps to (the header gains a second row on narrow screens). -->
+      <div class="relative flex-1 flex flex-col min-h-0">
+        <!-- Extension toast deck (`extension_ui_notify`). Deliberately at
+             the TOP of the transcript: the composer, the queue strip and
+             the slash/mention popups all live at the bottom of the column,
+             and a burst of notifications must never cover what you type
+             into. Below the pickers/modals in z-order. Hidden while empty;
+             `pointer-events` are re-enabled per toast so clicks land on
+             the transcript in the gaps between them. -->
+        <div
+          id="extension-toasts"
+          class="hidden pointer-events-none absolute right-3 md:right-6 top-2 z-30 w-[min(26rem,calc(100%-1.5rem))] max-h-[calc(100%-1rem)] overflow-y-auto flex flex-col gap-2"
+        ></div>
+
+        <!-- Messages -->
+        <!-- Flat pi-cli transcript: no `space-y-*` between rows so user/
+             assistant rows abut directly (matches the continuous terminal
+             feel of pi-cli). Padding moves to per-row `pi-row` CSS so
+             the bg-tint strips run the full container width. -->
+        <div id="messages" class="flex-1 overflow-y-auto px-0 py-2"></div>
+      </div>
 
       <!-- Shared backdrop for both mobile drawers. Hidden on desktop
            via CSS; toggled by app.js when either drawer opens. -->

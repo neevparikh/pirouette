@@ -9,6 +9,37 @@ follow [SemVer](https://semver.org).
 
 ### Added
 
+- **Extension notifications and statuses actually show up.** A pi extension
+  can call `ctx.ui.notify(message, type)` and `ctx.ui.setStatus(key, text)`;
+  the server already broadcast both over the WebSocket and the dashboard
+  already received both — and did nothing with them but a `console.log`. An
+  extension command whose whole output was a notification therefore looked
+  like it had done nothing at all.
+
+  `notify` now paints a toast in a deck at the top right of the transcript,
+  coloured by type (`info` / `warn` / `error`, anything else read as info).
+  It's at the top on purpose: the composer, the queue chips and the slash /
+  mention popups all live at the bottom, and notifications must never cover
+  what you type into. At most three stack at once, the rest queue behind
+  them; each auto-dismisses on a timer that scales with severity and length,
+  pauses while hovered, and has a ✕. Extensions reporting their own state
+  emit tens of lines of pretty-printed JSON, so anything multi-line or long
+  is collapsed to its first line with a `show all (+N lines)` toggle that
+  expands into a scrollable box and pins the toast open.
+
+  Toasts are per chat. A notification for a chat you aren't looking at
+  doesn't interrupt: it waits in that chat's queue (newest kept, capped) and
+  is released when you switch over, with a coloured dot in the chat list
+  meanwhile. Anything that has gone stale by the time you get there is
+  dropped rather than shown late.
+
+  `setStatus` gets a quiet strip of pills next to the chat name in the
+  header — one per key, so several extensions can hold a slot each, sorted
+  by key so the strip doesn't jitter, and cleared by a `null`. Both surfaces
+  use only base16 theme classes, so they follow whichever theme is active.
+  `scripts/check-extension-ui.mjs` drives a real browser through both
+  envelope types end to end.
+
 - **The chat sidebar can be resized, and remembers how wide you left it.**
   It was a fixed 16rem column, which is narrower than the names chats
   actually end up with — the sidebar is the only place a chat's full name
