@@ -6,6 +6,7 @@ import {
   describeToolResult,
   enhanceImagePaths,
   escHtml,
+  hidesToolResultBody,
   relTime,
   renderMarkdown,
   shortenPath,
@@ -484,7 +485,11 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     const contentStr = typeof msg.content === "string" ? msg.content : String(msg.content ?? "");
     const summary = describeToolResult(msg.toolName, contentStr, isError);
     const key = messageKey(msg, idx);
-    const hasBody = contentStr.trim().length > 0;
+    // Some tools answer with boilerplate written for the model (todo
+    // lists say "…continue to use the todo list…" after every write).
+    // The call row already shows the content; drop the echo.
+    const hasBody =
+      contentStr.trim().length > 0 && !hidesToolResultBody(msg.toolName, isError);
     const toolName = msg.toolName || "done";
     // Images render alongside the text body. The text body is always
     // visible (no chevron gate) so pi-cli's auto-expand semantics

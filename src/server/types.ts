@@ -188,6 +188,16 @@ export type WsEnvelope =
       statusKey: string;
       statusText: string | null;
     }
+  /** A widget an extension pinned above/below the editor (setWidget()),
+   *  pre-rendered into styled spans by widget-render.ts. `widget === null`
+   *  clears the slot. Re-broadcast to newly-connected clients so a refresh
+   *  doesn't lose widgets that were set earlier in the session. */
+  | {
+      kind: "extension_ui_widget";
+      agentId: string;
+      widgetKey: string;
+      widget: AgentWidget | null;
+    }
   /** Fast-mode badge state (a provider's `pi:fast-mode` channel), keyed by
    *  model so each agent's badge is independent. Broadcast whenever it
    *  changes, and primed on connect. An empty snapshot means no
@@ -236,6 +246,32 @@ export type ExtensionUIRequest =
       title: string;
       placeholder?: string;
     };
+
+/** Where a widget sits relative to the input editor. Mirrors pi's
+ *  `WidgetPlacement`. */
+export type WidgetPlacement = "aboveEditor" | "belowEditor";
+
+/** One styled run of text inside a widget line. `color` / `bg` are pi
+ *  *semantic* theme names (`accent`, `success`, `dim`, …), not RGB — the
+ *  dashboard maps them onto whichever base16 palette the user picked.
+ *  Absent means "inherit the surrounding text color". */
+export interface WidgetSpan {
+  text: string;
+  color?: string;
+  bg?: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strikethrough?: boolean;
+}
+
+/** A widget as broadcast to clients: one entry per `setWidget` key, its
+ *  content already rendered to lines of styled spans. */
+export interface AgentWidget {
+  key: string;
+  placement: WidgetPlacement;
+  lines: WidgetSpan[][];
+}
 
 export interface NormalizedEvent {
   type: string;

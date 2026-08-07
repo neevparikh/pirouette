@@ -1059,6 +1059,13 @@
           class="hidden absolute bottom-full left-3 right-3 md:left-6 md:right-6 mb-2 bg-base16-200 border border-base16-300 rounded-lg shadow-lg max-h-72 overflow-y-auto z-10"
         ></div>
 
+        <!-- Extension widgets pinned above the editor (ExtensionUIContext
+             setWidget with the default "aboveEditor" placement -- e.g. a
+             todo-list extension's progress checklist). Painted by
+             ExtensionUISurface from the styled spans the server produces
+             in widget-render.ts. -->
+        <div id="extension-widgets" class="hidden mb-2 flex flex-col gap-1"></div>
+
         <!-- Queue chips. Populated by app.js when the agent has pending
              steering or follow-up messages (mirroring pi's TUI). -->
         <div id="queue-strip" class="hidden mb-2 flex flex-wrap gap-1.5"></div>
@@ -1094,6 +1101,9 @@
             >mode: steer</button>
           </div>
         </div>
+
+        <!-- Extension widgets with placement "belowEditor". -->
+        <div id="extension-widgets-below" class="hidden mt-2 flex flex-col gap-1"></div>
 
       </div>
 

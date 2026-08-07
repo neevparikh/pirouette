@@ -40,6 +40,35 @@ follow [SemVer](https://semver.org).
   `scripts/check-extension-ui.mjs` drives a real browser through both
   envelope types end to end.
 
+- **Extension widgets show up in the dashboard.** `ctx.ui.setWidget(key, …)`
+  was a no-op, so anything an extension pinned around the editor — a todo
+  list's progress checklist, say — existed only in a terminal nobody was
+  looking at. Widgets now render in strips hugging the composer, above or
+  below it per the extension's `placement`, one slot per key, cleared by an
+  `undefined` and dropped when the chat's session goes away. They're per chat
+  like toasts and statuses, and re-sent to clients that connect later, so a
+  refresh doesn't lose a widget that was set at the start of the session.
+
+  Both forms of the API work, including the `(tui, theme) => Component`
+  factory that pi's own RPC mode ignores: the component is rendered against a
+  *sentinel theme* whose colours are unique impossible RGB triples, and the
+  ANSI it produces is parsed back into spans tagged with the semantic colour
+  that made them (`accent`, `success`, `dim`). The dashboard paints those with
+  the active base16 palette, so a widget themes with everything else instead
+  of carrying a terminal's RGB. Colours a widget wrote itself keep their text
+  and lose the colour; escape sequences and control characters never reach the
+  browser; a widget that throws is logged and dropped rather than failing the
+  agent's turn. `scripts/check-extension-ui.mjs` covers the widget strips in a
+  real browser alongside the toast deck.
+
+- **Todo-list tool calls render as a checklist.** `manage_todo_list` fell
+  through to the generic "pretty-print the arguments" branch, so every write
+  printed a screenful of raw JSON including each item's model-facing
+  `description`, and the result echoed a paragraph of instructions written for
+  the model. It's now `todos — 2/5 completed` over a ✓/◉/○ checklist with
+  completed items struck through, and the boilerplate body is dropped in
+  favour of the progress count.
+
 - **The chat sidebar can be resized, and remembers how wide you left it.**
   It was a fixed 16rem column, which is narrower than the names chats
   actually end up with — the sidebar is the only place a chat's full name

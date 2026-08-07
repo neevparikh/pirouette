@@ -1,5 +1,6 @@
-// Extension UI surfaces: toasts (`extension_ui_notify`) and the per-agent
-// status strip (`extension_ui_status`).
+// Extension UI surfaces: toasts (`extension_ui_notify`), the per-agent
+// status strip (`extension_ui_status`), and pinned widgets
+// (`extension_ui_widget`).
 //
 // Both envelopes come from the server's ExtensionUIContext (see
 // src/server/pirouette-ui-context.ts), which is the bridge for a pi
@@ -21,6 +22,14 @@
 //     dropped if it goes stale before you switch over — a status report
 //     from ten minutes ago is not worth interrupting for. `pendingFor()`
 //     lets the chat list mark that something is waiting.
+//
+//   - Widgets are the one persistent surface: an extension calls
+//     `ctx.ui.setWidget(key, …)` and the content stays on screen until it
+//     sets the key again or clears it (a todo list's progress checklist,
+//     say). They sit in strips hugging the composer, above or below per
+//     the extension's `placement`, and their text carries pi's *semantic*
+//     colour names (`accent`, `success`, `dim`) rather than RGB — see
+//     server/widget-render.ts — so a widget themes with everything else.
 //
 //   - Content can be big: an extension reporting its configuration emits
 //     tens of lines of pretty-printed JSON, and one truncated line of that
@@ -60,6 +69,52 @@ const TYPE_STYLE = {
 /** Severity ordering, used to colour the "notifications waiting" dot with
  *  the worst thing in the queue. */
 const SEVERITY_RANK = { info: 0, warn: 1, error: 2 };
+
+/** pi theme colour name -> base16 class, for widget spans. Names the map
+ *  doesn't know inherit the surrounding colour, which is a duller widget
+ *  rather than a broken one. */
+export const WIDGET_FG_CLASS = {
+  accent: "text-base16-cyan",
+  border: "text-base16-300",
+  borderAccent: "text-base16-cyan",
+  borderMuted: "text-base16-300",
+  success: "text-base16-green",
+  error: "text-base16-red",
+  warning: "text-base16-yellow",
+  muted: "text-base16-500",
+  dim: "text-base16-400",
+  text: "text-base16-700",
+  thinkingText: "text-base16-purple",
+  userMessageText: "text-base16-600",
+  customMessageText: "text-base16-600",
+  customMessageLabel: "text-base16-purple",
+  toolTitle: "text-base16-cyan",
+  toolOutput: "text-base16-500",
+  mdHeading: "text-base16-blue",
+  mdLink: "text-base16-blue",
+  mdLinkUrl: "text-base16-500",
+  mdCode: "text-base16-orange",
+  mdCodeBlock: "text-base16-orange",
+  mdQuote: "text-base16-500",
+  mdListBullet: "text-base16-purple",
+  toolDiffAdded: "text-base16-green",
+  toolDiffRemoved: "text-base16-red",
+  toolDiffContext: "text-base16-500",
+  syntaxComment: "text-base16-500",
+  syntaxKeyword: "text-base16-purple",
+  syntaxString: "text-base16-green",
+  syntaxNumber: "text-base16-orange",
+  bashMode: "text-base16-pink",
+};
+
+export const WIDGET_BG_CLASS = {
+  selectedBg: "bg-base16-300/40",
+  userMessageBg: "bg-base16-200",
+  customMessageBg: "bg-base16-200",
+  toolPendingBg: "bg-base16-200",
+  toolSuccessBg: "bg-base16-green/10",
+  toolErrorBg: "bg-base16-red/10",
+};
 
 /** Map an extension's notify type onto our three buckets. pi's TUI accepts
  *  "info" | "warning" | "error"; extensions in the wild also pass "warn",
@@ -115,6 +170,8 @@ export class ExtensionUISurface {
   constructor({
     toastHost,
     statusHost,
+    widgetHost,
+    widgetHostBelow,
     agentLabel = (id) => id,
     maxVisible = TOAST_MAX_VISIBLE,
     queueLimit = TOAST_QUEUE_LIMIT,
@@ -123,6 +180,8 @@ export class ExtensionUISurface {
   }) {
     this.toastHost = toastHost;
     this.statusHost = statusHost;
+    this.widgetHost = widgetHost;
+    this.widgetHostBelow = widgetHostBelow;
     this.agentLabel = agentLabel;
     this.maxVisible = maxVisible;
     this.queueLimit = queueLimit;
@@ -136,6 +195,8 @@ export class ExtensionUISurface {
     this.visible = [];
     /** @type {Map<string, Map<string, string>>} agentId -> key -> text */
     this.statuses = new Map();
+    /** @type {Map<string, Map<string, object>>} agentId -> key -> widget */
+    this.widgets = new Map();
     /** Called after anything that changes `pendingFor()`, so the host can
      *  repaint its chat list. */
     this.onPendingChange = null;
@@ -152,6 +213,10 @@ export class ExtensionUISurface {
     }
     if (envelope.kind === "extension_ui_status") {
       this.setStatus(envelope.agentId, envelope.statusKey, envelope.statusText);
+      return true;
+    }
+    if (envelope.kind === "extension_ui_widget") {
+      this.setWidget(envelope.agentId, envelope.widgetKey, envelope.widget);
       return true;
     }
     return false;
@@ -409,19 +474,96 @@ export class ExtensionUISurface {
     }
   }
 
+  // --- widgets ----------------------------------------------------------
+
+  /** `widget === null` clears the key. A widget arrives pre-rendered as
+   *  lines of styled spans; we only place it. */
+  setWidget(agentId, key, widget) {
+    if (!agentId || !key) return;
+    const byKey = this.widgets.get(agentId) ?? new Map();
+    if (widget && Array.isArray(widget.lines) && widget.lines.length > 0) {
+      byKey.set(key, widget);
+    } else {
+      byKey.delete(key);
+    }
+    if (byKey.size === 0) this.widgets.delete(agentId);
+    else this.widgets.set(agentId, byKey);
+    if (agentId === this.selectedAgentId) this.renderWidgets();
+  }
+
+  /** Widgets for an agent, sorted by key — stable ordering so several
+   *  extensions setting widgets don't make the strip jump around. */
+  widgetEntries(agentId) {
+    const byKey = this.widgets.get(agentId);
+    if (!byKey) return [];
+    return [...byKey.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([, widget]) => widget);
+  }
+
+  renderWidgets() {
+    const widgets = this.selectedAgentId ? this.widgetEntries(this.selectedAgentId) : [];
+    for (const [host, placement] of [
+      [this.widgetHost, "aboveEditor"],
+      [this.widgetHostBelow, "belowEditor"],
+    ]) {
+      if (!host) continue;
+      const mine = widgets.filter((w) => (w.placement ?? "aboveEditor") === placement);
+      host.textContent = "";
+      host.classList.toggle("hidden", mine.length === 0);
+      for (const widget of mine) host.appendChild(this.buildWidget(widget));
+    }
+  }
+
+  /** One widget as a block of monospace lines. Text goes in via
+   *  textContent — an extension is not a trusted source of HTML. */
+  buildWidget(widget) {
+    const doc = (this.widgetHost ?? this.widgetHostBelow).ownerDocument;
+    const block = doc.createElement("div");
+    block.className =
+      "font-mono text-[11px] leading-5 whitespace-pre overflow-x-auto text-base16-600";
+    block.dataset.widgetKey = String(widget.key ?? "");
+    for (const line of widget.lines ?? []) {
+      const lineEl = doc.createElement("div");
+      const spans = Array.isArray(line) ? line : [];
+      for (const span of spans) {
+        const classes = [];
+        const fg = WIDGET_FG_CLASS[span.color];
+        if (fg) classes.push(fg);
+        const bg = WIDGET_BG_CLASS[span.bg];
+        if (bg) classes.push(bg);
+        if (span.bold) classes.push("font-bold");
+        if (span.italic) classes.push("italic");
+        if (span.underline) classes.push("underline");
+        if (span.strikethrough) classes.push("line-through");
+        const el = doc.createElement("span");
+        if (classes.length > 0) el.className = classes.join(" ");
+        el.textContent = String(span.text ?? "");
+        lineEl.appendChild(el);
+      }
+      // A blank line is spacing the widget asked for; keep it from
+      // collapsing to zero height.
+      if (lineEl.textContent === "") lineEl.textContent = "\u00a0";
+      block.appendChild(lineEl);
+    }
+    return block;
+  }
+
   // --- lifecycle --------------------------------------------------------
 
   /** Follow the chat selection: park the outgoing agent's toasts and show
-   *  the incoming agent's status + queued notifications. */
+   *  the incoming agent's status, widgets + queued notifications. */
   setSelectedAgent(agentId) {
     if (agentId === this.selectedAgentId) {
       this.renderStatus();
+      this.renderWidgets();
       this.pump();
       return;
     }
     this.clearVisible();
     this.selectedAgentId = agentId ?? null;
     this.renderStatus();
+    this.renderWidgets();
     this.pump();
     this.notifyPendingChange();
   }
@@ -430,10 +572,14 @@ export class ExtensionUISurface {
   forgetAgent(agentId) {
     this.queues.delete(agentId);
     this.statuses.delete(agentId);
+    this.widgets.delete(agentId);
     for (const record of [...this.visible]) {
       if (record.entry.agentId === agentId) this.dismiss(record.entry.id);
     }
-    if (agentId === this.selectedAgentId) this.renderStatus();
+    if (agentId === this.selectedAgentId) {
+      this.renderStatus();
+      this.renderWidgets();
+    }
     this.notifyPendingChange();
   }
 }

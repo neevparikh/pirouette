@@ -13,11 +13,11 @@
  *
  *  This module implements the prompt-the-user primitives (`select`,
  *  `confirm`, `input`), the fire-and-forget primitives (`notify`,
- *  `setStatus`, `setTitle`, `setWidget` with string-array content), and
- *  stubs the TUI-only ones (`custom`, `editor`, `setEditorComponent`,
- *  `setFooter`, `setHeader`, `pasteToEditor`, theme management) as
- *  no-ops — matching what the SDK's `rpc-mode.js` does for the same
- *  shape.
+ *  `setStatus`, `setTitle`, `setWidget` — both the string-array and the
+ *  component-factory form, see widget-render.ts), and stubs the TUI-only
+ *  ones (`custom`, `editor`, `setEditorComponent`, `setFooter`,
+ *  `setHeader`, `pasteToEditor`, theme management) as no-ops — matching
+ *  what the SDK's `rpc-mode.js` does for the same shape.
  *
  *  # Flow
  *
@@ -40,7 +40,13 @@
 
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
 
-import type { ExtensionUIRequest, WsEnvelope } from "./types.js";
+import type {
+  AgentWidget,
+  ExtensionUIRequest,
+  WidgetPlacement,
+  WsEnvelope,
+} from "./types.js";
+import * as widgetRender from "./widget-render.js";
 
 /** ExtensionUIContext.theme is a `Theme` instance — a TUI-only object
  *  that the SDK uses to render ANSI colors. Pirouette has no terminal,
@@ -87,6 +93,10 @@ export interface UIContextHost {
   registerRequest(entry: PendingUIRequest): void;
   /** Broadcast a fire-and-forget envelope (notify / status / etc.). */
   broadcast(envelope: WsEnvelope): void;
+  /** Store the agent's latest widget for `key` (null clears it) and tell
+   *  clients about it. Held on the host, not here, so a browser that
+   *  connects later can be primed with widgets set before it joined. */
+  setWidget(key: string, widget: AgentWidget | null): void;
   /** Generate a unique request id. Injected for testability. */
   newRequestId(): string;
 }
@@ -225,9 +235,19 @@ export function createPirouetteUIContext(
     setWorkingVisible(_visible) {},
     setWorkingIndicator(_options) {},
     setHiddenThinkingLabel(_label) {},
-    setWidget(_key, _content, _options) {
-      // We could surface widgets in the web UI eventually; today the
-      // dashboard has no slot for them. Drop on the floor.
+    setWidget(
+      key: string,
+      content: widgetRender.WidgetContent,
+      options?: { placement?: WidgetPlacement },
+    ) {
+      // Component factories are rendered through a sentinel theme so the
+      // dashboard gets semantic colors rather than terminal RGB; string
+      // arrays pass straight through. Either way a widget that throws is
+      // dropped, never propagated — this runs inline on the agent's turn.
+      host.setWidget(
+        key,
+        widgetRender.renderExtensionWidget(key, content, options?.placement ?? "aboveEditor"),
+      );
     },
     setFooter(_factory) {},
     setHeader(_factory) {},

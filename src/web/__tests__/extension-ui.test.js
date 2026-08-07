@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 //
-// Extension UI surfaces: toasts (`extension_ui_notify`) and the header
-// status strip (`extension_ui_status`).
+// Extension UI surfaces: toasts (`extension_ui_notify`), the header
+// status strip (`extension_ui_status`) and pinned widgets
+// (`extension_ui_widget`).
 //
 // Everything here drives `handleEnvelope()` with the exact envelope shape
 // the server broadcasts (src/server/pirouette-ui-context.ts), so these are
@@ -19,16 +20,21 @@ import {
   toastDurationMs,
 } from "../extension-ui.js";
 
-/** Build the two host elements the surface paints into, mirroring the
- *  `#extension-toasts` / `#extension-status` slots in index.html. */
+/** Build the host elements the surface paints into, mirroring the
+ *  `#extension-toasts` / `#extension-status` / `#extension-widgets` slots
+ *  in index.html. */
 function setup({ selected = "agent-1", ...opts } = {}) {
   document.body.innerHTML = `
     <div id="extension-toasts" class="hidden"></div>
     <div id="extension-status" class="hidden"></div>
+    <div id="extension-widgets" class="hidden"></div>
+    <div id="extension-widgets-below" class="hidden"></div>
   `;
   const surface = new ExtensionUISurface({
     toastHost: document.getElementById("extension-toasts"),
     statusHost: document.getElementById("extension-status"),
+    widgetHost: document.getElementById("extension-widgets"),
+    widgetHostBelow: document.getElementById("extension-widgets-below"),
     agentLabel: (id) => `chat-${id}`,
     ...opts,
   });
@@ -46,6 +52,15 @@ function notifyEnvelope(agentId, message, notifyType) {
 function statusEnvelope(agentId, statusKey, statusText) {
   return { kind: "extension_ui_status", agentId, statusKey, statusText };
 }
+function widgetEnvelope(agentId, widgetKey, widget) {
+  return { kind: "extension_ui_widget", agentId, widgetKey, widget };
+}
+/** A widget in the shape server/widget-render.ts produces. */
+function widget(key, lines, placement = "aboveEditor") {
+  return { key, placement, lines };
+}
+const widgetBlocks = (id = "extension-widgets") =>
+  [...document.getElementById(id).querySelectorAll("[data-widget-key]")];
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -333,16 +348,123 @@ describe("status envelopes", () => {
   });
 });
 
+describe("widget envelopes", () => {
+  const todoWidget = widget("todo-list", [
+    [
+      { text: " Todo List ", color: "accent", bold: true },
+      { text: "— 1/3 completed", color: "muted" },
+    ],
+    [
+      { text: "  ✓ " },
+      { text: "1.", color: "accent" },
+      { text: " ship it", color: "dim", strikethrough: true },
+    ],
+  ]);
+
+  it("paints a widget above the editor with themed spans", () => {
+    const surface = setup({ selected: "agent-1" });
+    surface.handleEnvelope(widgetEnvelope("agent-1", "todo-list", todoWidget));
+
+    const blocks = widgetBlocks();
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].dataset.widgetKey).toBe("todo-list");
+    expect(blocks[0].textContent).toContain("Todo List");
+    expect(blocks[0].textContent).toContain("ship it");
+    const html = blocks[0].innerHTML;
+    expect(html).toContain("text-base16-cyan"); // accent
+    expect(html).toContain("font-bold");
+    expect(html).toContain("line-through"); // completed item
+    expect(document.getElementById("extension-widgets").classList.contains("hidden")).toBe(
+      false,
+    );
+  });
+
+  it("keeps one line per widget line", () => {
+    const surface = setup({ selected: "agent-1" });
+    surface.handleEnvelope(widgetEnvelope("agent-1", "todo-list", todoWidget));
+    expect(widgetBlocks()[0].children).toHaveLength(2);
+  });
+
+  it("never renders extension text as HTML", () => {
+    const surface = setup({ selected: "agent-1" });
+    surface.handleEnvelope(
+      widgetEnvelope("agent-1", "evil", widget("evil", [[{ text: "<img src=x onerror=1>" }]])),
+    );
+    expect(widgetBlocks()[0].querySelector("img")).toBeNull();
+    expect(widgetBlocks()[0].textContent).toContain("<img src=x onerror=1>");
+  });
+
+  it("ignores colour names it doesn't know instead of inventing a class", () => {
+    const surface = setup({ selected: "agent-1" });
+    surface.handleEnvelope(
+      widgetEnvelope("agent-1", "w", widget("w", [[{ text: "x", color: "nonsense" }]])),
+    );
+    expect(widgetBlocks()[0].innerHTML).not.toContain("nonsense");
+    expect(widgetBlocks()[0].textContent).toBe("x");
+  });
+
+  it("keeps a blank line from collapsing", () => {
+    const surface = setup({ selected: "agent-1" });
+    surface.handleEnvelope(widgetEnvelope("agent-1", "w", widget("w", [[], [{ text: "x" }]])));
+    expect(widgetBlocks()[0].children[0].textContent).toBe("\u00a0");
+  });
+
+  it("routes belowEditor widgets to the lower strip", () => {
+    const surface = setup({ selected: "agent-1" });
+    surface.handleEnvelope(
+      widgetEnvelope("agent-1", "w", widget("w", [[{ text: "under" }]], "belowEditor")),
+    );
+    expect(widgetBlocks()).toHaveLength(0);
+    expect(widgetBlocks("extension-widgets-below")).toHaveLength(1);
+    expect(document.getElementById("extension-widgets").classList.contains("hidden")).toBe(true);
+  });
+
+  it("replaces a widget under the same key and orders keys stably", () => {
+    const surface = setup({ selected: "agent-1" });
+    surface.handleEnvelope(widgetEnvelope("agent-1", "zeta", widget("zeta", [[{ text: "z" }]])));
+    surface.handleEnvelope(widgetEnvelope("agent-1", "alpha", widget("alpha", [[{ text: "a" }]])));
+    surface.handleEnvelope(
+      widgetEnvelope("agent-1", "zeta", widget("zeta", [[{ text: "z2" }]])),
+    );
+    expect(widgetBlocks().map((b) => b.dataset.widgetKey)).toEqual(["alpha", "zeta"]);
+    expect(widgetBlocks()[1].textContent).toBe("z2");
+  });
+
+  it("clears a widget on null and hides the strip when empty", () => {
+    const surface = setup({ selected: "agent-1" });
+    surface.handleEnvelope(widgetEnvelope("agent-1", "todo-list", todoWidget));
+    surface.handleEnvelope(widgetEnvelope("agent-1", "todo-list", null));
+    expect(widgetBlocks()).toHaveLength(0);
+    expect(document.getElementById("extension-widgets").classList.contains("hidden")).toBe(true);
+  });
+
+  it("shows only the selected agent's widgets, and swaps on selection", () => {
+    const surface = setup({ selected: "agent-1" });
+    surface.handleEnvelope(
+      widgetEnvelope("agent-2", "todo-list", widget("todo-list", [[{ text: "other" }]])),
+    );
+    expect(widgetBlocks()).toHaveLength(0);
+    surface.setSelectedAgent("agent-2");
+    expect(widgetBlocks()[0].textContent).toBe("other");
+    surface.setSelectedAgent("agent-1");
+    expect(widgetBlocks()).toHaveLength(0);
+  });
+});
+
 describe("lifecycle", () => {
   it("forgetAgent drops toasts, queue and status for a removed agent", () => {
     const surface = setup({ selected: "agent-1" });
     surface.handleEnvelope(notifyEnvelope("agent-1", "on screen", "info"));
     surface.handleEnvelope(statusEnvelope("agent-1", "k", "v"));
+    surface.handleEnvelope(
+      widgetEnvelope("agent-1", "todo-list", widget("todo-list", [[{ text: "1/2" }]])),
+    );
     surface.handleEnvelope(notifyEnvelope("agent-2", "queued", "info"));
     surface.forgetAgent("agent-1");
     surface.forgetAgent("agent-2");
     expect(toasts()).toHaveLength(0);
     expect(statusPills()).toHaveLength(0);
+    expect(widgetBlocks()).toHaveLength(0);
     expect(surface.pendingFor("agent-2")).toBeNull();
   });
 
@@ -366,15 +488,19 @@ describe("dashboard wiring", () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const read = (name) => readFileSync(resolve(here, "..", name), "utf8");
 
-  it("index.html declares both host slots", () => {
+  it("index.html declares every host slot", () => {
     const html = read("index.html");
     expect(html).toContain('id="extension-toasts"');
     expect(html).toContain('id="extension-status"');
+    expect(html).toContain('id="extension-widgets"');
+    expect(html).toContain('id="extension-widgets-below"');
   });
 
-  it("app.js routes both envelope kinds into the surface", () => {
+  it("app.js routes every envelope kind into the surface", () => {
     const app = read("app.js");
-    expect(app).toMatch(/case "extension_ui_notify":\s*\n\s*case "extension_ui_status":/);
+    expect(app).toMatch(
+      /case "extension_ui_notify":\s*\n\s*case "extension_ui_status":\s*\n\s*case "extension_ui_widget":/,
+    );
     expect(app).toContain("extensionUI.handleEnvelope(envelope)");
     // The old behaviour was a console.log and nothing else. Pin that it
     // stays gone, so the signal can't quietly go back to devtools-only.
