@@ -269,6 +269,13 @@ export class AgentManager {
    *  there. */
   private bashTimeoutPolicy: BashTimeoutPolicy | null = null;
 
+  /** Set for the whole of `shutdown()`. While it is true, nothing is
+   *  allowed to clear an agent's `interruptedTurn` flag: tearing the
+   *  sessions down makes in-flight `prompt()` calls settle, and those
+   *  completion paths would otherwise record "this turn finished" for a
+   *  turn we just killed. See `clearInterruptedTurn`. */
+  private shuttingDown = false;
+
   constructor(
     private readonly stateManager: StateManager,
     private readonly projectManager: ProjectManager,
@@ -1771,8 +1778,28 @@ export class AgentManager {
   }
 
   /** Mark an agent's interrupted turn as dealt with (persisted so a later
-   *  boot doesn't re-nudge). */
+   *  boot doesn't re-nudge).
+   *
+   *  Refuses to do so during shutdown. `shutdown()` aborts every live
+   *  session, and pi *resolves* the in-flight `prompt()` when a turn is
+   *  aborted rather than rejecting it — so from `deliverResumeNudge`'s
+   *  point of view a turn the shutdown just killed is indistinguishable
+   *  from one that ran to completion. Clearing the flag there wiped the
+   *  only durable record that the agent had work in flight, and the next
+   *  boot resumed the session without ever nudging it: the agent came back
+   *  with a transcript ending in an aborted command and sat at
+   *  `waiting_input` forever.
+   *
+   *  Only agents nudged by the *previous* restart were affected, which is
+   *  why this only showed up on back-to-back restarts. */
   private clearInterruptedTurn(id: string): void {
+    if (this.shuttingDown) {
+      console.log(
+        `[agent-manager] not clearing interruptedTurn for ${id}: shutting down, ` +
+          "the turn was aborted rather than finished",
+      );
+      return;
+    }
     const cfg = this.stateManager.getAgent(id);
     if (!cfg || cfg.interruptedTurn !== true) return;
     this.stateManager.updateAgentState(id, { interruptedTurn: false });
@@ -2248,9 +2275,16 @@ export class AgentManager {
    *    2. THEN best-effort tear down each live pi session, bounded per
    *       agent so one stuck `session.abort()` can't wedge the whole
    *       shutdown (and blow past the unit's TimeoutStopSec).
+   *    3. Re-assert the step-1 snapshot. Tearing a session down makes it
+   *       emit `agent_end` and settle its in-flight `prompt()`, and those
+   *       handlers write agent state (`waiting_input`, and previously a
+   *       cleared `interruptedTurn`). Nothing that happens *because of*
+   *       the shutdown may overwrite what we decided before it started.
    */
   async shutdown(): Promise<void> {
+    this.shuttingDown = true;
     const ids = [...this.handles.keys()];
+    const snapshot = new Map<string, boolean>();
 
     // 1. Persist intent first, then flush, so resume survives even a
     //    hard kill after this point. Capture whether each agent was
@@ -2265,8 +2299,16 @@ export class AgentManager {
       // own live streaming flag. If EITHER says mid-turn, we resume the
       // work on the next boot -- a spurious nudge is far cheaper than an
       // agent that silently drops what it was doing.
+      //
+      // A flag left over from a previous boot counts too: it means an
+      // earlier nudge was never delivered and the next boot is supposed
+      // to retry it. Overwriting it with `wasRunning` would drop that
+      // retry on the floor.
       const wasRunning =
-        cfg?.state === "running" || handle?.session.isStreaming === true;
+        cfg?.state === "running" ||
+        cfg?.interruptedTurn === true ||
+        handle?.session.isStreaming === true;
+      snapshot.set(id, wasRunning);
       this.stateManager.updateAgentState(id, {
         state: "shutdown",
         interruptedTurn: wasRunning,
@@ -2292,6 +2334,16 @@ export class AgentManager {
           `[agent-manager] shutdown: ${id} did not tear down cleanly: ${err}`,
         );
       }
+    }
+
+    // 3. Re-assert. Cheap, idempotent, and independent of which teardown
+    //    side effect wrote what in between.
+    for (const [id, wasRunning] of snapshot) {
+      if (!this.stateManager.getAgent(id)) continue; // removed mid-shutdown
+      this.stateManager.updateAgentState(id, {
+        state: "shutdown",
+        interruptedTurn: wasRunning,
+      });
     }
     try {
       await this.stateManager.flush();
