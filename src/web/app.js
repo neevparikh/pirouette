@@ -15,6 +15,7 @@ import {
   pickFastModeState,
   relTime,
   shortenPath,
+  shouldStickToBottom,
   SIDEBAR_DEFAULT_WIDTH,
 } from "./render.js";
 import {
@@ -2206,6 +2207,25 @@ const PLACEHOLDER_SELECT_KEY = "placeholder:select";
 const PLACEHOLDER_EMPTY_KEY = "placeholder:empty";
 const PLACEHOLDER_LOADING_KEY = "placeholder:loading";
 
+/** Agent whose transcript should open pinned to the bottom.
+ *
+ *  `#messages` is a single scroll container shared by every chat, so its
+ *  `scrollTop` survives an agent switch. Without this, selecting a chat
+ *  while scrolled up in the previous one dropped you into the middle of
+ *  the new one at the same pixel offset — and the near-bottom check in
+ *  renderMessages, which measures the *outgoing* chat's scroll position,
+ *  agreed you weren't following along and left you there.
+ *
+ *  Set on selection, honoured by every render until the real transcript
+ *  (not the "loading…" placeholder) has been painted, so the bottom we
+ *  land on is the bottom of the fetched history rather than of whatever
+ *  was in the cache. Cleared early if the user scrolls in the meantime. */
+let pinBottomAgentId = null;
+
+/** Bumped on every user scroll gesture in the transcript, so a deferred
+ *  scroll-to-bottom can tell whether the user moved under it. */
+let userScrollSeq = 0;
+
 // --- pi-md width measurement ---
 //
 // The pi-tui-style markdown renderer takes a character-column count
@@ -2323,15 +2343,27 @@ function renderMessages() {
   }
 
   // Snapshot scroll state before mutating. We auto-scroll to the new
-  // bottom only if the user was already pinned there (within ~40px). This
-  // keeps the view stable when they've scrolled up to read history while
-  // the agent is still working.
-  const wasNearBottom =
-    $messages.scrollHeight - $messages.scrollTop - $messages.clientHeight < 40;
+  // bottom only if the user was already pinned there (within ~40px), or if
+  // we just switched into this agent. This keeps the view stable when
+  // they've scrolled up to read history while the agent is still working.
+  const pinned = pinBottomAgentId !== null && pinBottomAgentId === selectedAgentId;
+  const stick = shouldStickToBottom({
+    scrollHeight: $messages.scrollHeight,
+    scrollTop: $messages.scrollTop,
+    clientHeight: $messages.clientHeight,
+    pinned,
+  });
 
   reconcileBlocks($messages, blocks);
 
-  if (wasNearBottom) $messages.scrollTop = $messages.scrollHeight;
+  if (stick) scrollToBottom();
+
+  // The pin is spent once real content has landed. While we're still
+  // showing "loading…" it has to survive, so the render that swaps in the
+  // fetched history also lands at the bottom.
+  if (pinned && blocks.length > 0 && blocks[0].key !== PLACEHOLDER_LOADING_KEY) {
+    pinBottomAgentId = null;
+  }
 
   // Refresh the queue strip + send-mode UI now that state has potentially
   // changed (queue_update events flow through reduceEvent into
@@ -2481,8 +2513,29 @@ function updateInputPlaceholder() {
 
 // --- actions ---
 
+/** Jump the transcript to the bottom, now and once more on the next frame.
+ *
+ *  The second pass catches height the browser only knows about after
+ *  layout — images in the transcript, a webfont swapping in, a pi-md box
+ *  re-measuring — which would otherwise leave us a few hundred px short of
+ *  the bottom right after switching chats. Skipped if the user scrolled
+ *  away in between (their pin got cleared). */
+function scrollToBottom() {
+  $messages.scrollTop = $messages.scrollHeight;
+  const agentAtSchedule = selectedAgentId;
+  const seqAtSchedule = userScrollSeq;
+  requestAnimationFrame(() => {
+    if (selectedAgentId !== agentAtSchedule) return;
+    if (userScrollSeq !== seqAtSchedule) return;
+    $messages.scrollTop = $messages.scrollHeight;
+  });
+}
+
 async function selectAgent(id) {
   selectedAgentId = id;
+  // Open at the bottom: `#messages` is shared across chats, so its
+  // scrollTop is still pointing wherever the previous chat was parked.
+  pinBottomAgentId = id;
   // Park the previous agent's toasts, paint this agent's status pills and
   // release anything that queued up while we were looking elsewhere.
   extensionUI.setSelectedAgent(id);
@@ -3780,6 +3833,17 @@ applyRawBtnStyle();
 // don't have to re-bind after every reconciliation pass. Walks up from
 // the click target to the first element carrying `data-toggle` since the
 // toggle attribute lives on a sub-row, not the message wrapper.
+// A deliberate scroll gesture in the transcript beats the open-at-bottom
+// pin: if the user is already reading history while the fetch is still in
+// flight, don't yank them back down when it lands. Gestures rather than
+// the `scroll` event, which also fires for our own programmatic jumps.
+for (const evt of ["wheel", "touchmove"]) {
+  $messages.addEventListener(evt, () => {
+    pinBottomAgentId = null;
+    userScrollSeq += 1;
+  }, { passive: true });
+}
+
 $messages.addEventListener("click", (e) => {
   const target = e.target.closest("[data-toggle]");
   if (!target || !$messages.contains(target)) return;

@@ -591,6 +591,36 @@ export function formatDocumentTitle(projectName, agentName) {
   return parts.join("\u2014");
 }
 
+// --- transcript scrolling ---
+
+/** How close to the bottom (px) still counts as "pinned to the bottom".
+ *  Sub-pixel scroll heights and a half-rendered last line mean the exact
+ *  arithmetic is rarely 0, so we need some slack. */
+export const STICK_TO_BOTTOM_SLACK = 40;
+
+/** Should the transcript be scrolled to the bottom after this render?
+ *
+ *  Two ways to say yes:
+ *    - `pinned`: the caller knows the view should start at the bottom
+ *      regardless of where the scrollbar happens to sit. That's the case
+ *      right after an agent switch, where the container's `scrollTop` is
+ *      still a leftover from the *previous* chat and says nothing about
+ *      where the user wants to be in this one.
+ *    - the user was already parked within `slack` px of the bottom, so
+ *      they're following along and want to keep following.
+ *
+ *  Otherwise they scrolled up to read history: leave the view alone. */
+export function shouldStickToBottom({
+  scrollHeight,
+  scrollTop,
+  clientHeight,
+  pinned = false,
+  slack = STICK_TO_BOTTOM_SLACK,
+}) {
+  if (pinned) return true;
+  return scrollHeight - scrollTop - clientHeight < slack;
+}
+
 // --- sidebar width ---
 
 /** Narrowest useful sidebar: below this the chat rows stop being readable

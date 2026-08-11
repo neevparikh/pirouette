@@ -326,6 +326,23 @@ follow [SemVer](https://semver.org).
 
 ### Fixed
 
+- **Switching chats dropped you into the middle of the new one.** The
+  transcript is one scroll container reused by every chat, so its
+  `scrollTop` survived the switch: pick a chat while scrolled up in the
+  previous one and the new chat opened at that same pixel offset, halfway
+  up a conversation you'd never read. The stick-to-bottom check made it
+  worse, since it measured the *outgoing* chat's scroll position and
+  concluded you weren't following along.
+
+  Selecting a chat now pins its first render to the bottom regardless of
+  where the scrollbar sits. The pin outlives the "loading…" placeholder,
+  so the bottom you land on is the bottom of the fetched history rather
+  than of whatever was in the cache, and a re-pin on the next animation
+  frame catches height that only exists after layout (images, webfont
+  swap). A wheel or touch gesture in the transcript cancels the pin, so
+  reading history while the fetch is still in flight doesn't get yanked
+  back down.
+
 - **A chat that one restart brought back was silently orphaned by the
   next one.** The symptom is a chat that comes back from a restart with a
   transcript ending in an aborted command and then just sits there, at
