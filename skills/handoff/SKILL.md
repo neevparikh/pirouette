@@ -29,6 +29,14 @@ in files anyway. Prefer compaction when the conversation itself is the state
 Don't hand off in the middle of an unstable worktree. The successor sees
 whatever you leave behind.
 
+Don't hand off when the *work* is finished and there is nothing for a
+successor to do — a handoff would leave an idle agent sitting in the chat
+list. Archive yourself instead:
+
+```bash
+pru archive --stop    # hides this chat and stops you; nothing is deleted
+```
+
 ## Before you hand off
 
 1. **Make the worktree tell the story.** Commit what's finished, push it,

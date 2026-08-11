@@ -15,6 +15,7 @@ import { send } from "./commands/send.js";
 import { stop } from "./commands/stop.js";
 import { interrupt } from "./commands/interrupt.js";
 import { handoff } from "./commands/handoff.js";
+import { archive, unarchive } from "./commands/archive.js";
 import { rename } from "./commands/rename.js";
 import { rm } from "./commands/rm.js";
 import { server } from "./commands/server.js";
@@ -90,6 +91,7 @@ program
   .alias("ls")
   .description("List all agents, grouped by project")
   .option("-p, --project <name>", "Only list agents in this project")
+  .option("-a, --archived", "Include archived agents (hidden by default)")
   .action(list);
 
 program
@@ -118,6 +120,20 @@ program
   .option("-m, --message <text>", "Briefing sent to the successor as its first message")
   .option("-f, --message-file <path>", "Read the briefing from a file")
   .action(handoff);
+
+program
+  .command("archive [agent]")
+  .description(
+    "Archive a chat: hide it from the dashboard's chat list, keeping the agent, " +
+      "its worktree and its transcript. Defaults to the agent running the command.",
+  )
+  .option("-s, --stop", "Also stop the agent (archiving alone leaves it running)")
+  .action(archive);
+
+program
+  .command("unarchive [agent]")
+  .description("Bring an archived chat back into the dashboard's chat list")
+  .action(unarchive);
 
 program
   .command("rename <agent> [new-name]")
