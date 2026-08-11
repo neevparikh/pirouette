@@ -18,6 +18,7 @@ import {
   renderDiff,
   renderMarkdown,
   shortenPath,
+  shouldStickToBottom,
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
@@ -495,6 +496,37 @@ describe("formatDocumentTitle", () => {
     expect(formatDocumentTitle(null, null)).toBe("pirouette");
     expect(formatDocumentTitle("", "orphan")).toBe("pirouette");
     expect(formatDocumentTitle(undefined, undefined)).toBe("pirouette");
+  });
+});
+
+describe("shouldStickToBottom", () => {
+  /** A transcript taller than its viewport, scrolled `fromBottom` px up. */
+  const view = (fromBottom, extra = {}) => ({
+    scrollHeight: 5000,
+    clientHeight: 800,
+    scrollTop: 5000 - 800 - fromBottom,
+    ...extra,
+  });
+
+  it("follows along when the user is parked at the bottom", () => {
+    expect(shouldStickToBottom(view(0))).toBe(true);
+    expect(shouldStickToBottom(view(10))).toBe(true);
+  });
+
+  it("leaves the view alone when the user scrolled up to read", () => {
+    expect(shouldStickToBottom(view(400))).toBe(false);
+  });
+
+  it("pins regardless of where the scrollbar sits", () => {
+    // The agent-switch case: scrollTop is a leftover from the previous
+    // chat, so the near-bottom arithmetic is meaningless here.
+    expect(shouldStickToBottom({ ...view(3000), pinned: true })).toBe(true);
+  });
+
+  it("sticks when the content is shorter than the viewport", () => {
+    expect(
+      shouldStickToBottom({ scrollHeight: 200, clientHeight: 800, scrollTop: 0 }),
+    ).toBe(true);
   });
 });
 
