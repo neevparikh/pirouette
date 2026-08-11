@@ -9,6 +9,7 @@ interface Agent {
   running: boolean;
   model: string | null;
   branchName: string | null;
+  archived?: boolean;
   usage?: {
     costUsd: number;
     totalTokens: number;
@@ -28,15 +29,21 @@ function formatTokens(t: number): string {
   return `${(t / 1_000_000).toFixed(2)}M`;
 }
 
-export async function list(opts: { project?: string }): Promise<void> {
+export async function list(opts: { project?: string; archived?: boolean }): Promise<void> {
   try {
     const data = await apiGet<{ agents: Agent[] }>("/api/agents");
     let agents = data.agents;
     if (opts.project) {
       agents = agents.filter((a) => a.projectName === opts.project);
     }
+    // Archived chats are hidden by default, as they are in the dashboard:
+    // the archive is where finished work goes so the list stays about what
+    // you're doing now. `--archived` shows them, tagged.
+    const hidden = opts.archived ? 0 : agents.filter((a) => a.archived).length;
+    if (hidden > 0) agents = agents.filter((a) => !a.archived);
     if (agents.length === 0) {
       console.log(opts.project ? `no agents in project "${opts.project}"` : "no agents");
+      if (hidden > 0) console.log(`(${hidden} archived — see them with: pru list --archived)`);
       return;
     }
 
@@ -61,8 +68,14 @@ export async function list(opts: { project?: string }): Promise<void> {
         const toks =
           (a.usage?.totalTokens ?? 0) > 0 ? `  ${formatTokens(a.usage!.totalTokens)}tok` : "";
         const model = a.model ? `  ${a.model}` : "";
-        console.log(`  ${icon} ${a.id}  ${state} ${a.name}${model}${cost}${toks}`);
+        const tag = a.archived ? "  [archived]" : "";
+        console.log(`  ${icon} ${a.id}  ${state} ${a.name}${tag}${model}${cost}${toks}`);
       }
+    }
+
+    if (hidden > 0) {
+      console.log("");
+      console.log(`${hidden} archived agent(s) hidden — see them with: pru list --archived`);
     }
   } catch (err) {
     console.error(`✗ failed to list agents: ${err instanceof Error ? err.message : err}`);

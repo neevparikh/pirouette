@@ -9,6 +9,24 @@ follow [SemVer](https://semver.org).
 
 ### Added
 
+- **`pru archive` exists.** The dashboard could archive a chat and handoff
+  archived one for you, but the CLI had no verb for it, so the only way to
+  get a finished chat out of the way from a shell was `pru rm` — which
+  deletes it. Agents looking for the obvious command found nothing.
+
+  `pru archive [agent]` sets the flag, `pru unarchive [agent]` clears it,
+  and both default to the agent running them (the same `PI_SESSION_FILE`
+  trick as `pru handoff` and `pru rename`), so an agent that has finished
+  its task can file itself away without knowing its own id. Archiving is
+  display-only and reversible: the agent, its worktree, its branch and its
+  session files are untouched, and the chat comes back out of the archive
+  by itself when you send it a message. `--stop` also stops the agent,
+  which is what "I'm done with this chat" usually means — it runs after
+  the archive is saved, so a failed stop can't lose the archive.
+
+  `pru list` follows the dashboard and hides archived chats, with a footer
+  saying how many it hid; `pru list --archived` shows them, tagged.
+
 - **Extension notifications and statuses actually show up.** A pi extension
   can call `ctx.ui.notify(message, type)` and `ctx.ui.setStatus(key, text)`;
   the server already broadcast both over the WebSocket and the dashboard

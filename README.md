@@ -282,11 +282,13 @@ overridden per host under `[hosts.<name>.dotfiles]`.
 | command | purpose |
 |---|---|
 | `pru launch <name>` | Create a new pi agent (`--project`, `--model`, `--thinking` optional) |
-| `pru list` | List all agents and their state |
+| `pru list` | List all agents and their state (`--archived` includes archived ones) |
 | `pru send <agent> <msg>` | Send a message to an agent |
 | `pru interrupt <agent>` | Cancel the agent's current turn; the session stays alive |
 | `pru handoff [agent]` | Replace an agent with a fresh one in the same worktree (defaults to self) |
 | `pru rename <agent> <name>` | Rename a chat (display name only; one argument renames self) |
+| `pru archive [agent]` | Hide a finished chat from the chat list (`--stop` also stops it; defaults to self) |
+| `pru unarchive [agent]` | Bring an archived chat back into the chat list |
 | `pru stop <agent>` | Stop an agent (keeps its state) |
 | `pru rm <agent>` | Remove an agent; `--all` also deletes its worktree + session files |
 | `pru status` | Show host + server health |
@@ -303,6 +305,26 @@ display-only: the agent id, its git worktree, its branch and its session
 files keep the slug they were created with, so renaming mid-turn disturbs
 nothing. Names aren't unique across projects — if a name matches two chats,
 commands that take an agent reference ask you to use the id.
+
+**Archiving a chat.** Work finishes long before anyone wants to delete it:
+the branch is merged, but the transcript is still the record of how it got
+there. Archiving hides a chat from the dashboard's chat list (and from
+`pru list`) without touching anything else — the agent, its worktree, its
+branch and its session files all stay exactly as they are, and the
+transcript stays readable behind the dashboard's *show archived* toggle.
+
+```bash
+pru archive <agent>          # tuck it away; the agent keeps running
+pru archive <agent> --stop   # ...and stop it, the usual "I'm done here"
+pru archive                  # archive the chat you're running inside
+pru list --archived          # see what's in there
+pru unarchive <agent>        # put it back
+```
+
+Archiving is reversible and lossless, so it's the safe half of `pru rm`:
+reach for it whenever you're tempted to delete a chat you might still want
+to read. Handoff archives the outgoing chat for you, and a chat comes back
+out of the archive by itself if you send it a message.
 
 **Interrupting a turn.** Just like pi's TUI, <kbd>Esc</kbd> in the dashboard
 aborts whatever the selected agent is doing right now — the in-flight LLM
