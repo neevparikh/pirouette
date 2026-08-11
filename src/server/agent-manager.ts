@@ -36,6 +36,11 @@ import {
   resolveCompactionPolicy,
   type CompactionPolicy,
 } from "./compaction-policy.js";
+import {
+  guardExtensionsResult,
+  keepSharedExtensionRuntimeActive,
+  type ExtensionsResult,
+} from "./extension-runtime.js";
 import { createWorktree, removeWorktree } from "./git.js";
 import { resolveAgentModel } from "./model-resolution.js";
 import { setupWorktreeDataTools } from "./worktree-setup.js";
@@ -358,6 +363,12 @@ export class AgentManager {
         await loader.reload();
         this.resourceLoader = loader;
         const exts = loader.getExtensions();
+        // One shared runtime, many sessions: stop pi's per-session dispose
+        // from marking it stale for the whole server. See extension-runtime.ts.
+        keepSharedExtensionRuntimeActive(
+          (exts as ExtensionsResult).runtime,
+          (message) => console.log(message),
+        );
         console.log(
           `[agent-manager] resource loader ready: ${exts.extensions.length} extension(s)` +
             (exts.extensions.length > 0
@@ -2491,7 +2502,10 @@ export class AgentManager {
     // extensions on every agent boot would redo provider registration.)
     const agentDir = getAgentDir();
     const agentResourceLoader: ResourceLoader = {
-      getExtensions: () => resourceLoader.getExtensions(),
+      // Re-guard on every read: a `/reload` from any agent swaps in a fresh
+      // runtime object that hasn't been protected yet.
+      getExtensions: () =>
+        guardExtensionsResult(resourceLoader.getExtensions(), (message) => console.log(message)),
       getSkills: () => resourceLoader.getSkills(),
       getPrompts: () => resourceLoader.getPrompts(),
       getThemes: () => resourceLoader.getThemes(),
