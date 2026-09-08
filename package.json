@@ -43,13 +43,13 @@
     "spike:stream:reset": "tsx src/spikes/event-streaming.ts reset"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.82.1",
+    "@earendil-works/pi-coding-agent": "^0.85.1",
     "commander": "^13.1.0",
     "smol-toml": "^1.6.1",
     "ws": "^8.18.3"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.82.1",
+    "@earendil-works/pi-ai": "^0.85.1",
     "@types/jsdom": "^28.0.1",
     "@types/ws": "^8.18.1",
     "dompurify": "^3.4.1",
