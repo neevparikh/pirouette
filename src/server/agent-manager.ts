@@ -2513,6 +2513,7 @@ export class AgentManager {
         agentsFiles: loadProjectContextFiles({ cwd: config.worktreePath, agentDir }),
       }),
       getSystemPrompt: () => resourceLoader.getSystemPrompt(),
+      getSystemPromptSource: () => resourceLoader.getSystemPromptSource(),
       // Tell the agent about the bash deadline up front. Without this it
       // only learns the rule by having a command killed, and the tool
       // description still advertises "no default timeout".
@@ -2521,6 +2522,9 @@ export class AgentManager {
         const guidance = bashTimeoutGuidance(this.getBashTimeoutPolicy());
         return guidance ? [...base, guidance] : base;
       },
+      // Sources are the on-disk provenance of the append-prompts above; our
+      // synthetic bash-timeout guidance has no file, so it contributes none.
+      getAppendSystemPromptSources: () => resourceLoader.getAppendSystemPromptSources(),
       extendResources: (paths) => resourceLoader.extendResources(paths),
       reload: () => resourceLoader.reload(),
     };

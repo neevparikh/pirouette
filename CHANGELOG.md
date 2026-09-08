@@ -310,6 +310,17 @@ follow [SemVer](https://semver.org).
 
 ### Changed
 
+- **pi 0.85.1.** `@earendil-works/pi-coding-agent` (and the `pi-ai` dev
+  dependency) moved from `^0.82.1` to `^0.85.1`, the first release whose
+  model catalog carries GPT-6 Astra, so `pru launch --model
+  <provider>/gpt-6-astra` resolves instead of erroring out as an unknown
+  model. `ResourceLoader` grew two members in that range —
+  `getSystemPromptSource()` and `getAppendSystemPromptSources()` — and the
+  per-agent wrapper in `agent-manager.ts` implements the interface
+  structurally, so it now delegates both to the shared loader. The
+  synthetic bash-timeout guidance we append has no file behind it and
+  contributes no source, which is what the sources list is for.
+
 - **Sending a message to an archived chat un-archives it.** Archiving is a
   "tuck this away, I'm done with it" gesture, so typing into the chat
   contradicts it — and until now the flag stuck, which meant the chat stayed
