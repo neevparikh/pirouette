@@ -1301,6 +1301,12 @@ function persistCollapsed() {
   );
 }
 
+/** Creation arrives via both HTTP and WS, in either order. Keep one record
+ *  and don't overwrite newer state changes with the creation snapshot. */
+function rememberCreatedAgent(agent) {
+  if (!agents.some((a) => a.id === agent.id)) agents.push(agent);
+}
+
 // --- websocket ---
 
 function connectWs() {
@@ -1352,9 +1358,10 @@ function handleWsMessage(envelope) {
       break;
 
     case "agent_created":
-      agents.push(envelope.agent);
+      // A broadcast is not a navigation request: it may come from the CLI,
+      // another agent, or another tab. Only explicit local actions select.
+      rememberCreatedAgent(envelope.agent);
       renderAgentList();
-      selectAgent(envelope.agent.id);
       break;
 
     case "agent_removed":
@@ -2596,7 +2603,9 @@ async function createAgentQuick(name, projectName) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || `create failed: ${res.status}`);
   }
-  return (await res.json()).id;
+  const agent = await res.json();
+  rememberCreatedAgent(agent);
+  return agent.id;
 }
 
 async function sendMessage() {
@@ -2803,8 +2812,7 @@ async function forkAgent(opts = {}) {
       return;
     }
     const child = await res.json();
-    // The agent_created broadcast has already added it to our list; just
-    // select it so the user lands on the fork.
+    rememberCreatedAgent(child);
     await selectAgent(child.id);
   } catch (err) {
     alert(`Failed to fork: ${err}`);
@@ -2830,6 +2838,7 @@ async function handoffAgent(briefing) {
       return;
     }
     const successor = await res.json();
+    rememberCreatedAgent(successor);
     await selectAgent(successor.id);
   } catch (err) {
     alert(`Failed to hand off: ${err}`);
