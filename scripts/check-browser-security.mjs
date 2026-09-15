@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import * as playwright from "playwright";
@@ -16,7 +16,7 @@ const worktreePath = join(dataDir, "worktree");
 const agent = {
   id: "security-demo", name: "security-demo", projectName: "scratchpad",
   worktreePath, branchName: null, sessionDir: join(dataDir, "sessions"),
-  state: "idle", createdAt: new Date().toISOString(), lastActivity: new Date().toISOString(),
+  state: "stopped", createdAt: new Date().toISOString(), lastActivity: new Date().toISOString(),
   model: null, thinkingLevel: "off", usage: { costUsd: 0, totalTokens: 0, turns: 0 },
   errorMessage: null, parentAgentId: null,
 };
@@ -47,7 +47,7 @@ try {
   await new Promise((done) => listener.listen(0, "127.0.0.1", done));
   const port = listener.address().port;
   await new Promise((done) => listener.close(done));
-  handle = await runServer({ host: "127.0.0.1", port, dataDir, webDir: fileURLToPath(new URL("../dist/web/", import.meta.url)) });
+  handle = await runServer({ host: "127.0.0.1", port, dataDir, webDir: resolve(fileURLToPath(new URL("../dist/web/", import.meta.url))) });
   const origin = `http://127.0.0.1:${port}`;
   const svgUrl = `${origin}/api/agents/${agent.id}/file?path=chart.svg`;
 
@@ -55,6 +55,7 @@ try {
     const browser = await playwright[name].launch({ headless: true });
     try {
       const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+      page.setDefaultTimeout(10_000);
       const requests = [], errors = [];
       const violations = [];
       page.on("pageerror", (err) => errors.push(err.message));
@@ -120,6 +121,11 @@ try {
       console.log(`${name}: message filtering, CSP, local images, math, real WS, and SVG sandbox passed`);
     } finally { await browser.close(); }
   }
+} catch (error) {
+  // The server installs process-level error logging. Do not let that turn
+  // an assertion failure in this standalone check into a successful exit.
+  console.error(error);
+  process.exitCode = 1;
 } finally {
   await handle?.shutdown();
   await rm(dataDir, { recursive: true, force: true });
