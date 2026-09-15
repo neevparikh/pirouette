@@ -21,15 +21,14 @@
 const STRICT_STRIKETHROUGH_REGEX =
   /^(~~)(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))\1(?=[^~]|$)/;
 
-let markedConfigured = false;
-function configureMarked() {
-  if (markedConfigured) return;
-  const marked = globalThis.marked;
-  if (!marked) return;
+const configuredMarked = new WeakSet();
+export function configureMarked(marked = globalThis.marked) {
+  if (!marked || configuredMarked.has(marked)) return;
 
   try {
-    if (marked.Tokenizer) {
-      class StrictStrikethroughTokenizer extends marked.Tokenizer {
+    const Tokenizer = marked.Tokenizer || globalThis.marked?.Tokenizer;
+    if (Tokenizer) {
+      class StrictStrikethroughTokenizer extends Tokenizer {
         del(src) {
           const match = STRICT_STRIKETHROUGH_REGEX.exec(src);
           if (!match) return undefined;
@@ -68,7 +67,7 @@ function configureMarked() {
     );
   }
 
-  markedConfigured = true;
+  configuredMarked.add(marked);
 }
 
 // File extensions we'll render inline as thumbnails when referenced

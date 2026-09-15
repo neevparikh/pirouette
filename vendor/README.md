@@ -6,11 +6,13 @@ version. Update by re-running the download steps documented next to
 each file.
 
 The npm-published packages we ship in the dashboard (`marked`,
-`marked-highlight`, `dompurify`, `highlight.js`) are NOT here —
-`scripts/post-build.mjs` copies their build artifacts from
+`marked-highlight`, `dompurify`, `highlight.js`, `katex`) are NOT here —
+`scripts/vendor.mjs` copies their build artifacts from
 `node_modules/` directly (bundling with esbuild for `highlight.js`,
 which doesn't ship a UMD/IIFE form). That's reproducible because the
-package versions are pinned in `package-lock.json`.
+package versions are pinned in `package-lock.json`. KaTeX's CSS, fonts,
+JavaScript, and license are copied together under `src/web/vendor/katex/`
+and included in the built dashboard.
 
 Only files with no equivalent npm distribution form live here.
 

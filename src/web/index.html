@@ -12,6 +12,8 @@
     <script src="vendor/marked.min.js"></script>
     <script src="vendor/marked-highlight.umd.js"></script>
     <script src="vendor/purify.min.js"></script>
+    <link rel="stylesheet" href="vendor/katex/katex.min.css" />
+    <script src="vendor/katex/katex.min.js"></script>
     <!-- highlight.js bundled (with esbuild) from highlight.js/lib/common.js,
          which covers ~36 popular languages. Matches pi-coding-agent's
          markdown renderer setup (auto-detect off; explicit-language only). -->
@@ -414,6 +416,20 @@
         border-radius: 4px;
         margin: 0.5rem 0;
       }
+
+      /* Math can't use terminal-cell wrapping. Keep the surrounding prose
+         monospace, but let KaTeX own equation fonts and geometry. */
+      .math-document { white-space: normal; min-width: 0; overflow-x: auto; }
+      .math-document table { width: max-content; }
+      .math-document .katex { font-size: 1.1em; }
+      .math-document .katex-display {
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 0.2em 0;
+        text-align: left;
+      }
+      .math-document .katex-display > .katex { text-align: left; }
+      .math-document .math-fallback { white-space: pre-wrap; }
 
       /* Pi-terminal markdown rendering
          ------------------------------

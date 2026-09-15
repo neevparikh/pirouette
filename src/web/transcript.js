@@ -4,14 +4,12 @@
 import {
   describeToolCall,
   describeToolResult,
-  enhanceImagePaths,
   escHtml,
   hidesToolResultBody,
   relTime,
-  renderMarkdown,
   shortenPath,
 } from "./render.js";
-import { renderMarkdownPi } from "./pi-markdown.js";
+import { renderMessageMarkdown } from "./message-markdown.js";
 
 /**
  * @typedef {Object} ChatMessage
@@ -340,7 +338,7 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     let userBody = "";
     if (msg.content) {
       if (opts && opts.widthCols) {
-        userBody = `<pre class="pi-md">${renderMarkdownPi(msg.content, opts.widthCols)}</pre>`;
+        userBody = renderMessageMarkdown(msg.content, { widthCols: opts.widthCols });
       } else {
         userBody = `<pre class="whitespace-pre-wrap">${escHtml(msg.content)}</pre>`;
       }
@@ -354,63 +352,26 @@ export function renderMessage(msg, idx, expandedItems, opts) {
 
   if (msg.role === "assistant") {
     if (msg.streaming) {
-      // Streaming row: flat pi-cli layout (no bubble). The text is run
-      // through the SAME pi-tui markdown renderer used for finalized
-      // messages, so headings, lists, code fences, tables and inline
-      // styling appear *as the tokens stream in* rather than showing
-      // raw markdown that flips to rendered output at the very end.
-      //
-      // app.js's updateStreamingElement() re-runs renderMarkdownPi on
-      // each delta and swaps the bubble's innerHTML in one shot (cheap
-      // — the render is pure string work and the DOM node count is
-      // small). A trailing blinking cursor is appended after the
-      // rendered markdown. When no width is available (tests / preview)
-      // we fall back to escaped plain text.
-      const streamBody =
-        opts && opts.widthCols
-          ? renderMarkdownPi(msg.content, opts.widthCols)
-          : escHtml(msg.content);
-      const streamClass =
-        opts && opts.widthCols
-          ? "pi-md"
-          : "whitespace-pre-wrap text-base16-600 font-mono";
+      // Use exactly the same renderer as app.js's incremental updates.
+      // The stable outer div allows switching between terminal <pre> and
+      // flow-layout math without putting block elements inside a <pre>.
+      const streamBody = renderMessageMarkdown(msg.content, {
+        widthCols: opts?.widthCols,
+        raw: rawAssistant || !opts?.widthCols,
+        cursor: '<span class="animate-pulse text-base16-green streaming-cursor">▊</span>',
+      });
       return `
         <div class="message-enter pi-row pi-row-assistant px-4 py-1.5" data-msg-key="${wrapKey}">
-          <pre id="streaming-body" class="${streamClass}">${streamBody}<span class="animate-pulse text-base16-green streaming-cursor">▊</span></pre>
+          <div id="streaming-body">${streamBody}</div>
         </div>`;
     }
-    // `rawAssistant` toggle (owned by app.js, localStorage-backed) --
-    // flipped via the `raw` button. When on, every assistant message
-    // renders as plain escaped markdown source.
-    //
-    // Default path: pi-tui box-drawing renderer (renderMarkdownPi),
-    // width-tied to the bubble's column capacity. The whole pi-md
-    // block sits inline in the flat transcript -- no bubble border,
-    // no left/right alignment, just full-column flow that matches
-    // pi-cli.
-    let body;
-    if (rawAssistant) {
-      body = `<pre class="whitespace-pre-wrap text-base16-600 font-mono">${escHtml(msg.content)}</pre>`;
-    } else if (opts && opts.widthCols) {
-      const pi = renderMarkdownPi(msg.content, opts.widthCols);
-      // enhanceImagePaths returns { html, thumbnails }: thumbnails
-      // render BELOW the <pre class="pi-md"> block (not inside it)
-      // because injecting `<a><img>` into a `white-space: pre` block
-      // would break the column-aligned text layout. Image-path
-      // references in inline code (<span class="pi-code">foo.png</span>)
-      // become thumbnail tiles in the strip.
-      const { html: piHtml, thumbnails } = opts.agentId
-        ? enhanceImagePaths(pi, opts.agentId)
-        : { html: pi, thumbnails: "" };
-      body = `<pre class="pi-md">${piHtml}</pre>${thumbnails}`;
-    } else {
-      // Fallback for tests / preview where no width is available.
-      const md = renderMarkdown(msg.content);
-      const { html: enhancedHtml, thumbnails } = opts && opts.agentId
-        ? enhanceImagePaths(md, opts.agentId)
-        : { html: md, thumbnails: "" };
-      body = `<div class="md text-base16-600">${enhancedHtml}</div>${thumbnails}`;
-    }
+    // Math uses browser flow layout; ordinary messages retain the
+    // width-aware terminal renderer. The raw toggle bypasses both.
+    const body = renderMessageMarkdown(msg.content, {
+      widthCols: opts?.widthCols,
+      raw: rawAssistant,
+      agentId: opts?.agentId,
+    });
     return `
       <div class="message-enter pi-row pi-row-assistant px-4 py-1.5" data-msg-key="${wrapKey}">
         ${body}
