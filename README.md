@@ -367,6 +367,20 @@ the *next* press is the tell for the blur-and-swallow behaviour above.
 `defaultPrevented: true` means something outside the page claimed the key
 but let it through — the dashboard interrupts anyway.
 
+### Math in chat
+
+The dashboard renders LaTeX math with KaTeX: `\(...\)` or `$...$` inline,
+and `\[...\]` or `$$...$$` for display equations. Equations render as
+responses stream in, and in existing conversations when you reopen them.
+Messages containing math use browser-flow layout so fractions, aligned
+equations, and tables aren't constrained to terminal character cells;
+other messages keep the terminal-style renderer.
+
+Code spans and code blocks stay literal. The **raw** toggle shows the
+original Markdown/LaTeX, including while streaming. Unsupported or incomplete
+TeX falls back to readable source rather than interrupting the message.
+KaTeX and its fonts are served locally with the dashboard.
+
 ### Long tasks: compaction and handoff
 
 Two ways to deal with a chat that has outgrown its context.
@@ -661,7 +675,7 @@ design.
 - Trust-on-first-use SSH host keys (governed by your `~/.ssh/config`).
 
 Browser libraries (marked, marked-highlight, DOMPurify, highlight.js,
-Tailwind) are vendored at build time — no CDN dependency at runtime.
+KaTeX, Tailwind) are vendored at build time — no CDN dependency at runtime.
 
 ## Architecture
 

@@ -14,6 +14,7 @@
 //   - marked.min.js              (npm: marked)
 //   - marked-highlight.umd.js    (npm: marked-highlight)
 //   - purify.min.js              (npm: dompurify)
+//   - katex/                    (npm: katex, JS + CSS + fonts + license)
 //   - highlight.umd.js           (npm: highlight.js, bundled with esbuild
 //                                 since the package ships only CJS)
 //   - tailwindcss.min.js         (committed at vendor/tailwindcss-3.4.17.min.js
@@ -48,6 +49,15 @@ function copyFromNodeModules(relPath, destName) {
 copyFromNodeModules("marked/marked.min.js", "marked.min.js");
 copyFromNodeModules("marked-highlight/lib/index.umd.js", "marked-highlight.umd.js");
 copyFromNodeModules("dompurify/dist/purify.min.js", "purify.min.js");
+
+// Preserve the fonts/ paths referenced by KaTeX's CSS. No runtime CDN.
+const katexOut = path.join(outDir, "katex");
+mkdirSync(katexOut, { recursive: true });
+for (const file of ["katex.min.js", "katex.min.css"]) {
+  copyFromNodeModules(`katex/dist/${file}`, `katex/${file}`);
+}
+cpSync(path.join(nodeModules, "katex/dist/fonts"), path.join(katexOut, "fonts"), { recursive: true });
+copyFromNodeModules("katex/LICENSE", "katex/LICENSE");
 
 // highlight.js: package ships only CJS, no single-file UMD. Bundle the
 // `common` entry (~36 most-used languages, matches what the jsDelivr CDN

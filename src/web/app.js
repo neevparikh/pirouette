@@ -23,7 +23,7 @@ import {
   reduceEvent,
   renderTranscriptBlocks,
 } from "./transcript.js";
-import { renderMarkdownPi } from "./pi-markdown.js";
+import { renderMessageMarkdown } from "./message-markdown.js";
 import { ExtensionUISurface } from "./extension-ui.js";
 import { VimMode } from "./vim.js";
 import { escapeAction } from "./keys.js";
@@ -1553,17 +1553,16 @@ function handleAgentEvent(agentId, event) {
 /** Update the contents of a live streaming bubble in place.
  *
  *  Assistant text (`kind = "text"`) is rendered as markdown *while it
- *  streams* via renderMarkdownPi — the same pi-tui renderer used for
- *  finalized messages. On each delta we re-run the renderer over the
- *  full accumulated text and swap the bubble's innerHTML in one shot,
+ *  streams* via renderMessageMarkdown — the same renderer used for
+ *  finalized messages (terminal layout, or browser flow for math). On each
+ *  delta we re-run the renderer over the full accumulated text and swap
+ *  the bubble's innerHTML in one shot,
  *  appending a blinking cursor. This is what makes headings, lists,
  *  code fences and tables appear incrementally instead of showing raw
  *  markdown that flips to rendered output only at the very end.
  *
- *  The render is pure string work (marked lexer + our own line builder)
- *  and the resulting node count is small, so a full innerHTML swap per
- *  delta is cheap and doesn't flash the way the old marked + DOMPurify +
- *  highlight.js pipeline did.
+ *  Ordinary Markdown uses the cheap terminal line builder; math uses
+ *  sanitized flow HTML with cached KaTeX output for completed equations.
  *
  *  Thinking (`kind = "thinking"`) stays plain-text append-only — it's an
  *  auto-scrolling muted box where markdown structure adds no value.
@@ -1604,12 +1603,16 @@ function updateStreamingElement(elementId, text, kind) {
     // Fall back to escaped plain text so streaming keeps flowing.
     let rendered;
     try {
-      rendered = renderMarkdownPi(text, measureBubbleWidthCols());
+      rendered = renderMessageMarkdown(text, {
+        widthCols: measureBubbleWidthCols(),
+        raw: rawView,
+        cursor,
+      });
     } catch (err) {
       console.error("streaming markdown render failed; falling back:", err);
-      rendered = escHtml(text);
+      rendered = renderMessageMarkdown(text, { raw: true, cursor });
     }
-    el.innerHTML = rendered + cursor;
+    el.innerHTML = rendered;
     el.__pirStreamText = text;
   } else {
     // Thinking: append-only fast path. The new full text is the previous
