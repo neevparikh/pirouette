@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Browser regression: history, streaming, raw mode, local fonts and mobile
-// overflow. Run `npm run vendor && node scripts/check-math.mjs`.
+// overflow under production CSP. Run `npm run build && node scripts/check-math.mjs`.
 // Optional: CHROMIUM_PATH, MATH_SCREENSHOT (output PNG path).
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
@@ -8,10 +8,13 @@ import { readFile } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { dashboardCsp } from "../dist/server/content-security.js";
 
 const root = fileURLToPath(new URL("../src/web/", import.meta.url));
 const mime = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf" };
 const server = createServer(async (req, res) => {
+  res.setHeader("content-security-policy", dashboardCsp(req.headers.host));
+  res.setHeader("x-content-type-options", "nosniff");
   const path = new URL(req.url, "http://localhost").pathname;
   const file = resolve(root, "." + (path === "/" ? "/index.html" : path));
   if (!file.startsWith(root.endsWith(sep) ? root : root + sep)) return res.writeHead(404).end();
@@ -44,11 +47,14 @@ Code stays literal: ` + '`\\(x\\)`.';
 const history = [{ role: "assistant", content: source, ts: Date.now() }];
 const errors = [];
 const fontResponses = [];
+const violations = [];
 let browser;
 try {
   browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}) });
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   page.on("pageerror", (err) => errors.push(err.message));
+  await page.exposeFunction("recordViolation", (directive) => violations.push(directive));
+  await page.addInitScript(() => document.addEventListener("securitypolicyviolation", (event) => window.recordViolation(event.effectiveDirective)));
   page.on("response", (r) => { if (r.url().includes("/vendor/katex/fonts/")) fontResponses.push(r); });
   // The entire check runs offline except for this local static server.
   await page.route("**/*", (route) => route.request().url().startsWith(origin) ? route.continue() : route.abort());
@@ -113,6 +119,7 @@ try {
     await page.screenshot({ path: process.env.MATH_SCREENSHOT });
   }
   assert.deepEqual(errors, []);
+  assert.deepEqual(violations, [], "normal math/UI needs no CSP exceptions");
   console.log("Math history, streaming, raw mode, local fonts, theme colors and mobile overflow passed.");
 } finally {
   await browser?.close();

@@ -289,9 +289,10 @@ describe("renderMarkdown", () => {
     expect(html).toMatch(/<pre>/);
     expect(html).toContain("const x = 1;");
   });
-  it("sanitizes dangerous HTML", () => {
+  it("escapes dangerous HTML into visible text", () => {
     const html = renderMarkdown('<img src=x onerror="alert(1)">');
-    expect(html).not.toContain("onerror");
+    expect(html).not.toContain("<img");
+    expect(html).toContain("&lt;img");
   });
   it("falls back to plain text for empty input", () => {
     expect(renderMarkdown("")).toBe("");

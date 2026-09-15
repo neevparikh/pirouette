@@ -182,12 +182,20 @@ describe("GET /api/agents/:id/file", () => {
     expect(r.headers["content-type"]).toBe("image/png");
     expect(r.body.equals(ONE_PX_PNG)).toBe(true);
     expect(r.headers["cache-control"]).toMatch(/private/);
+    expect(r.headers["x-content-type-options"]).toBe("nosniff");
+    expect(r.headers["content-security-policy"]).toContain("sandbox;");
   });
 
   it("serves SVG", async () => {
     const r = await rawGet(`/api/agents/${AGENT_ID}/file?path=diagram.svg`);
     expect(r.status).toBe(200);
     expect(r.headers["content-type"]).toBe("image/svg+xml");
+    const csp = String(r.headers["content-security-policy"]);
+    expect(csp).toContain("sandbox;");
+    expect(csp).toContain("default-src 'none'");
+    expect(csp).toContain("script-src 'none'");
+    expect(csp).not.toContain("allow-scripts");
+    expect(csp).not.toContain("allow-same-origin");
   });
 
   it("404s for missing files", async () => {

@@ -666,6 +666,25 @@ In practice: **anyone who can open a TCP connection to the dashboard port has
 shell access on the host.** The agents have full bash/edit/write tools by
 design.
 
+The browser treats message content as untrusted: raw HTML is displayed as
+text, Markdown links allow only HTTP(S), mailto and relative destinations,
+and remote images become click-to-open links rather than automatic loads.
+KaTeX runs with untrusted commands disabled; its generated markup is sanitized
+with DOMPurify. A response CSP forbids inline scripts, event handlers, eval,
+frames and arbitrary external resources. Local image documents, including
+SVG opened in a tab, receive a separate sandbox CSP with scripts disabled and
+an opaque origin. The existing Google Fonts stylesheet/font hosts are the
+only external resource exceptions; JavaScript is self-hosted.
+
+**This is not a sandbox for agents with host access.** An agent that can
+rewrite the served JavaScript or server can bypass these protections. Running
+intentionally hostile agents safely requires a separately protected dashboard
+service and execution environment: no agent write access to serving code,
+configuration or credentials, and no privilege escalation into that service.
+A separate account alone is insufficient if agents can use sudo to cross the
+boundary. Worktree file serving also is not filesystem isolation (symlinks
+can reference files outside the worktree).
+
 ### Things you're trusting (the supply chain)
 
 - The npm package `@neevparikh/pirouette` (or whatever `defaults.npm_package`
