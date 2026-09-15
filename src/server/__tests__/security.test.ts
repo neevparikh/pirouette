@@ -156,6 +156,22 @@ describe("server security middleware", () => {
     });
   });
 
+  describe("browser response policies", () => {
+    it.each(["/", "/vendor/lib.js", "/api/health", "/missing"])("sets security headers on %s", async (p) => {
+      const res = await rawRequest({ path: p, host: `127.0.0.1:${port}` });
+      expect(res.headers["x-content-type-options"]).toBe("nosniff");
+      expect(res.headers["referrer-policy"]).toBe("no-referrer");
+      const csp = String(res.headers["content-security-policy"]);
+      expect(csp).toContain("default-src 'none'");
+      expect(csp).toContain("script-src 'self'; script-src-attr 'none'");
+      expect(csp).not.toContain("unsafe-eval");
+      expect(csp).toContain(`connect-src 'self' ws://127.0.0.1:${port} wss://127.0.0.1:${port}`);
+      expect(csp).toContain("frame-ancestors 'none'");
+      expect(csp).toContain("base-uri 'none'");
+      expect(csp).toContain("form-action 'none'");
+    });
+  });
+
   describe("static file serving", () => {
     it("serves vendored files under /vendor/", async () => {
       const res = await rawRequest({ path: "/vendor/lib.js", host: `127.0.0.1:${port}` });

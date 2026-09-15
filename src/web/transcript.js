@@ -10,6 +10,7 @@ import {
   shortenPath,
 } from "./render.js";
 import { renderMessageMarkdown } from "./message-markdown.js";
+import { isRasterDataUrl } from "./content-policy.js";
 
 /**
  * @typedef {Object} ChatMessage
@@ -292,9 +293,10 @@ function renderInlineImages(images) {
   // right-aligned bubbles.
   let html = `<div class="flex flex-wrap gap-1 justify-start">`;
   for (const img of images) {
-    if (!img || typeof img.dataUrl !== "string") continue;
-    html += `<a href="${img.dataUrl}" target="_blank" rel="noopener" class="block">
-      <img src="${img.dataUrl}" alt="attached ${escHtml(img.mimeType || "image")}" class="max-h-48 max-w-full rounded border border-base16-300 object-contain bg-base16-100" />
+    if (!img || !isRasterDataUrl(img.dataUrl)) continue;
+    const src = escHtml(img.dataUrl);
+    html += `<a href="${src}" target="_blank" rel="noopener noreferrer" class="block">
+      <img src="${src}" alt="attached ${escHtml(img.mimeType || "image")}" class="max-h-48 max-w-full rounded border border-base16-300 object-contain bg-base16-100" />
     </a>`;
   }
   html += `</div>`;

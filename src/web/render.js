@@ -5,6 +5,8 @@
 // in Node. `renderMarkdown` uses `marked` + `DOMPurify` which may be provided
 // either via CDN globals (in the browser) or via npm packages (in tests).
 
+import { safeLinkUrl } from "./content-policy.js";
+
 // --- markdown ---
 //
 // Configured to match pi-coding-agent's markdown semantics (see
@@ -66,6 +68,27 @@ export function configureMarked(marked = globalThis.marked) {
       }),
     );
   }
+
+  // Only our renderers generate HTML. Source HTML (including styles,
+  // forms and resource tags) stays visible as text, even in math messages.
+  marked.use({ renderer: {
+    html({ text }) { return escHtml(text); },
+    link({ href, title, tokens }) {
+      const label = this.parser.parseInline(tokens);
+      const safe = safeLinkUrl(href);
+      if (!safe) return label;
+      return `<a href="${escHtml(safe)}"${title ? ` title="${escHtml(title)}"` : ""} target="_blank" rel="noopener noreferrer">${label}</a>`;
+    },
+    image({ href, text }) {
+      // Local paths are enhanced only after sanitization, through the
+      // worktree file endpoint. Remote images require an explicit click;
+      // never load or proxy an agent-supplied external resource.
+      if (looksLikeImagePathRef(href)) return `<code>${escHtml(href)}</code>`;
+      const label = escHtml(text || "image");
+      const safe = safeLinkUrl(href);
+      return safe ? `<a href="${escHtml(safe)}" target="_blank" rel="noopener noreferrer">${label} (external image)</a>` : label;
+    },
+  } });
 
   configuredMarked.add(marked);
 }
@@ -183,11 +206,11 @@ export function enhanceImagePaths(html, agentId) {
   };
   const decode = (inner) =>
     inner
-      .replace(/&amp;/g, "&")
       .replace(/&lt;/g, "<")
       .replace(/&gt;/g, ">")
       .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'");
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, "&");
   // pi-md inline code: <span class="pi-code">...</span> (the
   //   classes attribute may include additional pi-* classes for
   //   nested formatting, e.g. "pi-strong pi-code")
@@ -201,11 +224,11 @@ export function enhanceImagePaths(html, agentId) {
 
   let thumbnails = "";
   if (paths.length > 0) {
-    // `onerror` hides paths that 404 (the assistant proposed but
-    // didn't create the file) so we don't leave broken-image icons.
+    // app.js hides failed thumbnails via a capture-phase error listener;
+    // no inline event handlers are permitted by the dashboard CSP.
     const cells = paths.map((p) => {
       const src = `/api/agents/${encodeURIComponent(agentId)}/file?path=${encodeURIComponent(p)}`;
-      return `<a href="${src}" target="_blank" rel="noopener" class="block" title="${p}"><img src="${src}" alt="${p}" loading="lazy" class="max-h-32 rounded border border-base16-300" onerror="this.parentNode.style.display='none'" /></a>`;
+      return `<a href="${src}" target="_blank" rel="noopener noreferrer" class="block" title="${escHtml(p)}"><img src="${src}" alt="${escHtml(p)}" loading="lazy" class="max-h-32 rounded border border-base16-300" /></a>`;
     }).join("");
     thumbnails = `<div class="pi-image-strip flex flex-wrap gap-2 mt-2">${cells}</div>`;
   }

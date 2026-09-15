@@ -21,6 +21,7 @@ import { getConfig } from "../config.js";
 import { AgentManager } from "./agent-manager.js";
 import { ProjectManager } from "./project-manager.js";
 import { StateManager } from "./state.js";
+import { dashboardCsp, IMAGE_DOCUMENT_CSP } from "./content-security.js";
 import type {
   CreateAgentRequest,
   CreateProjectRequest,
@@ -301,8 +302,9 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
   // ---- request routing ----
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const method = req.method ?? "GET";
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    const pathname = url.pathname;
+    res.setHeader("x-content-type-options", "nosniff");
+    res.setHeader("referrer-policy", "no-referrer");
+    res.setHeader("content-security-policy", IMAGE_DOCUMENT_CSP);
 
     // Host header validation. Reject before any further processing so
     // we don't even read the body of a request we won't honor. Returns
@@ -315,6 +317,10 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
       res.end("misdirected request");
       return;
     }
+
+    res.setHeader("content-security-policy", dashboardCsp(hostHeader));
+    const url = new URL(req.url ?? "/", `http://${hostHeader}`);
+    const pathname = url.pathname;
 
     // Same-origin design: refuse all cross-origin preflights outright.
     // A 405 with no Access-Control-Allow-* tells the browser "not
@@ -513,19 +519,19 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
       // Serve a file from inside the agent's worktree, by relative path.
       //
       // Used by the dashboard to render images that the agent references
-      // inline (markdown `![](plots/foo.png)`, `<img src="plots/foo.png">`,
-      // or just a `<code>plots/foo.png</code>` mention) without making the
+      // inline (markdown `![](plots/foo.png)` or an inline-code path
+      // mention) without making the
       // user open a tool result + click through. "Best-effort" -- only
       // serves whitelisted image MIME types, capped at 25 MB, with strict
       // path-traversal protection.
       //
       // Safety:
       //   - `path` is resolved against the agent's `worktreePath`.
-      //   - resolved real path must stay inside worktreePath (symlinks
-      //     pointing out of the worktree are rejected).
+      //   - lexical path must stay inside worktreePath. This is NOT a
+      //     filesystem sandbox: symlinks may point outside the worktree.
       //   - only image extensions are served; everything else 415s.
       //   - 25 MB cap (well above what any chart we generate looks like).
-      //   - same-origin only; no CORS headers.
+      //   - no CORS headers; sandbox CSP isolates opened image documents.
       if (method === "GET" && sub === "/file") {
         const agent = agentManager.getAgent(agentId);
         if (!agent) {
@@ -584,6 +590,7 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
           res.writeHead(200, {
             "content-type": mime,
             "content-length": String(buf.length),
+            "content-security-policy": IMAGE_DOCUMENT_CSP,
             // Short cache: assistant-referenced files can be regenerated
             // mid-conversation (e.g. an updated plot). 30s lets a single
             // page-load avoid double-fetching the same image without

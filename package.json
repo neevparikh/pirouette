@@ -52,7 +52,7 @@
     "@earendil-works/pi-ai": "^0.85.1",
     "@types/jsdom": "^28.0.1",
     "@types/ws": "^8.18.1",
-    "dompurify": "^3.4.1",
+    "dompurify": "^3.4.15",
     "esbuild": "^0.28.0",
     "highlight.js": "^11.11.1",
     "isomorphic-dompurify": "^2.36.0",

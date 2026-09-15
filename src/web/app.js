@@ -28,6 +28,14 @@ import { ExtensionUISurface } from "./extension-ui.js";
 import { VimMode } from "./vim.js";
 import { escapeAction } from "./keys.js";
 
+// Resource errors do not bubble. Capture them for dynamically rendered
+// thumbnails instead of embedding handlers that would require unsafe-inline.
+document.addEventListener("error", (event) => {
+  if (event.target instanceof HTMLImageElement && event.target.closest(".pi-image-strip")) {
+    event.target.closest("a")?.style.setProperty("display", "none");
+  }
+}, true);
+
 // --- state ---
 
 let agents = [];
@@ -82,8 +90,8 @@ let activityTimer = null;
 let ws = null;
 let reconnectTimer = null;
 // Theme state is owned by localStorage (`pirouette-theme-{light,dark,mode}`)
-// and applied as a class on <html>. The FOUC-preventing inline script in
-// index.html sets the initial class before this module loads; we only need
+// and applied as a class on <html>. The synchronous bootstrap.js script
+// sets the initial class before this module loads; we only need
 // to re-apply on user action or OS-preference change.
 
 // --- elements ---

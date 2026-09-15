@@ -33,6 +33,7 @@
 //     rest.
 
 import { escHtml } from "./render.js";
+import { safeLinkUrl } from "./content-policy.js";
 
 // ---------- width helpers ----------
 
@@ -290,10 +291,10 @@ function runsToHtml(runs) {
       // emit raw.
       if (cls) out += `<span class="${cls}">${run.text}</span>`;
       else out += run.text;
-    } else if (run.href) {
-      const href = run.href.replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    } else if (safeLinkUrl(run.href)) {
+      const href = escHtml(run.href);
       const c = cls ? ` class="${cls}"` : "";
-      out += `<a${c} href="${href}" target="_blank" rel="noopener">${escHtml(run.text)}</a>`;
+      out += `<a${c} href="${href}" target="_blank" rel="noopener noreferrer">${escHtml(run.text)}</a>`;
     } else if (cls) {
       out += `<span class="${cls}">${escHtml(run.text)}</span>`;
     } else {
