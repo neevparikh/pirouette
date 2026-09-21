@@ -13,6 +13,37 @@ function messageEvent(
 }
 
 describe("normalizeEvent", () => {
+  it.each(["manual", "threshold", "overflow"] as const)("preserves %s compaction failures", (reason) => {
+    const event: AgentSessionEvent = {
+      type: "compaction_end", reason, result: undefined,
+      aborted: false, willRetry: false,
+      errorMessage: "Summarization failed: generation hit the token cap and the summary is incomplete",
+    };
+    expect(normalizeEvent(event)).toEqual(event);
+  });
+
+  it("sends compaction success accounting without summary contents", () => {
+    const event: AgentSessionEvent = {
+      type: "compaction_end", reason: "threshold", aborted: false, willRetry: false,
+      result: {
+        summary: "A large summary that doesn't belong in this event",
+        firstKeptEntryId: "kept", tokensBefore: 120000, estimatedTokensAfter: 23000,
+        details: { modifiedFiles: ["some-file.ts"] },
+      },
+    };
+    expect(normalizeEvent(event)).toEqual({
+      type: "compaction_end", reason: "threshold", aborted: false, willRetry: false,
+      result: { tokensBefore: 120000, estimatedTokensAfter: 23000 },
+    });
+  });
+
+  it("preserves cancelled compactions without inventing a result", () => {
+    const event: AgentSessionEvent = {
+      type: "compaction_end", reason: "manual", result: undefined, aborted: true, willRetry: false,
+    };
+    expect(normalizeEvent(event)).toEqual(event);
+  });
+
   it("passes through a plain-string user message", () => {
     expect(normalizeEvent(messageEvent("message_end", "user", "hello"))).toEqual({
       type: "message_end",

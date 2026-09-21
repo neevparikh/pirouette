@@ -401,6 +401,14 @@ server's environment. It re-derives on a model switch, so moving an agent
 from a 1M-token model to a 200k one doesn't leave it compacting every turn.
 `/compact [instructions]` still compacts on demand.
 
+The dashboard distinguishes successful, failed, and cancelled compactions.
+Failures show the error returned by pi (also recorded in the server log),
+not a successful “context compacted” message. The outcome stays visible
+through subsequent events and history refreshes in the current browser
+session; successful compactions show the before/estimated-after token counts
+when available. A failed compaction may need `/compact` with instructions for
+a shorter summary, or a `/handoff` to a fresh agent.
+
 **Handoff** throws the conversation away and keeps the work. A new agent
 starts in the *same worktree* — same branch, same uncommitted changes, same
 model — with an empty context and a briefing; the outgoing chat is archived

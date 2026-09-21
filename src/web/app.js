@@ -1275,6 +1275,9 @@ async function fetchHistory(agentId) {
     const data = await res.json();
     if (Array.isArray(data.messages)) {
       transcriptByAgent[agentId] = {
+        // History replaces messages, not live queue/compaction status. In
+        // particular, don't erase a failure as soon as history is fetched.
+        ...stateFor(agentId),
         messages: data.messages,
         streamingText: "",
         streamingThinking: "",
@@ -1513,10 +1516,9 @@ function handleAgentEvent(agentId, event) {
     }
   } else if (event.type === "compaction_end") {
     // Drop the activity entry. The transcript already shows the result
-    // line via the COMPACTION_KEY block. Pi has just rewritten the
-    // session messages (replaced history with a summary) so refetch the
-    // canonical history; otherwise our local transcript stays stale
-    // until the next idle/waiting_input transition.
+    // line via the COMPACTION_KEY block. Only a successful compaction has
+    // rewritten the session history; don't refetch (and clear streaming
+    // content) when compaction failed or was cancelled.
     delete currentActivity[agentId];
     renderAgentList();
     if (agentId === selectedAgentId) {
@@ -1526,7 +1528,7 @@ function handleAgentEvent(agentId, event) {
       // messages list. We leave `historyLoaded` at true so other code
       // paths don't double-fetch; fetchHistory itself overwrites the
       // cached transcript.
-      void fetchHistory(agentId);
+      if (event.result && !event.errorMessage && !event.aborted) void fetchHistory(agentId);
       void fetchStats(agentId);
     }
   }

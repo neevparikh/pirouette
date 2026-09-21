@@ -2680,6 +2680,9 @@ export class AgentManager {
   private handleAgentEvent(agentId: string, event: AgentSessionEvent): void {
     const normalized = normalizeEvent(event);
     console.log(`[agent-manager] event from ${agentId}: ${event.type}`);
+    if (event.type === "compaction_end" && event.errorMessage && !event.aborted) {
+      console.error(`[agent-manager] compaction failed for ${agentId} (${event.reason}): ${event.errorMessage}`);
+    }
     this.emitEvent(agentId, normalized);
 
     // Track state transitions based on events

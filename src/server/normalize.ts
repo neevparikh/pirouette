@@ -192,6 +192,13 @@ export function normalizeEvent(event: AgentSessionEvent): NormalizedEvent {
         reason: event.reason,
         aborted: event.aborted,
         willRetry: event.willRetry,
+        errorMessage: event.errorMessage,
+        // A result is proof of success. Send only accounting metadata, not
+        // the potentially large summary or its file-operation details.
+        result: event.result ? {
+          tokensBefore: event.result.tokensBefore,
+          estimatedTokensAfter: event.result.estimatedTokensAfter,
+        } : undefined,
       };
     case "auto_retry_start":
       return {

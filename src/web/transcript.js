@@ -100,9 +100,8 @@ export function reduceEvent(state, event, now) {
       };
 
     case "compaction_end":
-      // Result lingers (rendered as a small system-style line) so the user
-      // can confirm the compaction succeeded. The next compaction_start
-      // will overwrite it.
+      // Keep the outcome visible until another compaction completes. Errors
+      // must not be mistaken for success just because they weren't aborts.
       return {
         ...state,
         compaction: {
@@ -112,6 +111,11 @@ export function reduceEvent(state, event, now) {
             reason: typeof event.reason === "string" ? event.reason : null,
             aborted: !!event.aborted,
             willRetry: !!event.willRetry,
+            errorMessage: typeof event.errorMessage === "string" ? event.errorMessage : null,
+            result: event.result && typeof event.result === "object" ? {
+              tokensBefore: event.result.tokensBefore,
+              estimatedTokensAfter: event.result.estimatedTokensAfter,
+            } : null,
             ts,
           },
         },
@@ -146,6 +150,7 @@ export function reduceEvent(state, event, now) {
           newMsgs.push({ role: "assistant", content: streamingText, ts });
         }
         return {
+          ...state,
           messages: newMsgs,
           streamingText: "",
           streamingThinking: "",
@@ -157,6 +162,7 @@ export function reduceEvent(state, event, now) {
 
     case "tool_execution_start":
       return {
+        ...state,
         messages: [
           ...messages,
           {
@@ -186,6 +192,7 @@ export function reduceEvent(state, event, now) {
         resultText = resultText.slice(0, 2000) + "\n…(truncated)";
       }
       return {
+        ...state,
         messages: [
           ...messages,
           {
@@ -204,7 +211,7 @@ export function reduceEvent(state, event, now) {
     }
   }
 
-  return { messages, streamingText, streamingThinking, queue: state.queue };
+  return { ...state, messages, streamingText, streamingThinking };
 }
 
 /** Fold a `message_end` event for a user message into the transcript.
@@ -606,10 +613,19 @@ export function renderTranscriptBlocks(state, expandedItems, opts) {
  *  the same DOM node, so reconciliation is a single innerHTML swap. */
 export const COMPACTION_KEY = "compaction";
 
+function compactionReasonLabel(reason) {
+  const label = {
+    manual: "manual",
+    auto: "automatic",
+    threshold: "automatic threshold",
+    overflow: "context recovery",
+  }[reason];
+  return label ? ` (${label})` : "";
+}
+
 function renderCompactionRow(c) {
   if (c.active) {
-    const reason = c.reason === "manual" ? "manual" : c.reason === "auto" ? "auto" : null;
-    const reasonLabel = reason ? ` (${reason})` : "";
+    const reasonLabel = compactionReasonLabel(c.reason);
     return `
       <div class="message-enter px-2 py-1" data-msg-key="${COMPACTION_KEY}">
         <div class="flex items-baseline gap-2 text-xs font-mono text-base16-orange bg-base16-orange/10 border border-base16-orange/20 rounded px-2 py-1">
@@ -620,8 +636,7 @@ function renderCompactionRow(c) {
   }
   const r = c.lastResult;
   if (!r) return "";
-  const reason = r.reason === "manual" ? "manual" : r.reason === "auto" ? "auto" : null;
-  const reasonLabel = reason ? ` (${reason})` : "";
+  const reasonLabel = compactionReasonLabel(r.reason);
   if (r.aborted) {
     return `
       <div class="message-enter px-2 py-1" data-msg-key="${COMPACTION_KEY}">
@@ -631,11 +646,35 @@ function renderCompactionRow(c) {
         </div>
       </div>`;
   }
+  if (r.errorMessage) {
+    return `
+      <div class="message-enter px-2 py-1" data-msg-key="${COMPACTION_KEY}">
+        <div role="alert" class="text-xs font-mono text-base16-red bg-base16-red/10 border border-base16-red/20 rounded px-2 py-1">
+          <div>× compaction failed${escHtml(reasonLabel)}</div>
+          <div class="whitespace-pre-wrap break-words mt-1">${escHtml(r.errorMessage)}</div>
+          <div class="mt-1">The agent may need a manual /compact or /handoff to continue.</div>
+        </div>
+      </div>`;
+  }
+  if (!r.result) {
+    // Older servers omit the result. An unknown outcome is not success.
+    return `
+      <div class="message-enter px-2 py-1" data-msg-key="${COMPACTION_KEY}">
+        <div class="text-xs font-mono text-base16-orange bg-base16-orange/10 border border-base16-orange/20 rounded px-2 py-1">
+          <span>compaction ended without a result${escHtml(reasonLabel)}</span>
+        </div>
+      </div>`;
+  }
+  const { tokensBefore, estimatedTokensAfter } = r.result;
+  const tokenLabel = Number.isFinite(tokensBefore) && tokensBefore >= 0 &&
+    Number.isFinite(estimatedTokensAfter) && estimatedTokensAfter >= 0
+    ? ` — ${tokensBefore.toLocaleString("en-US")} → ~${estimatedTokensAfter.toLocaleString("en-US")} tokens`
+    : "";
   return `
     <div class="message-enter px-2 py-1" data-msg-key="${COMPACTION_KEY}">
       <div class="flex items-baseline gap-2 text-xs font-mono text-base16-green bg-base16-green/10 border border-base16-green/20 rounded px-2 py-1">
         <span>✓</span>
-        <span>context compacted${escHtml(reasonLabel)}</span>
+        <span>context compacted${escHtml(reasonLabel)}${escHtml(tokenLabel)}</span>
       </div>
     </div>`;
 }
