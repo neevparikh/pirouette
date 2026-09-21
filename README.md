@@ -256,7 +256,8 @@ your override file in `$EDITOR`.
 | `defaults.dotfiles.clone_url` | defaults | `yadm clone` URL (optional) |
 | `defaults.dotfiles.authorized_keys_url` | defaults | authorized_keys URL (optional) |
 | `defaults.compaction.auto_compact_at` | defaults | Compact at this fraction of the context window (0 = pi's default) |
-| `defaults.compaction.auto_compact_models` | defaults | Model globs the threshold applies to (empty = all) |
+| `defaults.compaction.auto_compact_models` | defaults | Model globs the fallback threshold applies to (empty = all) |
+| `defaults.compaction.rules` | defaults | Ordered per-model overrides with `models` globs and `auto_compact_at` |
 | `defaults.compaction.keep_recent_tokens` | defaults | Tokens kept verbatim after a compaction (0 = a quarter of the threshold) |
 | `defaults.bash_timeout.default_seconds` | defaults | Deadline on an agent `bash` call that doesn't ask for one (default 30, 0 = unbounded) |
 | `defaults.bash_timeout.max_seconds` | defaults | Cap on an explicit `timeout` (default 600, 0 = uncapped) |
@@ -400,6 +401,37 @@ or as `PIROUETTE_AUTO_COMPACT_AT` / `PIROUETTE_AUTO_COMPACT_MODELS` in the
 server's environment. It re-derives on a model switch, so moving an agent
 from a 1M-token model to a 200k one doesn't leave it compacting every turn.
 `/compact [instructions]` still compacts on demand.
+
+To use different thresholds for different models, add ordered rules:
+
+```toml
+[defaults.compaction]
+auto_compact_at = 0  # unmatched models keep pi's default reserve
+
+[[defaults.compaction.rules]]
+models = ["claude-*"]
+auto_compact_at = 0.4
+
+[[defaults.compaction.rules]]
+models = ["gpt-*"]
+auto_compact_at = 0.8
+```
+
+The first matching rule wins, before the fallback `auto_compact_at` /
+`auto_compact_models` settings. Rule globs match either `provider/model-id`
+or the bare model ID, case-insensitively; use `["*"]` for a catch-all.
+A rule with `auto_compact_at = 0` selects pi's default reserve, not a later
+rule. Existing configurations without rules behave exactly as before.
+`keep_recent_tokens` remains shared; when unset, each model keeps a quarter
+of its own trigger budget.
+
+`PIROUETTE_AUTO_COMPACT_RULES` can replace the rule array with JSON
+(e.g. `'[{"models":["gpt-*"],"auto_compact_at":0.8}]'`); `[]` clears it.
+The existing `PIROUETTE_AUTO_COMPACT_AT` / `PIROUETTE_AUTO_COMPACT_MODELS`
+variables only override the fallback, not explicit rules. Invalid rules are
+skipped with warnings. Restart the server after changing the host policy;
+it is cached for the process lifetime. Hosted sessions use this policy,
+not `compaction` values from standalone pi's `settings.json`.
 
 The dashboard distinguishes successful, failed, and cancelled compactions.
 Failures show the error returned by pi (also recorded in the server log),
@@ -604,7 +636,8 @@ The details that make this hold up in practice:
 | `PIROUETTE_PORT` | `7777` | Server port |
 | `PIROUETTE_DATA_DIR` | `.pirouette/data` | Server data directory |
 | `PIROUETTE_AUTO_COMPACT_AT` | `0` | Compact at this fraction of the context window (overrides config) |
-| `PIROUETTE_AUTO_COMPACT_MODELS` | — | Comma-separated model globs the threshold applies to |
+| `PIROUETTE_AUTO_COMPACT_MODELS` | — | Comma-separated model globs the fallback threshold applies to |
+| `PIROUETTE_AUTO_COMPACT_RULES` | — | JSON array replacing per-model compaction rules (`[]` clears them) |
 | `PIROUETTE_AUTO_COMPACT_KEEP_RECENT_TOKENS` | — | Tokens kept verbatim after a compaction |
 | `PIROUETTE_BASH_TIMEOUT_SECONDS` | `30` | Deadline on an agent `bash` call with no explicit `timeout` (`0` = unbounded) |
 | `PIROUETTE_BASH_MAX_TIMEOUT_SECONDS` | `600` | Cap on an explicit `timeout` (`0` = uncapped) |

@@ -2643,6 +2643,10 @@ export class AgentManager {
             `context window for ${policy.models.length > 0 ? policy.models.join(", ") : "every model"}`,
         );
       }
+      for (const rule of policy.rules ?? []) {
+        const threshold = rule.fraction > 0 ? `${Math.round(rule.fraction * 100)}% of the context window` : "pi's default reserve";
+        console.log(`[agent-manager] auto-compaction rule: ${rule.models.join(", ")} → ${threshold}`);
+      }
       this.compactionPolicy = policy;
     }
     return this.compactionPolicy;

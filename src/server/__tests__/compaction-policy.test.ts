@@ -18,6 +18,7 @@ import {
   PI_DEFAULT_RESERVE_TOKENS,
   policyAppliesTo,
   resolveCompactionPolicy,
+  type CompactionConfig,
 } from "../compaction-policy.js";
 
 /** Pi's trigger, reproduced so the tests assert the thing we actually care
@@ -63,6 +64,132 @@ describe("resolveCompactionPolicy", () => {
     const { policy, warnings } = resolveCompactionPolicy({ auto_compact_at: "soon" }, {});
     expect(policy.fraction).toBe(0);
     expect(warnings).toHaveLength(1);
+  });
+});
+
+describe("per-model compaction rules", () => {
+  const rules = [
+    { models: ["demo/claude-*"], auto_compact_at: 0.4 },
+    { models: ["demo/gpt-*"], auto_compact_at: 0.8 },
+  ];
+  const claude = { provider: "demo", id: "claude-large", contextWindow: 1_000_000 };
+  const gpt = { provider: "demo", id: "gpt-medium", contextWindow: 272_000 };
+
+  it("supports different thresholds without a global fraction", () => {
+    const { policy, warnings } = resolveCompactionPolicy({ rules }, {});
+    expect(warnings).toEqual([]);
+    expect(policy.fraction).toBe(0);
+    expect(policyAppliesTo(policy, claude)).toBe(true);
+    expect(policyAppliesTo(policy, gpt)).toBe(true);
+    expect(compactionSettingsFor(policy, claude)).toEqual({
+      enabled: true, triggerTokens: 400_000, reserveTokens: 600_000, keepRecentTokens: 100_000,
+    });
+    expect(compactionSettingsFor(policy, gpt)).toEqual({
+      enabled: true, triggerTokens: 217_600, reserveTokens: 54_400, keepRecentTokens: 54_400,
+    });
+    expect(compactionSettingsFor(policy, { id: "unmatched", contextWindow: 272_000 }).reserveTokens)
+      .toBe(PI_DEFAULT_RESERVE_TOKENS);
+  });
+
+  it("uses the first matching rule, including a zero that selects pi's defaults", () => {
+    const { policy } = resolveCompactionPolicy({
+      auto_compact_at: 0.6,
+      rules: [
+        { models: "demo/gpt-medium", auto_compact_at: 0 },
+        ...rules,
+        { models: "*", auto_compact_at: 0.7 },
+      ],
+    }, {});
+    expect(policyAppliesTo(policy, gpt)).toBe(false);
+    expect(compactionSettingsFor(policy, gpt).reserveTokens).toBe(PI_DEFAULT_RESERVE_TOKENS);
+    expect(compactionSettingsFor(policy, claude).triggerTokens).toBe(400_000);
+    expect(compactionSettingsFor(policy, { id: "other", contextWindow: 1_000_000 }).triggerTokens).toBe(700_000);
+  });
+
+  it("checks rules before the fallback model filter and retains the fallback for other models", () => {
+    const { policy } = resolveCompactionPolicy({
+      auto_compact_at: 0.5, auto_compact_models: ["claude-*"], rules: [rules[1]],
+    }, {});
+    expect(compactionSettingsFor(policy, gpt).triggerTokens).toBe(217_600);
+    expect(compactionSettingsFor(policy, claude).triggerTokens).toBe(500_000);
+    expect(policyAppliesTo(policy, { id: "other" })).toBe(false);
+  });
+
+  it("matches bare and qualified globs case-insensitively without regex semantics", () => {
+    const { policy } = resolveCompactionPolicy({ rules: [
+      { models: ["GPT-*", "a.b"], auto_compact_at: 0.8 },
+    ] }, {});
+    expect(policyAppliesTo(policy, gpt)).toBe(true);
+    expect(policyAppliesTo(policy, { provider: "other", id: "gpt-test" })).toBe(true);
+    expect(policyAppliesTo(policy, { provider: "a", id: "b" })).toBe(false);
+  });
+
+  it("applies the same percentage and clamp validation to rules", () => {
+    const { policy, warnings } = resolveCompactionPolicy({ rules: [
+      { models: "one", auto_compact_at: 80 },
+      { models: "two", auto_compact_at: 0.99 },
+      { models: "three", auto_compact_at: 0.01 },
+    ] }, {});
+    expect(policy.rules?.map((rule) => rule.fraction)).toEqual([0.8, 0.95, 0.05]);
+    expect(warnings).toHaveLength(2);
+    expect(warnings[0]).toContain("rules[1].auto_compact_at");
+  });
+
+  it("ignores malformed rules without discarding good siblings", () => {
+    const config = { rules: [
+      null, [], "invalid", { models: [], auto_compact_at: 0.8 },
+      { models: [null], auto_compact_at: 0.8 }, { models: ["gpt-*"], auto_compact_at: "soon" },
+      { models: ["gpt-*"] }, ...rules,
+    ] } as unknown as CompactionConfig;
+    const { policy, warnings } = resolveCompactionPolicy(config, {});
+    expect(policy.rules).toHaveLength(2);
+    expect(warnings).toHaveLength(7);
+    expect(compactionSettingsFor(policy, gpt).triggerTokens).toBe(217_600);
+  });
+
+  it("warns about a non-array config instead of failing startup", () => {
+    const { policy, warnings } = resolveCompactionPolicy({ rules: {} } as CompactionConfig, {});
+    expect(policy).toEqual(INERT_POLICY);
+    expect(warnings).toEqual(["ignoring compaction rules: expected an array"]);
+  });
+
+  it("lets JSON environment rules replace or clear configured rules", () => {
+    const env = { PIROUETTE_AUTO_COMPACT_RULES: JSON.stringify([{ models: "gpt-*", auto_compact_at: 0.7 }]) };
+    const { policy } = resolveCompactionPolicy({ rules }, env);
+    expect(compactionSettingsFor(policy, gpt).triggerTokens).toBe(190_400);
+    expect(policyAppliesTo(policy, claude)).toBe(false);
+    expect(resolveCompactionPolicy({ rules }, { PIROUETTE_AUTO_COMPACT_RULES: "[]" }).policy.rules).toEqual([]);
+  });
+
+  it.each(["not JSON", "null", "{}"])("ignores malformed environment rules (%s)", (raw) => {
+    const { policy, warnings } = resolveCompactionPolicy({ rules }, { PIROUETTE_AUTO_COMPACT_RULES: raw });
+    expect(compactionSettingsFor(policy, gpt).triggerTokens).toBe(217_600);
+    expect(warnings).toHaveLength(1);
+  });
+
+  it("keeps rule overrides when environment changes the fallback", () => {
+    const { policy } = resolveCompactionPolicy({ rules }, { PIROUETTE_AUTO_COMPACT_AT: "0.6" });
+    expect(compactionSettingsFor(policy, gpt).triggerTokens).toBe(217_600);
+    expect(compactionSettingsFor(policy, { id: "other", contextWindow: 1_000_000 }).triggerTokens).toBe(600_000);
+  });
+
+  it("recomputes both budgets on model switches and survives settings saves", () => {
+    const { policy } = resolveCompactionPolicy({ rules }, {});
+    const manager = SettingsManager.inMemory({ compaction: { enabled: true } });
+    for (const model of [claude, gpt, claude]) {
+      const settings = compactionSettingsFor(policy, model);
+      applyCompactionSettings(manager, settings);
+      manager.setDefaultModelAndProvider(model.provider, model.id);
+      manager.setDefaultThinkingLevel("high");
+      expect(manager.getCompactionSettings().reserveTokens).toBe(settings.reserveTokens);
+      expect(manager.getCompactionSettings().keepRecentTokens).toBe(settings.keepRecentTokens);
+    }
+  });
+
+  it("still respects keep-recent overrides and minimum reserve guardrails", () => {
+    const { policy } = resolveCompactionPolicy({ rules, keep_recent_tokens: 20000 }, {});
+    expect(compactionSettingsFor(policy, gpt).keepRecentTokens).toBe(20000);
+    expect(compactionSettingsFor(policy, { ...gpt, contextWindow: 32000 }).reserveTokens).toBe(PI_DEFAULT_RESERVE_TOKENS);
   });
 });
 
