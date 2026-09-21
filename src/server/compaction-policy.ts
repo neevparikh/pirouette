@@ -17,10 +17,13 @@
  *  also caps the summary's own `maxTokens` (`0.8 * reserveTokens`, clamped to
  *  the model's `maxTokens`), so making it bigger never starves the summary.
  *
- *  Configuration (later wins):
+ *  Ordered `rules` allow different fractions for different model globs;
+ *  the first match overrides the fallback fraction/model filter.
+ *
+ *  Configuration (env overrides the corresponding config field):
  *    - `[defaults.compaction]` in pirouette.toml / ~/.pirouette/config.toml
  *    - `PIROUETTE_AUTO_COMPACT_AT` / `PIROUETTE_AUTO_COMPACT_MODELS` /
- *      `PIROUETTE_AUTO_COMPACT_KEEP_RECENT_TOKENS`
+ *      `PIROUETTE_AUTO_COMPACT_KEEP_RECENT_TOKENS` / `PIROUETTE_AUTO_COMPACT_RULES`
  *
  *  With no configuration the policy is inert and agents keep pi's defaults.
  */
@@ -44,6 +47,13 @@ const DEFAULT_KEEP_RECENT_RATIO = 0.25;
 const MIN_FRACTION = 0.05;
 const MAX_FRACTION = 0.95;
 
+export interface CompactionRule {
+  /** First matching rule wins; patterns match qualified or bare model IDs. */
+  models: string[];
+  /** 0 restores pi's default reserve for matching models. */
+  fraction: number;
+}
+
 export interface CompactionPolicy {
   /** Fraction of the context window at which auto-compaction fires. 0 (or
    *  unset) leaves pi's default reserve-based trigger alone. */
@@ -54,15 +64,23 @@ export interface CompactionPolicy {
   /** Explicit override for how much recent conversation survives a
    *  compaction. 0 = derive it from the trigger point. */
   keepRecentTokens: number;
+  /** Ordered overrides, checked before the fallback fraction/model filter. */
+  rules?: CompactionRule[];
 }
 
-export const INERT_POLICY: CompactionPolicy = { fraction: 0, models: [], keepRecentTokens: 0 };
+export const INERT_POLICY: CompactionPolicy = { fraction: 0, models: [], keepRecentTokens: 0, rules: [] };
+
+export interface CompactionRuleConfig {
+  models: string[] | string;
+  auto_compact_at: number | string;
+}
 
 /** `[defaults.compaction]` as written in TOML. All fields optional. */
 export interface CompactionConfig {
   auto_compact_at?: number | string;
   auto_compact_models?: string[] | string;
   keep_recent_tokens?: number | string;
+  rules?: CompactionRuleConfig[];
 }
 
 function parseNumber(value: unknown): number | null {
@@ -89,6 +107,49 @@ function parseList(value: unknown): string[] | null {
   return null;
 }
 
+/** Fractions and percentages share the same validation in defaults and rules. */
+function parseFraction(value: unknown, label: string, warnings: string[]): number | null {
+  const parsed = parseNumber(value);
+  if (parsed === null) {
+    warnings.push(`ignoring ${label}=${JSON.stringify(value)}: not a number`);
+    return null;
+  }
+  if (parsed <= 0) return 0;
+  const fraction = parsed > 1 ? parsed / 100 : parsed;
+  const clamped = Math.min(MAX_FRACTION, Math.max(MIN_FRACTION, fraction));
+  if (fraction !== clamped) {
+    warnings.push(`${label}=${parsed} is outside [${MIN_FRACTION}, ${MAX_FRACTION}]; clamped to ${clamped}`);
+  }
+  return clamped;
+}
+
+function parseRules(value: unknown, warnings: string[]): CompactionRule[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    warnings.push("ignoring compaction rules: expected an array");
+    return [];
+  }
+  const rules: CompactionRule[] = [];
+  for (const [i, entry] of value.entries()) {
+    const label = `rules[${i}]`;
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      warnings.push(`ignoring ${label}: expected an object`);
+      continue;
+    }
+    const rawModels = entry.models;
+    const validModels = typeof rawModels === "string" ||
+      (Array.isArray(rawModels) && rawModels.every((model) => typeof model === "string"));
+    const models = validModels ? parseList(rawModels) : null;
+    if (!models?.length) {
+      warnings.push(`ignoring ${label}: models must contain at least one model glob (use "*" to match all)`);
+      continue;
+    }
+    const fraction = parseFraction(entry.auto_compact_at, `${label}.auto_compact_at`, warnings);
+    if (fraction !== null) rules.push({ models, fraction });
+  }
+  return rules;
+}
+
 /** Build the effective policy from `[defaults.compaction]` plus env
  *  overrides. Bad values are ignored (with the reason returned in
  *  `warnings`) rather than failing server startup — a typo in a threshold
@@ -99,25 +160,23 @@ export function resolveCompactionPolicy(
 ): { policy: CompactionPolicy; warnings: string[] } {
   const warnings: string[] = [];
 
-  let fraction = 0;
   const rawFraction = env.PIROUETTE_AUTO_COMPACT_AT ?? config?.auto_compact_at;
-  const parsedFraction = parseNumber(rawFraction);
-  if (rawFraction !== undefined && rawFraction !== "" && parsedFraction === null) {
-    warnings.push(`ignoring auto_compact_at=${JSON.stringify(rawFraction)}: not a number`);
-  } else if (parsedFraction !== null && parsedFraction > 0) {
-    // Accept both "0.4" and "40" (percent) — the second is the mistake
-    // everyone makes at least once.
-    const asFraction = parsedFraction > 1 ? parsedFraction / 100 : parsedFraction;
-    if (asFraction < MIN_FRACTION || asFraction > MAX_FRACTION) {
-      const clamped = Math.min(MAX_FRACTION, Math.max(MIN_FRACTION, asFraction));
-      warnings.push(
-        `auto_compact_at=${parsedFraction} is outside [${MIN_FRACTION}, ${MAX_FRACTION}]; clamped to ${clamped}`,
-      );
-      fraction = clamped;
-    } else {
-      fraction = asFraction;
+  const fraction = rawFraction === undefined || rawFraction === ""
+    ? 0
+    : parseFraction(rawFraction, "auto_compact_at", warnings) ?? 0;
+
+  let rawRules: unknown = config?.rules;
+  const envRules = env.PIROUETTE_AUTO_COMPACT_RULES;
+  if (envRules !== undefined && envRules !== "") {
+    try {
+      const parsed: unknown = JSON.parse(envRules);
+      if (!Array.isArray(parsed)) throw new Error("expected a JSON array");
+      rawRules = parsed;
+    } catch {
+      warnings.push("ignoring PIROUETTE_AUTO_COMPACT_RULES: expected a JSON array; using configured rules");
     }
   }
+  const rules = parseRules(rawRules, warnings);
 
   const rawModels = env.PIROUETTE_AUTO_COMPACT_MODELS ?? config?.auto_compact_models;
   const models = parseList(rawModels) ?? [];
@@ -132,7 +191,7 @@ export function resolveCompactionPolicy(
     keepRecentTokens = Math.round(parsedKeep);
   }
 
-  return { policy: { fraction, models, keepRecentTokens }, warnings };
+  return { policy: { fraction, models, keepRecentTokens, rules }, warnings };
 }
 
 /** Glob match supporting `*` (any run of characters) only — enough for
@@ -146,18 +205,26 @@ function globMatches(pattern: string, value: string): boolean {
   return new RegExp(`^${escaped}$`).test(value.toLowerCase());
 }
 
-/** Whether the policy's fraction applies to this model. An empty model list
- *  means "every model"; otherwise a pattern must match either the qualified
- *  `<provider>/<id>` or the bare `<id>`. */
+function matchesModel(patterns: string[], model: { provider?: string; id?: string }): boolean {
+  const id = model.id ?? "";
+  const qualified = model.provider ? `${model.provider}/${id}` : id;
+  return patterns.some((p) => globMatches(p, qualified) || globMatches(p, id));
+}
+
+/** Ordered rules override the fallback, including its model filter. A zero
+ *  rule deliberately selects pi's defaults instead of falling through. */
+function fractionForModel(policy: CompactionPolicy, model: { provider?: string; id?: string }): number {
+  const rule = policy.rules?.find((candidate) => matchesModel(candidate.models, model));
+  if (rule) return rule.fraction;
+  return policy.models.length === 0 || matchesModel(policy.models, model) ? policy.fraction : 0;
+}
+
+/** Whether an early-compaction threshold is configured for this model. */
 export function policyAppliesTo(
   policy: CompactionPolicy,
   model: { provider?: string; id?: string },
 ): boolean {
-  if (policy.fraction <= 0) return false;
-  if (policy.models.length === 0) return true;
-  const id = model.id ?? "";
-  const qualified = model.provider ? `${model.provider}/${id}` : id;
-  return policy.models.some((p) => globMatches(p, qualified) || globMatches(p, id));
+  return fractionForModel(policy, model) > 0;
 }
 
 /** The slice of pi's SettingsManager this module touches. Structural so the
@@ -222,12 +289,14 @@ export function compactionSettingsFor(
     keepRecentTokens: policy.keepRecentTokens || PI_DEFAULT_KEEP_RECENT_TOKENS,
     triggerTokens: null,
   };
-  if (!model || !policyAppliesTo(policy, model)) return fallback;
+  if (!model) return fallback;
+  const fraction = fractionForModel(policy, model);
+  if (fraction <= 0) return fallback;
 
   const contextWindow = model.contextWindow ?? 0;
   if (!Number.isFinite(contextWindow) || contextWindow <= 0) return fallback;
 
-  const triggerTokens = Math.round(contextWindow * policy.fraction);
+  const triggerTokens = Math.round(contextWindow * fraction);
   const reserveTokens = contextWindow - triggerTokens;
 
   // A trigger point that doesn't leave room for pi's own reserve isn't

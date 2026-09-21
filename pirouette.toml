@@ -78,6 +78,16 @@ auto_compact_models = []
 # it from the threshold (a quarter of it), which scales with the window
 # instead of always dropping back to pi's 20k.
 keep_recent_tokens = 0
+# Optional ordered per-model overrides, checked before the fallback above.
+# First matching rule wins. Use ["*"] for a catch-all; a zero threshold
+# selects pi's defaults. Uncomment these in the host's user config:
+# [[defaults.compaction.rules]]
+# models = ["claude-*"]
+# auto_compact_at = 0.4
+# [[defaults.compaction.rules]]
+# models = ["gpt-*"]
+# auto_compact_at = 0.8
+# Restart the server after changing the policy.
 
 [defaults.bash_timeout]
 # Deadline on every `bash` tool call an agent makes, in seconds. Pi's tool

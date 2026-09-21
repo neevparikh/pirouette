@@ -15,6 +15,7 @@ import {
   selectHostName,
 } from "../config.js";
 import { buildBootstrapEnv } from "../cli/remote/host.js";
+import { compactionSettingsFor, resolveCompactionPolicy } from "../server/compaction-policy.js";
 
 let sandbox: string;
 let prevHome: string | undefined;
@@ -43,6 +44,29 @@ function writeUserConfig(body: string): void {
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, "config.toml"), body);
 }
+
+describe("compaction configuration", () => {
+  it("loads ordered per-model rules from the host's TOML", () => {
+    writeUserConfig(`
+[defaults.compaction]
+auto_compact_at = 0
+
+[[defaults.compaction.rules]]
+models = ["claude-*"]
+auto_compact_at = 0.4
+
+[[defaults.compaction.rules]]
+models = ["gpt-*"]
+auto_compact_at = 0.8
+`);
+    const { config } = loadConfig();
+    const { policy, warnings } = resolveCompactionPolicy(config.defaults.compaction, {});
+    expect(warnings).toEqual([]);
+    expect(policy.rules?.map((rule) => rule.models)).toEqual([["claude-*"], ["gpt-*"]]);
+    expect(compactionSettingsFor(policy, { id: "claude-large", contextWindow: 1_000_000 }).triggerTokens).toBe(400_000);
+    expect(compactionSettingsFor(policy, { id: "gpt-medium", contextWindow: 272_000 }).triggerTokens).toBe(217_600);
+  });
+});
 
 describe("resolveHost — defaults + computed values", () => {
   it("computes home_dir and data_dir from persistent_root + user", () => {
