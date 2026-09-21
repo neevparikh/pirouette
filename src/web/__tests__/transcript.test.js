@@ -306,6 +306,98 @@ describe("reduceEvent", () => {
   });
 });
 
+describe("compaction outcomes", () => {
+  function finish(event) {
+    return reduceEvent(initialTranscriptState(), {
+      type: "compaction_end", reason: "threshold", aborted: false, willRetry: false, ...event,
+    }, 1234);
+  }
+
+  it.each(["manual", "threshold", "overflow"])("shows %s errors, not success", (reason) => {
+    const errorMessage = "Summarization failed: generation hit the token cap and the summary is incomplete";
+    const state = finish({ reason, errorMessage });
+    expect(state.compaction.lastResult).toMatchObject({ errorMessage, result: null });
+    const html = renderTranscript(state, new Set());
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("compaction failed");
+    expect(html).toContain(errorMessage);
+    expect(html).not.toContain("context compacted");
+    expect(html).not.toContain("text-base16-green");
+  });
+
+  it("escapes provider error text instead of treating it as HTML or Markdown", () => {
+    const html = renderTranscript(finish({ errorMessage: '<img src=x onerror="alert(1)"> **error** & failure' }), new Set());
+    expect(html).toContain("&lt;img");
+    expect(html).toContain("&amp; failure");
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("<strong>");
+  });
+
+  it("requires a result before claiming success", () => {
+    const html = renderTranscript(finish({}), new Set());
+    expect(html).toContain("compaction ended without a result");
+    expect(html).not.toContain("context compacted");
+  });
+
+  it("shows success with before/after accounting", () => {
+    const result = { tokensBefore: 120000, estimatedTokensAfter: 23000 };
+    const state = finish({ result });
+    expect(state.compaction.lastResult.result).toEqual(result);
+    const html = renderTranscript(state, new Set());
+    expect(html).toContain("context compacted (automatic threshold)");
+    expect(html).toContain("120,000 → ~23,000 tokens");
+    expect(html).not.toContain("compaction failed");
+  });
+
+  it("doesn't render invalid token accounting", () => {
+    const html = renderTranscript(finish({ result: { tokensBefore: -1, estimatedTokensAfter: NaN } }), new Set());
+    expect(html).toContain("context compacted");
+    expect(html).not.toContain("NaN");
+    expect(html).not.toContain("tokens");
+  });
+
+  it("shows cancellation separately from failure or success", () => {
+    const html = renderTranscript(finish({ aborted: true, reason: "manual" }), new Set());
+    expect(html).toContain("compaction aborted (manual)");
+    expect(html).not.toContain("context compacted");
+    expect(html).not.toContain("compaction failed");
+  });
+
+  it("prioritizes an error over result metadata", () => {
+    const html = renderTranscript(finish({ errorMessage: "failure", result: { tokensBefore: 1 } }), new Set());
+    expect(html).toContain("compaction failed");
+    expect(html).not.toContain("context compacted");
+  });
+
+  it.each([
+    { type: "message_start", role: "assistant" },
+    { type: "message_update", updateType: "text_delta", delta: "working" },
+    { type: "message_end", role: "assistant" },
+    { type: "tool_execution_start", toolName: "read", toolCallId: "one", args: {} },
+    { type: "tool_execution_end", toolName: "read", toolCallId: "one", result: { content: [] } },
+    { type: "queue_update", steering: [], followUp: [] },
+    { type: "agent_end" },
+  ])("keeps failure status through $type", (event) => {
+    const state = reduceEvent(finish({ errorMessage: "summary failed" }), event);
+    expect(renderTranscript(state, new Set())).toContain("summary failed");
+  });
+
+  it("keeps an error through unrelated events and replaces it after successful recovery", () => {
+    let state = finish({ errorMessage: "summary failed" });
+    state = reduceEvent(state, { type: "agent_end" });
+    expect(renderTranscript(state, new Set())).toContain("summary failed");
+    state = reduceEvent(state, { type: "compaction_start", reason: "overflow" });
+    expect(renderTranscript(state, new Set())).toContain("compacting context… (context recovery)");
+    state = reduceEvent(state, {
+      type: "compaction_end", reason: "overflow", aborted: false, willRetry: true,
+      result: { tokensBefore: 120000, estimatedTokensAfter: 23000 },
+    });
+    const html = renderTranscript(state, new Set());
+    expect(html).toContain("context compacted (context recovery)");
+    expect(html).not.toContain("summary failed");
+  });
+});
+
 // --- full mock transcript ---
 
 /** A realistic transcript: user message → assistant thinks → uses bash → replies. */
