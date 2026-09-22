@@ -55,28 +55,32 @@
         scrollbar-color: rgb(var(--color-base16-500)) rgb(var(--color-base16-100));
         scrollbar-gutter: stable;
       }
-      @supports selector(::-webkit-scrollbar) {
-        #messages {
-          /* Non-auto standard colors override the sized pseudo-elements
-             in Chromium. Firefox keeps the native full-width bar above. */
-          scrollbar-color: auto;
-        }
-        #messages::-webkit-scrollbar {
-          width: 20px;
-          height: 20px;
-        }
-        #messages::-webkit-scrollbar-track {
-          background: rgb(var(--color-base16-100));
-        }
-        #messages::-webkit-scrollbar-thumb {
-          min-height: 48px;
-          border: 3px solid rgb(var(--color-base16-100));
-          border-radius: 10px;
-          background: rgb(var(--color-base16-500));
-        }
-        #messages::-webkit-scrollbar-thumb:hover,
-        #messages::-webkit-scrollbar-thumb:active {
-          background: rgb(var(--color-base16-600));
+      /* Let high-contrast mode paint its native scrollbar instead of
+         forcing the custom thumb and track to the same system color. */
+      @media (forced-colors: none) {
+        @supports selector(::-webkit-scrollbar) {
+          #messages {
+            /* Non-auto standard colors override the sized pseudo-elements
+               in Chromium. Firefox keeps the native full-width bar above. */
+            scrollbar-color: auto;
+          }
+          #messages::-webkit-scrollbar {
+            width: 20px;
+            height: 20px;
+          }
+          #messages::-webkit-scrollbar-track {
+            background: rgb(var(--color-base16-100));
+          }
+          #messages::-webkit-scrollbar-thumb {
+            min-height: 48px;
+            border: 3px solid rgb(var(--color-base16-100));
+            border-radius: 10px;
+            background: rgb(var(--color-base16-500));
+          }
+          #messages::-webkit-scrollbar-thumb:hover,
+          #messages::-webkit-scrollbar-thumb:active {
+            background: rgb(var(--color-base16-600));
+          }
         }
       }
 

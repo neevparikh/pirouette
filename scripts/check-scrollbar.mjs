@@ -111,6 +111,13 @@ for (const name of names.length ? names : ["chromium"]) {
     if (name === "chromium") {
       assert.equal((await metrics()).gutter, gutter, `${name}: stable gutter for short transcripts`);
     }
+    if (name === "chromium") {
+      await page.emulateMedia({ forcedColors: "active" });
+      assert.equal(await page.locator("#messages").evaluate((el) => getComputedStyle(el).scrollbarColor),
+        "auto", "high-contrast mode uses system scrollbar colors");
+      assert.equal(await page.locator("#messages").evaluate((el) => getComputedStyle(el, "::-webkit-scrollbar").width),
+        "auto", "high-contrast mode uses the native scrollbar, not custom parts");
+    }
     console.log(`${name}: ${initial.custom ? "20px scrollbar and thumb dragging" : "native scrollbar fallback"}, scoping, themes, and mobile layout passed`);
   } finally {
     await browser.close();
