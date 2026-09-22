@@ -350,6 +350,7 @@ export interface ChatMessage {
   ts: number;
   toolName?: string;
   toolCallId?: string;
+  toolStatus?: "running";
   args?: Record<string, unknown>;
   isError?: boolean;
   /** Inline image attachments. Currently populated for user messages

@@ -85,7 +85,8 @@ describe("describeToolCall", () => {
     const r = describeToolCall("bash", { command: "ls -la", description: "list files" });
     expect(r.header).toBe("list files");
     expect(r.subtitle).toBe("ls -la");
-    expect(r.body).toBe("");
+    expect(r.body).toBe("ls -la");
+    expect(r.language).toBe("bash");
   });
   it("bash with multiline command puts first line in subtitle and full in body", () => {
     const r = describeToolCall("bash", { command: "cd foo\nls\npwd" });
@@ -115,13 +116,19 @@ describe("describeToolCall", () => {
     expect(r.body).toMatch(/- a/);
     expect(r.body).toMatch(/\+ b/);
   });
-  it("write shows line count and preview", () => {
+  it("write shows line count and preserves the full content", () => {
     const content = Array.from({ length: 15 }, (_, i) => `line ${i + 1}`).join("\n");
     const r = describeToolCall("write", { file_path: "/x", content });
     expect(r.subtitle).toBe("/x (15 lines)");
-    expect(r.body).toContain("line 1");
-    expect(r.body).toContain("line 10");
-    expect(r.body).toContain("… (15 lines total)");
+    expect(r.body).toBe(content);
+  });
+  it("edit renders all replacements in a batch", () => {
+    const r = describeToolCall("edit", { path: "x.ts", edits: [
+      { oldText: "old1", newText: "new1" }, { oldText: "old2", newText: "new2" },
+    ] });
+    expect(r.bodyLines).toHaveLength(4);
+    expect(r.body).toContain("- old1");
+    expect(r.body).toContain("+ new2");
   });
   it("grep shows pattern, path, and type filter", () => {
     const r = describeToolCall("grep", {

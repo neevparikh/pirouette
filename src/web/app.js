@@ -21,9 +21,12 @@ import {
 import {
   initialTranscriptState,
   reduceEvent,
+  renderThinkingBody,
   renderTranscriptBlocks,
+  STREAMING_THINKING_KEY,
 } from "./transcript.js";
 import { renderMessageMarkdown } from "./message-markdown.js";
+import { syncMessagePreviews } from "./message-preview.js";
 import { ExtensionUISurface } from "./extension-ui.js";
 import { VimMode } from "./vim.js";
 import { escapeAction } from "./keys.js";
@@ -81,8 +84,12 @@ let fastModeSnapshot = { global: null, byModel: {} };
 let sendMode = /** @type {"steer" | "followUp"} */ (
   localStorage.getItem("pirouette-send-mode") === "followUp" ? "followUp" : "steer"
 );
-/** Tracks which tool-call / result blocks are expanded. */
-const expandedItems = new Set();
+/** Expansion is per agent: index-based user/thinking keys can repeat in chats. */
+const expandedItemsByAgent = new Map();
+function expandedItemsFor(agentId = selectedAgentId) {
+  if (!expandedItemsByAgent.has(agentId)) expandedItemsByAgent.set(agentId, new Set());
+  return expandedItemsByAgent.get(agentId);
+}
 /** @type {Record<string, {tool: string, subtitle?: string, since: number}>} */
 const currentActivity = {};
 let activityTimer = null;
@@ -1380,6 +1387,7 @@ function handleWsMessage(envelope) {
       delete transcriptByAgent[envelope.agentId];
       delete currentActivity[envelope.agentId];
       delete statsByAgent[envelope.agentId];
+      expandedItemsByAgent.delete(envelope.agentId);
       extensionUI.forgetAgent(envelope.agentId);
       if (selectedAgentId === envelope.agentId) {
         selectedAgentId = null;
@@ -1409,9 +1417,7 @@ function handleWsMessage(envelope) {
       delete transcriptByAgent[envelope.agentId];
       delete currentActivity[envelope.agentId];
       historyLoaded[envelope.agentId] = true; // empty server history; skip refetch
-      // expandedItems is keyed by `<agentId>:<idx>` style messageKeys, so
-      // entries from the old session can stay — they just won't match any
-      // new keys. Cheap enough to leave; no reason to scan-and-prune.
+      expandedItemsByAgent.delete(envelope.agentId);
       if (selectedAgentId === envelope.agentId) renderMessages();
       break;
 
@@ -1421,7 +1427,10 @@ function handleWsMessage(envelope) {
       if (agent) {
         agent.state = envelope.state;
         renderAgentList();
-        if (selectedAgentId === envelope.agentId) renderAgentHeader();
+        if (selectedAgentId === envelope.agentId) {
+          renderAgentHeader();
+          renderMessages();
+        }
       }
       if (envelope.state === "idle" || envelope.state === "waiting_input") {
         historyLoaded[envelope.agentId] = false;
@@ -1484,6 +1493,12 @@ function handleWsMessage(envelope) {
 function handleAgentEvent(agentId, event) {
   const prev = stateFor(agentId);
   transcriptByAgent[agentId] = reduceEvent(prev, event);
+  if (event.type === "message_end" && event.role === "assistant" && prev.streamingThinking) {
+    const expanded = expandedItemsFor(agentId);
+    if (expanded.delete(STREAMING_THINKING_KEY)) {
+      expanded.add(`msg:${prev.messages.length}`);
+    }
+  }
 
   if (event.type === "tool_execution_start") {
     const desc = describeToolCall(event.toolName, event.args);
@@ -1574,8 +1589,7 @@ function handleAgentEvent(agentId, event) {
  *  Ordinary Markdown uses the cheap terminal line builder; math uses
  *  sanitized flow HTML with cached KaTeX output for completed equations.
  *
- *  Thinking (`kind = "thinking"`) stays plain-text append-only — it's an
- *  auto-scrolling muted box where markdown structure adds no value.
+ *  Thinking uses the same Markdown renderer, inside an eight-line preview.
  *
  *  If the element doesn't exist yet (first delta of a turn), fall back
  *  to a single full render that creates it. */
@@ -1625,33 +1639,14 @@ function updateStreamingElement(elementId, text, kind) {
     el.innerHTML = rendered;
     el.__pirStreamText = text;
   } else {
-    // Thinking: append-only fast path. The new full text is the previous
-    // text plus some suffix; insert just the suffix before the cursor.
-    const last = el.__pirStreamText ?? "";
-    if (text.startsWith(last) && text.length > last.length) {
-      const suffix = text.slice(last.length);
-      const cursorSpan = el.querySelector(".streaming-cursor, .animate-pulse");
-      const node = document.createTextNode(suffix);
-      if (cursorSpan) {
-        el.insertBefore(node, cursorSpan);
-      } else {
-        el.appendChild(node);
-      }
-      el.__pirStreamText = text;
-    } else if (text !== last) {
-      // Replacement (server resent text out of order, or initial paint).
-      el.textContent = ""; // wipe, then rebuild
-      el.appendChild(document.createTextNode(text));
-      const cursor = document.createElement("span");
-      cursor.className = "animate-pulse text-base16-500 streaming-cursor";
-      cursor.textContent = "▊";
-      el.appendChild(cursor);
-      el.__pirStreamText = text;
-    }
-  }
-
-  if (kind === "thinking") {
-    el.scrollTop = el.scrollHeight;
+    if (text === el.__pirStreamText) return;
+    const hadFocus = el.contains(document.activeElement);
+    el.innerHTML = renderThinkingBody(text, STREAMING_THINKING_KEY, expandedItemsFor(), {
+      widthCols: measureBubbleWidthCols(),
+    }, true);
+    el.__pirStreamText = text;
+    syncMessagePreviews(el);
+    if (hadFocus) el.querySelector("button[data-toggle]")?.focus({ preventScroll: true });
   }
 
   // Outer scroll follow: only if the user was already near the bottom of
@@ -2354,10 +2349,11 @@ function renderMessages() {
       // Width is re-measured on resize via the ResizeObserver below.
       const cols = measureBubbleWidthCols();
       _lastRenderWidthCols = cols;
-      blocks = renderTranscriptBlocks(state, expandedItems, {
+      blocks = renderTranscriptBlocks(state, expandedItemsFor(), {
         rawAssistant: rawView,
         agentId: selectedAgentId,
         widthCols: cols,
+        agentRunning: agents.find((a) => a.id === selectedAgentId)?.state === "running",
       });
     }
   }
@@ -2375,6 +2371,7 @@ function renderMessages() {
   });
 
   reconcileBlocks($messages, blocks);
+  syncMessagePreviews($messages);
 
   if (stick) scrollToBottom();
 
@@ -3850,9 +3847,8 @@ $rawBtn.addEventListener("click", () => {
 });
 applyRawBtnStyle();
 
-// Delegated click handler for `data-toggle` chevrons (tool runs, thinking
-// expanders, tool-row body expanders). Attached once at startup so we
-// don't have to re-bind after every reconciliation pass. Walks up from
+// Delegated click handler for message/thinking/tool preview controls.
+// Attached once so we don't re-bind after every reconciliation pass. Walks up from
 // the click target to the first element carrying `data-toggle` since the
 // toggle attribute lives on a sub-row, not the message wrapper.
 // A deliberate scroll gesture in the transcript beats the open-at-bottom
@@ -3871,9 +3867,18 @@ $messages.addEventListener("click", (e) => {
   if (!target || !$messages.contains(target)) return;
   const key = target.getAttribute("data-toggle");
   if (!key) return;
-  if (expandedItems.has(key)) expandedItems.delete(key);
-  else expandedItems.add(key);
+  const expanded = expandedItemsFor();
+  if (expanded.has(key)) expanded.delete(key);
+  else expanded.add(key);
   renderMessages();
+  // Reconciliation replaces the row. Keep keyboard focus on the new button
+  // so Enter/Space can collapse it again without tabbing through the page.
+  for (const button of $messages.querySelectorAll("button[data-toggle]")) {
+    if (button.getAttribute("data-toggle") === key) {
+      button.focus({ preventScroll: true });
+      break;
+    }
+  }
 });
 
 // Load the theme manifest in the background — the picker is populated

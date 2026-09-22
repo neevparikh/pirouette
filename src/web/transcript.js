@@ -6,11 +6,14 @@ import {
   describeToolResult,
   escHtml,
   hidesToolResultBody,
+  parseToolArgs,
   relTime,
   shortenPath,
 } from "./render.js";
 import { renderMessageMarkdown } from "./message-markdown.js";
+import { renderMessagePreview } from "./message-preview.js";
 import { isRasterDataUrl } from "./content-policy.js";
+import { renderToolBody, toolLanguageFromPath, toolResultLanguage } from "./tool-content.js";
 
 /**
  * @typedef {Object} ChatMessage
@@ -22,6 +25,7 @@ import { isRasterDataUrl } from "./content-policy.js";
  * @property {Record<string, unknown>} [args]
  * @property {boolean} [isError]
  * @property {boolean} [streaming]
+ * @property {"running"|"completed"|"failed"|"unknown"} [toolStatus]
  */
 
 /**
@@ -73,6 +77,12 @@ export function reduceEvent(state, event, now) {
   let streamingThinking = state.streamingThinking;
 
   switch (event.type) {
+    case "agent_end":
+      return {
+        ...state,
+        messages: messages.map((msg) => msg.toolStatus === "running" ? { ...msg, toolStatus: "unknown" } : msg),
+      };
+
     case "queue_update": {
       // Pi emits queue_update whenever the session's steering / follow-up
       // queues change — either because the user added a message during a
@@ -171,6 +181,7 @@ export function reduceEvent(state, event, now) {
             toolName: event.toolName,
             toolCallId: event.toolCallId,
             args: event.args,
+            toolStatus: "running",
             ts,
           },
         ],
@@ -188,13 +199,12 @@ export function reduceEvent(state, event, now) {
           .map((c) => c.text)
           .join("\n");
       }
-      if (resultText.length > 2000) {
-        resultText = resultText.slice(0, 2000) + "\n…(truncated)";
-      }
       return {
         ...state,
         messages: [
-          ...messages,
+          ...messages.map((msg) => msg.role === "tool" && event.toolCallId && msg.toolCallId === event.toolCallId
+            ? { ...msg, toolStatus: event.isError ? "failed" : "completed" }
+            : msg),
           {
             role: "tool_result",
             content: resultText,
@@ -355,7 +365,7 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     return `
       <div class="message-enter pi-row pi-row-user flex flex-col gap-1 px-4 py-3" data-msg-key="${wrapKey}">
         ${imagesHtml}
-        ${userBody}
+        ${userBody ? renderMessagePreview(userBody, wrapKey, expanded, "message") : ""}
       </div>`;
   }
 
@@ -388,61 +398,29 @@ export function renderMessage(msg, idx, expandedItems, opts) {
   }
 
   if (msg.role === "thinking") {
-    // Streaming path: render a simple auto-scrolling live box so the
-    // text keeps flowing without triggering layout churn. The id is
-    // stable so app.js can update the innerHTML in place on each
-    // thinking_delta.
-    //
-    // Pi-cli prints thinking lines as italic + muted at the same size
-    // as surrounding prose. We match by inheriting the transcript's
-    // 14 px / 20 px rhythm via `.pi-row-thinking` (no text-[11px]).
-    if (msg.streaming) {
-      return `
-        <div class="message-enter pi-row pi-row-thinking px-4 py-1" data-msg-key="${wrapKey}">
-          <div class="italic text-base16-500 mb-1">thinking…</div>
-          <pre id="streaming-thinking-body" class="text-base16-500 italic whitespace-pre-wrap max-h-48 overflow-y-auto">${escHtml(msg.content)}<span class="animate-pulse text-base16-500">▊</span></pre>
-        </div>`;
-    }
-    // Finalized path: first-line preview + expand/collapse for the rest.
-    const key = messageKey(msg, idx);
-    const isExpanded = expanded.has(key);
-    const preview = msg.content.split("\n")[0].slice(0, 120);
-    const hasMore = msg.content.length > preview.length;
-    const chevron = hasMore ? `<span class="text-base16-500 ml-auto">${isExpanded ? "▼" : "▶"}</span>` : "";
     return `
-      <div class="message-enter pi-row pi-row-thinking px-4 py-1" data-msg-key="${key}">
-        <div class="flex items-baseline gap-2 italic cursor-pointer hover:bg-base16-200/50 rounded px-1 py-0.5" data-toggle="${hasMore ? key : ""}">
-          <span class="text-base16-500">thinking</span>
-          <span class="text-base16-500 truncate italic">${escHtml(preview)}${hasMore && !isExpanded ? "…" : ""}</span>
-          ${chevron}
-        </div>
-        ${hasMore ? `<pre class="mt-1 text-base16-500 italic whitespace-pre-wrap ${isExpanded ? "" : "hidden"}" data-expand="${key}">${escHtml(msg.content)}</pre>` : ""}
+      <div class="message-enter pi-row pi-row-thinking px-4 py-1" data-msg-key="${escHtml(wrapKey)}">
+        <div class="italic text-base16-500 mb-1">thinking${msg.streaming ? "…" : ""}</div>
+        <div${msg.streaming ? ' id="streaming-thinking-body"' : ""} class="thinking-content">${renderThinkingBody(msg.content, wrapKey, expanded, opts, msg.streaming)}</div>
       </div>`;
   }
 
-  // Tool / tool_result rows: pi-cli renders these inline in the
-  // transcript, ALWAYS expanded, NO chevron. Color is the only
-  // differentiator from assistant prose:
-  //   - tool name -> cyan accent (text-base16-cyan)
-  //   - args / subtitle -> muted (text-base16-500)
-  //   - body / output -> muted (text-base16-500)
-  //   - assistant prose stays at default (~ text-base16-700)
-  // No bg-tint, no border bar, no fold. The whole row is read-only;
-  // the user can't collapse a tool body, matching pi-cli's behavior.
   if (msg.role === "tool") {
     const desc = describeToolCall(msg.toolName, msg.args);
     const key = messageKey(msg, idx);
-    const hasBody = desc.body && desc.body.length > 0;
-    const bodyHtml = !hasBody
-      ? ""
-      : desc.bodyIsRich
-        ? `<div class="mt-1">${desc.body}</div>`
-        : `<pre class="mt-1 text-base16-500 whitespace-pre-wrap">${escHtml(desc.body)}</pre>`;
+    const args = parseToolArgs(msg.args);
+    const language = desc.language || (msg.toolName?.toLowerCase() === "write"
+      ? toolLanguageFromPath(args?.path || args?.file_path) : "");
+    const status = msg.toolStatus === "running" && opts?.agentRunning === false ? "unknown" : msg.toolStatus;
+    const bodyHtml = renderToolBody({ ...desc, language, key, expanded, label: "Input" });
+    // Bash commands live in the highlighted body, not a duplicated/truncated subtitle.
+    const subtitle = msg.toolName?.toLowerCase() === "bash" ? "" : desc.subtitle;
     return `
-      <div class="message-enter pi-row pi-row-tool pi-row-tool-call px-4 py-1" data-msg-key="${key}">
-        <div class="flex items-baseline gap-2">
+      <div class="message-enter pi-row pi-row-tool pi-row-tool-call px-4 py-1" data-msg-key="${escHtml(key)}">
+        <div class="tool-header">
           <span class="text-base16-cyan font-semibold">${escHtml(desc.header)}</span>
-          ${desc.subtitle ? `<span class="text-base16-500 truncate">${escHtml(desc.subtitle)}</span>` : ""}
+          ${subtitle ? `<span class="tool-subtitle">${escHtml(subtitle)}</span>` : ""}
+          ${renderToolStatus(status)}
         </div>
         ${bodyHtml}
       </div>`;
@@ -450,8 +428,6 @@ export function renderMessage(msg, idx, expandedItems, opts) {
 
   if (msg.role === "tool_result") {
     const isError = !!msg.isError;
-    const icon = isError ? "✗" : "✓";
-    const color = isError ? "text-base16-red" : "text-base16-green";
     const contentStr = typeof msg.content === "string" ? msg.content : String(msg.content ?? "");
     const summary = describeToolResult(msg.toolName, contentStr, isError);
     const key = messageKey(msg, idx);
@@ -461,29 +437,24 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     const hasBody =
       contentStr.trim().length > 0 && !hidesToolResultBody(msg.toolName, isError);
     const toolName = msg.toolName || "done";
-    // Images render alongside the text body. The text body is always
-    // visible (no chevron gate) so pi-cli's auto-expand semantics
-    // hold for both text + image content.
+    // Image attachments stay visible independently of the text preview.
     const imagesHtml = renderInlineImages(msg.images);
     const hasImages = imagesHtml.length > 0;
     const bodyHtml = hasBody
-      ? `<pre class="mt-1 text-base16-500 whitespace-pre-wrap">${escHtml(contentStr)}</pre>`
+      ? renderToolBody({ body: contentStr, language: toolResultLanguage(msg.toolName, msg.args, contentStr, isError), key, expanded, label: "Output" })
       : "";
     const imagesWrap = hasImages ? `<div class="mt-1">${imagesHtml}</div>` : "";
     const imageLabelSuffix = hasImages
       ? ` <span class="text-base16-500">· ${msg.images.length} image${msg.images.length === 1 ? "" : "s"}</span>`
       : "";
-    // No icon glyph -- per user request, the green ✓ / red ✗ marker
-    // is dropped. Tool name still uses the cyan accent for success;
-    // errors switch the name to red so the failure signal isn't
-    // lost. Summary stays muted.
     const nameClass = isError ? "text-base16-red font-semibold" : "text-base16-cyan font-semibold";
     return `
-      <div class="message-enter pi-row pi-row-tool pi-row-tool-result px-4 py-1" data-msg-key="${key}">
-        <div class="flex items-baseline gap-2">
+      <div class="message-enter pi-row pi-row-tool pi-row-tool-result px-4 py-1" data-msg-key="${escHtml(key)}">
+        <div class="tool-header">
           <span class="${nameClass}">${escHtml(toolName)}</span>
           ${summary ? `<span class="text-base16-500">— ${escHtml(summary)}</span>` : ""}
           ${imageLabelSuffix}
+          ${renderToolStatus(isError ? "failed" : "completed")}
         </div>
         ${bodyHtml}
         ${imagesWrap}
@@ -500,20 +471,27 @@ export function renderMessage(msg, idx, expandedItems, opts) {
   return "";
 }
 
-// v0.12.6 dropped the collapsible "X tool calls" grouping widget --
-// pi-cli has no such concept. Tool/tool_result messages now render as
-// individual flat rows in the transcript, with per-row chevrons for
-// expanding long bodies. `isToolRow` / `summarizeToolRun` /
-// `renderToolRun` helpers were removed alongside.
+/** Shared by the initial row and incremental thinking updates. Markdown and
+ * folding stay identical while streaming and after a turn is finalized. */
+export function renderThinkingBody(text, key, expanded, opts, streaming = false) {
+  const body = renderMessageMarkdown(text, {
+    widthCols: opts?.widthCols,
+    cursor: streaming ? '<span class="animate-pulse text-base16-500 streaming-cursor">▊</span>' : "",
+  });
+  return renderMessagePreview(body, key, expanded, "thinking");
+}
+
+function renderToolStatus(status) {
+  const label = { running: "Running", completed: "Completed", failed: "Failed" }[status] || "No result";
+  const state = ["running", "completed", "failed"].includes(status) ? status : "unknown";
+  return `<span class="tool-status tool-status-${state}"${state === "running" ? ' role="status"' : ""}>${state === "running" ? '<span class="tool-spinner" aria-hidden="true"></span>' : ""}${label}</span>`;
+}
 
 /** Render a full transcript (final messages + in-flight streaming).
  *  Returns an HTML string.
  *
- *  Groups consecutive tool/tool_result messages into collapsible runs.
- *  A run that's followed by any non-tool message (assistant, user, system)
- *  is considered *completed* and renders collapsed by default. A run that
- *  reaches the end of the transcript is *live* (agent's current turn) and
- *  renders expanded so the user can watch work happen in real time.
+ *  Tool inputs and outputs each show a compact preview by default; keys in
+ *  expandedItems reveal their full content, independently of other rows.
  *
  *  Pass `opts.rawAssistant = true` to render every assistant message as its
  *  plain markdown source instead of rendered HTML (global raw-view toggle).
@@ -559,10 +537,26 @@ export function renderTranscriptBlocks(state, expandedItems, opts) {
   const blocks = [];
   const msgs = state.messages;
 
+  // Join by call ID, not adjacency: parallel tools can finish out of order.
+  // History has no live status field; a matching result is proof of completion.
+  const calls = new Map();
+  const results = new Map();
+  for (const msg of msgs) {
+    if (!msg.toolCallId) continue;
+    if (msg.role === "tool") calls.set(msg.toolCallId, msg);
+    if (msg.role === "tool_result") results.set(msg.toolCallId, msg);
+  }
   for (let i = 0; i < msgs.length; i++) {
+    let msg = msgs[i];
+    const result = msg.toolCallId && results.get(msg.toolCallId);
+    if (msg.role === "tool" && result) {
+      msg = { ...msg, toolStatus: result.isError ? "failed" : "completed" };
+    } else if (msg.role === "tool_result" && msg.toolCallId) {
+      msg = { ...msg, args: calls.get(msg.toolCallId)?.args };
+    }
     blocks.push({
-      key: messageKey(msgs[i], i),
-      html: renderMessage(msgs[i], i, expanded, renderOpts),
+      key: messageKey(msg, i),
+      html: renderMessage(msg, i, expanded, renderOpts),
     });
   }
 
