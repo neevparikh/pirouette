@@ -201,6 +201,8 @@ export interface AgentHandle {
   config: AgentConfig;
   session: AgentSession;
   unsubscribe: () => void;
+  /** Calls with a start event but no end event, for dashboard history reloads. */
+  activeToolCalls?: Set<string>;
   /** The session's settings manager. Held so model switches can recompute
    *  the auto-compaction threshold, which is derived from the model's
    *  context window (see compaction-policy.ts). */
@@ -1127,6 +1129,7 @@ export class AgentManager {
               content: `▶ ${tc.name}`,
               toolName: tc.name,
               toolCallId: tc.id,
+              ...(handle?.activeToolCalls?.has(tc.id) ? { toolStatus: "running" as const } : {}),
               args: tc.arguments,
               ts: msg.timestamp,
             });
@@ -1159,16 +1162,12 @@ export class AgentManager {
           .filter((p) => p.type === "text")
           .map((p) => p.text ?? "")
           .join("\n");
-        // Truncate long tool output for the chat view
-        const truncated =
-          textContent.length > 2000
-            ? textContent.slice(0, 2000) + "\n…(truncated)"
-            : textContent;
+        // The dashboard collapses long output without discarding its contents.
         // Tool results can also include images (e.g. a screenshot tool).
         const images = pickImageContent(msg.content);
         result.push({
           role: "tool_result",
-          content: truncated || (msg.isError ? "✗ error" : "✓ done"),
+          content: textContent,
           toolName: msg.toolName,
           toolCallId: msg.toolCallId,
           isError: msg.isError,
@@ -2687,6 +2686,16 @@ export class AgentManager {
     if (event.type === "compaction_end" && event.errorMessage && !event.aborted) {
       console.error(`[agent-manager] compaction failed for ${agentId} (${event.reason}): ${event.errorMessage}`);
     }
+    if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
+      const handle = this.handles.get(agentId);
+      if (handle) {
+        if (event.type === "tool_execution_start") {
+          (handle.activeToolCalls ??= new Set()).add(event.toolCallId);
+        } else {
+          handle.activeToolCalls?.delete(event.toolCallId);
+        }
+      }
+    }
     this.emitEvent(agentId, normalized);
 
     // Track state transitions based on events
@@ -2698,6 +2707,7 @@ export class AgentManager {
       // instead of the more neutral `idle`. This gives the UI a signal it
       // can use for "this agent wants your attention" indicators.
       const handle = this.handles.get(agentId);
+      handle?.activeToolCalls?.clear();
       const hasHistory = (handle?.session.messages.length ?? 0) > 0;
       this.setAgentState(agentId, hasHistory ? "waiting_input" : "idle");
     }

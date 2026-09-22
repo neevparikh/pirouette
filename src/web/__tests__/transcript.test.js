@@ -124,7 +124,7 @@ describe("reduceEvent", () => {
     });
   });
 
-  it("truncates very long tool output", () => {
+  it("retains long tool output for expansion", () => {
     const huge = "x".repeat(3000);
     const s = reduceEvent(initialTranscriptState(), {
       type: "tool_execution_end",
@@ -133,8 +133,7 @@ describe("reduceEvent", () => {
       isError: false,
       result: { content: [{ type: "text", text: huge }] },
     });
-    expect(s.messages[0].content.length).toBeLessThan(huge.length);
-    expect(s.messages[0].content).toContain("…(truncated)");
+    expect(s.messages[0].content).toBe(huge);
   });
 
   it("marks errors on tool_execution_end", () => {
@@ -665,9 +664,8 @@ describe("renderMessage", () => {
       0,
     );
     expect(html).toContain("thinking");
-    // Collapsed body has the hidden class
-    expect(html).toMatch(/data-expand=/);
-    expect(html).toMatch(/hidden/);
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('class="message-preview-body is-collapsed"');
   });
 
   it("thinking expands when key is in expandedItems", () => {
@@ -676,12 +674,11 @@ describe("renderMessage", () => {
     const expanded = new Set([messageKey(msg, 0)]);
     const collapsedHtml = renderMessage(msg, 0, new Set());
     const expandedHtml = renderMessage(msg, 0, expanded);
-    // Collapsed has `hidden`, expanded does not.
-    expect(collapsedHtml).toMatch(/<pre class="[^"]*\bhidden\b/);
-    expect(expandedHtml).not.toMatch(/<pre class="[^"]*\bhidden\b/);
-    // Expanded chevron should point down.
-    expect(expandedHtml).toContain("▼");
-    expect(collapsedHtml).toContain("▶");
+    expect(collapsedHtml).toContain('class="message-preview-body is-collapsed"');
+    expect(expandedHtml).not.toContain("is-collapsed");
+    expect(expandedHtml).toContain('aria-expanded="true"');
+    expect(expandedHtml).toContain("Show less");
+    expect(collapsedHtml).toContain("Show all");
   });
 
   it("system message renders in orange warning style", () => {

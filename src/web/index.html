@@ -410,7 +410,7 @@
            - A tool call and its immediately-following tool result
              fuse into one block (no gap between them) because they
              belong to the same logical operation.
-         No left bars, no chevrons, no per-row borders. */
+         Long tool bodies have per-row expand controls. */
       .pi-row {
         /* Default gap above each row. Big enough that two
            same-class blocks (e.g. tool_result -> next tool_call, or
@@ -467,6 +467,34 @@
       .pi-row-assistant,
       .pi-row-thinking,
       .pi-row-system { }
+
+      /* Tool content shares the theme's code palette and a fixed line rhythm.
+         Horizontal scrolling keeps long lines from defeating the 8-line preview. */
+      .tool-header { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.25rem 0.5rem; }
+      .tool-subtitle { color: rgb(var(--color-base16-500)); overflow-wrap: anywhere; min-width: 0; }
+      .tool-content { margin-top: 0.35rem; }
+      .tool-content-label { font-size: 10px; line-height: 18px; text-transform: uppercase; letter-spacing: 0.06em; color: rgb(var(--color-base16-500)); }
+      .tool-body { overflow-x: auto; color: rgb(var(--color-base16-600)); }
+      .tool-code, .tool-rich-lines { margin: 0; font-size: 13px; line-height: 20px; white-space: pre; }
+      .tool-code code { font: inherit; background: transparent; padding: 0; }
+      .tool-rich-lines > div { font-size: inherit; line-height: inherit; }
+      .tool-rich-lines .diff-line { white-space: pre; }
+      .message-preview-body { line-height: 20px; }
+      .message-preview-body.is-collapsed { max-height: 160px; overflow: hidden; }
+      .message-preview-body .md { line-height: inherit; }
+      .message-expand[hidden] { display: none; }
+      .thinking-content { color: rgb(var(--color-base16-500)); }
+      .tool-expand, .message-expand { display: block; padding: 0.25rem 0; color: rgb(var(--color-base16-cyan)); font-size: 12px; cursor: pointer; }
+      .tool-expand:hover, .message-expand:hover { text-decoration: underline; }
+      .tool-expand:focus-visible, .message-expand:focus-visible { outline: 2px solid rgb(var(--color-base16-cyan)); outline-offset: 2px; }
+      .tool-status { display: inline-flex; align-items: center; gap: 0.35rem; margin-left: auto; padding: 0 0.4rem; border-radius: 0.25rem; font-size: 11px; line-height: 20px; white-space: nowrap; }
+      .tool-status-running { color: rgb(var(--color-base16-yellow)); background: rgb(var(--color-base16-yellow) / 0.12); }
+      .tool-status-completed { color: rgb(var(--color-base16-green)); background: rgb(var(--color-base16-green) / 0.10); }
+      .tool-status-failed { color: rgb(var(--color-base16-red)); background: rgb(var(--color-base16-red) / 0.12); }
+      .tool-status-unknown { color: rgb(var(--color-base16-500)); }
+      .tool-spinner { width: 0.7rem; height: 0.7rem; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: tool-spin 0.8s linear infinite; }
+      @keyframes tool-spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) { .tool-spinner { animation: none; } }
 
       /* Syntax highlighting — base16-mapped hljs classes, following the
        * same palette conventions as neevparikh.github.io's Shiki setup.

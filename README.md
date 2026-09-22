@@ -368,6 +368,23 @@ the *next* press is the tell for the blur-and-swallow behaviour above.
 `defaultPrevented: true` means something outside the page claimed the key
 but let it through — the dashboard interrupts anyway.
 
+### Tool calls in chat
+
+Tool inputs and outputs show up to eight lines by default. **Show all**
+expands a long command, file, diff, checklist, or result; **Show less** folds
+it back without discarding the remaining content. Long lines scroll
+horizontally. Commands, JSON, and supported source files use theme-aware
+syntax highlighting; logs and unknown file types stay plain text.
+
+Each tool has an explicit **Running**, **Completed**, or **Failed** label.
+Running tools include a spinner (static with reduced-motion preferences).
+A call without a known result or live execution is labelled **No result**,
+not assumed successful. Input and output expansion are independent.
+
+Long user messages and thinking traces also default to an eight-line preview,
+measured after wrapping so a pasted paragraph stays compact on mobile.
+Thinking renders Markdown both during streaming and after completion.
+
 ### Math in chat
 
 The dashboard renders LaTeX math with KaTeX: `\(...\)` or `$...$` inline,

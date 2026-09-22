@@ -314,7 +314,8 @@ export function parseToolArgs(args) {
 
 /**
  * Given a tool name and parsed args, return a display object.
- * { header, subtitle, body, bodyIsRich }
+ * { header, subtitle, body, bodyIsRich, bodyLines?, language? }
+ * Rich bodies expose individually rendered lines for compact previews.
  */
 export function describeToolCall(toolName, args) {
   const parsed = parseToolArgs(args);
@@ -333,8 +334,9 @@ export function describeToolCall(toolName, args) {
       subtitle: oneLine
         ? cmd
         : cmd.split("\n")[0].slice(0, 80) + (cmd.length > 80 ? "…" : ""),
-      body: oneLine ? "" : cmd,
+      body: cmd,
       bodyIsRich: false,
+      language: "bash",
     };
   }
 
@@ -350,12 +352,15 @@ export function describeToolCall(toolName, args) {
 
   if (name === "edit") {
     const p = parsed.file_path || parsed.path || "";
-    const oldStr = parsed.old_string || parsed.oldText || "";
-    const newStr = parsed.new_string || parsed.newText || "";
+    const edits = Array.isArray(parsed.edits) ? parsed.edits : [parsed];
+    const bodyLines = edits.filter((edit) => edit && typeof edit === "object").flatMap((edit) =>
+      renderDiffLines(edit.old_string || edit.oldText || "", edit.new_string || edit.newText || ""),
+    );
     return {
       header: "edit",
       subtitle: shortenPath(p),
-      body: renderDiff(oldStr, newStr),
+      body: bodyLines.join(""),
+      bodyLines,
       bodyIsRich: true,
     };
   }
@@ -364,13 +369,10 @@ export function describeToolCall(toolName, args) {
     const p = parsed.file_path || parsed.path || "";
     const content = parsed.content || "";
     const lines = content.split("\n");
-    const preview = lines.slice(0, 10).join("\n");
-    const body =
-      lines.length > 10 ? `${preview}\n… (${lines.length} lines total)` : preview;
     return {
       header: "write",
       subtitle: `${shortenPath(p)} (${lines.length} lines)`,
-      body,
+      body: content,
       bodyIsRich: false,
     };
   }
@@ -385,10 +387,12 @@ export function describeToolCall(toolName, args) {
     if (op === "read" || todos.length === 0) {
       return { header: "todos", subtitle: op, body: "", bodyIsRich: false };
     }
+    const bodyLines = todos.map((todo) => renderTodoList([todo]));
     return {
       header: "todos",
       subtitle: todoProgress(todos),
-      body: renderTodoList(todos),
+      body: bodyLines.join(""),
+      bodyLines,
       bodyIsRich: true,
     };
   }
@@ -415,7 +419,7 @@ export function describeToolCall(toolName, args) {
 
   // Generic tool — pretty-print args
   const body = Object.keys(parsed).length > 0 ? JSON.stringify(parsed, null, 2) : "";
-  return { header: toolName || "tool", subtitle: "", body, bodyIsRich: false };
+  return { header: toolName || "tool", subtitle: "", body, bodyIsRich: false, language: "json" };
 }
 
 /**
@@ -520,7 +524,7 @@ export function renderTodoList(todos) {
     const cls = TODO_CLASSES[todo.status];
     const icon = TODO_ICONS[todo.status];
     const label = todo.id === undefined || todo.id === null ? "" : `${todo.id}. `;
-    html += `<div><span class="${cls.icon}">${icon}</span> <span class="${cls.title}">${escHtml(label + todo.title)}</span></div>`;
+    html += `<div><span class="${cls.icon}">${icon}</span> <span class="${cls.title}">${escHtml(label + todo.title.replace(/[\r\n]+/g, " "))}</span></div>`;
   }
   html += "</div>";
   return html;
@@ -530,18 +534,14 @@ export function renderTodoList(todos) {
 
 /** Render a simple line-level diff between old and new strings. */
 export function renderDiff(oldStr, newStr) {
-  const oldLines = (oldStr || "").split("\n");
-  const newLines = (newStr || "").split("\n");
+  return `<div class="font-mono text-[11px] leading-5">${renderDiffLines(oldStr, newStr).join("")}</div>`;
+}
 
-  let html = '<div class="font-mono text-[11px] leading-5">';
-  for (const line of oldLines) {
-    html += `<span class="diff-line diff-del">- ${escHtml(line) || "&nbsp;"}</span>`;
-  }
-  for (const line of newLines) {
-    html += `<span class="diff-line diff-add">+ ${escHtml(line) || "&nbsp;"}</span>`;
-  }
-  html += "</div>";
-  return html;
+function renderDiffLines(oldStr, newStr) {
+  return [
+    ...String(oldStr ?? "").split("\n").map((line) => `<span class="diff-line diff-del">- ${escHtml(line) || "&nbsp;"}</span>`),
+    ...String(newStr ?? "").split("\n").map((line) => `<span class="diff-line diff-add">+ ${escHtml(line) || "&nbsp;"}</span>`),
+  ];
 }
 
 // --- relative time ---
