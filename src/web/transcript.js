@@ -399,8 +399,8 @@ export function renderMessage(msg, idx, expandedItems, opts) {
 
   if (msg.role === "thinking") {
     return `
-      <div class="message-enter pi-row pi-row-thinking px-4 py-1" data-msg-key="${escHtml(wrapKey)}">
-        <div class="italic text-base16-500 mb-1">thinking${msg.streaming ? "…" : ""}</div>
+      <div class="message-enter pi-row pi-row-thinking px-4 py-2" data-msg-key="${escHtml(wrapKey)}">
+        <div class="thinking-label">thinking${msg.streaming ? "…" : ""}</div>
         <div${msg.streaming ? ' id="streaming-thinking-body"' : ""} class="thinking-content">${renderThinkingBody(msg.content, wrapKey, expanded, opts, msg.streaming)}</div>
       </div>`;
   }
