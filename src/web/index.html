@@ -142,6 +142,17 @@
         font-feature-settings: "calt" 1, "zero" 1;
       }
 
+      /* ...but never in editable text. Chromium reshapes only around the
+         edit point on each keystroke, which corrupts calt-based
+         ligatures: typing `...` / `---` / `->` one key at a time left two
+         blank spacer cells followed by a single `.` / `-` / `>`.
+         Programmatically set values rendered fine, so only typed input
+         was affected. Plain glyphs are also easier to put a caret in. */
+      textarea, input, [contenteditable] {
+        font-variant-ligatures: none;
+        font-feature-settings: "calt" 0, "liga" 0, "zero" 1;
+      }
+
       /* Markdown rendering rules
        * -------------------------
        * Goal: match pi-coding-agent's TUI markdown look as closely as
