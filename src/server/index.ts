@@ -730,6 +730,27 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
             error(res, 400, "message is required");
             return;
           }
+          // Resolve the sender before touching the recipient, so a bad
+          // `from` fails cleanly rather than half-delivering. The stored
+          // name is the sender's name *now*; renames later don't rewrite
+          // history, but the id in the header stays valid for replies.
+          let from: { id: string; name: string } | undefined;
+          if (body.from !== undefined) {
+            if (typeof body.from !== "string" || !body.from) {
+              error(res, 400, "from must be an agent id or name");
+              return;
+            }
+            const sender = agentManager.resolveAgentRef(body.from);
+            if (!sender) {
+              error(res, 400, `Unknown sender agent "${body.from}"`);
+              return;
+            }
+            if ("ambiguous" in sender) {
+              error(res, 400, `Ambiguous sender "${body.from}"; use the agent id`);
+              return;
+            }
+            from = { id: sender.id, name: sender.name };
+          }
           if (!agentManager.isRunning(agentId)) {
             try {
               await agentManager.resumeAgent(agentId);
@@ -788,7 +809,7 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
             }
             images = body.images;
           }
-          agentManager.sendMessage(agentId, body.message, { mode, images }).catch((err) => {
+          agentManager.sendMessage(agentId, body.message, { mode, images, from }).catch((err) => {
             console.error(`[server] sendMessage error for ${agentId}: ${err}`);
             broadcast({
               kind: "error",

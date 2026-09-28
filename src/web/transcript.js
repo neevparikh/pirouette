@@ -26,6 +26,8 @@ import { renderToolBody, toolLanguageFromPath, toolResultLanguage } from "./tool
  * @property {boolean} [isError]
  * @property {boolean} [streaming]
  * @property {"running"|"completed"|"failed"|"unknown"} [toolStatus]
+ * @property {{ id: string, name: string }} [from]
+ *           On a user row: another agent sent it, not the user.
  */
 
 /**
@@ -247,6 +249,19 @@ function appendUserMessage(state, event, ts) {
   // the transcript would be worse than skipping it.
   if (!content && images.length === 0) return state;
 
+  // From another agent: never the echo of something this tab typed, so it
+  // must not confirm a pending optimistic row with the same text.
+  const from = agentSender(event.from);
+  if (from) {
+    return {
+      ...state,
+      messages: [
+        ...state.messages,
+        { role: "user", content, ts, from, ...(images.length > 0 ? { images } : {}) },
+      ],
+    };
+  }
+
   const pendingIdx = state.messages.findIndex(
     (m) => m.role === "user" && m.pending && m.content === content,
   );
@@ -264,6 +279,13 @@ function appendUserMessage(state, event, ts) {
       { role: "user", content, ts, ...(images.length > 0 ? { images } : {}) },
     ],
   };
+}
+
+/** `{id, name}` of an agent sender, or null if `from` isn't one. */
+function agentSender(from) {
+  if (!from || typeof from !== "object") return null;
+  if (typeof from.id !== "string" || typeof from.name !== "string") return null;
+  return { id: from.id, name: from.name };
 }
 
 /** Apply a sequence of events to an initial (or provided) state. */
@@ -362,8 +384,17 @@ export function renderMessage(msg, idx, expandedItems, opts) {
         userBody = `<pre class="whitespace-pre-wrap">${escHtml(msg.content)}</pre>`;
       }
     }
+    // A message from another agent gets its own tint and a label naming
+    // the sender (a button that opens that chat), so it doesn't read as
+    // something the user typed.
+    const from = agentSender(msg.from);
+    const rowClass = from ? "pi-row-agent-msg" : "pi-row-user";
+    const fromHtml = from
+      ? `<div class="agent-msg-label">from agent <button type="button" class="agent-msg-sender" data-open-agent="${escHtml(from.id)}" title="Open ${escHtml(from.name)} (${escHtml(from.id)})">${escHtml(from.name)}</button></div>`
+      : "";
     return `
-      <div class="message-enter pi-row pi-row-user flex flex-col gap-1 px-4 py-3" data-msg-key="${wrapKey}">
+      <div class="message-enter pi-row ${rowClass} flex flex-col gap-1 px-4 py-3" data-msg-key="${wrapKey}">
+        ${fromHtml}
         ${imagesHtml}
         ${userBody ? renderMessagePreview(userBody, wrapKey, expanded, "message") : ""}
       </div>`;

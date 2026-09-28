@@ -34,4 +34,12 @@ describe("packaged skills", () => {
     expect(handoff!.description.length).toBeGreaterThan(40);
     expect(handoff!.disableModelInvocation).toBe(false);
   });
+
+  it("includes the agent-messaging skill", () => {
+    const { skills } = loadSkillsFromDir({ dir: packagedSkillsDir(), source: "pirouette" });
+    const messaging = skills.find((s) => s.name === "agent-messaging");
+    expect(messaging).toBeDefined();
+    expect(messaging!.description).toContain("pru send");
+    expect(messaging!.disableModelInvocation).toBe(false);
+  });
 });

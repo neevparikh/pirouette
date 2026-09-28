@@ -498,6 +498,30 @@
            amber/terracotta tint instead. */
         background: rgb(var(--color-base16-green) / 0.03);
       }
+      /* A message another agent sent (`pru send` from inside an agent).
+         Blue rather than the user's green, with a left rule and a
+         "from agent <name>" label, so a peer's request can't be mistaken
+         for something the user typed. */
+      .pi-row-agent-msg {
+        background: rgb(var(--color-base16-blue) / 0.07);
+        box-shadow: inset 3px 0 0 rgb(var(--color-base16-blue) / 0.65);
+      }
+      .agent-msg-label {
+        color: rgb(var(--color-base16-blue));
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .agent-msg-sender {
+        text-transform: none;
+        letter-spacing: normal;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+        cursor: pointer;
+      }
+      .agent-msg-sender:focus-visible { outline: 1px solid rgb(var(--color-base16-blue)); outline-offset: 2px; }
+      .pi-row-agent-msg .message-expand { color: rgb(var(--color-base16-blue)); }
       /* Thinking is a separate, theme-aware panel rather than assistant
          output. Inset borders preserve the Markdown renderer's text width. */
       .pi-row-thinking {

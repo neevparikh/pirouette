@@ -157,8 +157,15 @@ const event = (agentId, ev) => ({ kind: "agent_event", agentId, event: ev });
 const userMessage = (agentId, text, images) =>
   event(agentId, { type: "message_end", role: "user", text, ...(images ? { images } : {}) });
 
+// Message text only: long-message previews add a "Show all" button.
 const userRows = (page) =>
-  page.$$eval(".pi-row-user", (els) => els.map((el) => el.textContent.trim()));
+  page.$$eval(".pi-row-user", (els) =>
+    els.map((el) => {
+      const copy = el.cloneNode(true);
+      copy.querySelectorAll("button").forEach((b) => b.remove());
+      return copy.textContent.trim();
+    }),
+  );
 
 /** Wait for the envelope to cross the socket and paint. */
 const settle = (page) => page.waitForTimeout(250);
@@ -242,6 +249,35 @@ await withDashboard(async (page, stub) => {
     "render inline",
     await page.$$eval(".pi-row-user img", (els) => els.map((el) => el.getAttribute("src"))),
     [PIXEL],
+  );
+});
+
+console.log("a message from another agent:");
+await withDashboard(async (page, stub) => {
+  // `pru send` run inside second-chat, as the server normalizes it.
+  stub.broadcast(
+    event("agent-1", {
+      type: "message_end",
+      role: "user",
+      text: "please review my branch",
+      from: { id: "agent-2", name: "second-chat" },
+    }),
+  );
+  await settle(page);
+  expect("is not drawn as the user", await userRows(page), []);
+  expect(
+    "is labelled with the sender",
+    await page.$$eval(".pi-row-agent-msg", (els) =>
+      els.map((el) => [el.querySelector(".agent-msg-sender")?.textContent, el.textContent.includes("please review my branch")]),
+    ),
+    [["second-chat", true]],
+  );
+  await page.click(".agent-msg-sender");
+  await settle(page);
+  expect(
+    "and the label opens the sender's chat",
+    await page.$eval('[data-agent-row="agent-2"]', (el) => el.className.includes("font-semibold")),
+    true,
   );
 });
 

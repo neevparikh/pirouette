@@ -185,6 +185,25 @@ describe("reduceEvent", () => {
     expect(s1.messages).toEqual([{ role: "user", content: "hi", ts: 1 }]);
   });
 
+  it("keeps the sender on a message from another agent", () => {
+    const from = { id: "a1b2c3d4", name: "parent" };
+    const s1 = reduceEvent(initialTranscriptState(), { type: "message_end", role: "user", text: "do X", from }, 7);
+    expect(s1.messages).toEqual([{ role: "user", content: "do X", ts: 7, from }]);
+  });
+
+  it("does not let an agent's message confirm the user's pending one", () => {
+    const s0 = {
+      ...initialTranscriptState(),
+      messages: [{ role: "user", content: "hi", ts: 1, pending: true }],
+    };
+    const from = { id: "a1b2c3d4", name: "parent" };
+    const s1 = reduceEvent(s0, { type: "message_end", role: "user", text: "hi", from }, 7);
+    expect(s1.messages).toEqual([
+      { role: "user", content: "hi", ts: 1, pending: true },
+      { role: "user", content: "hi", ts: 7, from },
+    ]);
+  });
+
   it("confirms one pending message per echo when the same text is sent twice", () => {
     const s0 = {
       ...initialTranscriptState(),
@@ -538,6 +557,18 @@ describe("renderMessage", () => {
     );
     expect(html).toContain("<img");
     expect(html).toContain('src="data:image/png;base64,XYZ"');
+  });
+
+  it("a message from another agent is labelled with its sender, not drawn as the user", () => {
+    const html = renderMessage(
+      { role: "user", content: "run it", ts: 0, from: { id: "a1b2c3d4", name: "<b>parent</b>" } },
+      0,
+    );
+    expect(html).toContain("pi-row-agent-msg");
+    expect(html).not.toContain("pi-row-user");
+    expect(html).toContain('data-open-agent="a1b2c3d4"');
+    expect(html).toContain("&lt;b&gt;parent&lt;/b&gt;");
+    expect(html).toContain("run it");
   });
 
   it("user message renders as a flat pi-cli row with escaped content", () => {

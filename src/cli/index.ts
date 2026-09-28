@@ -100,8 +100,14 @@ program
   .action(status);
 
 program
-  .command("send <agent> <message>")
-  .description("Send a message to an agent")
+  .command("send <agent> [message]")
+  .description(
+    "Send a message to an agent. From inside an agent it is sent as that agent " +
+      "(labelled with the sender, with a reply hint); from a human shell, as the user.",
+  )
+  .option("-f, --message-file <path>", "Read the message from a file")
+  .option("--follow-up", "If the agent is mid-turn, queue until the turn ends instead of steering")
+  .option("--as-user", "Send as the user even from inside an agent")
   .action(send);
 
 program

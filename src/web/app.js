@@ -3863,6 +3863,14 @@ for (const evt of ["wheel", "touchmove"]) {
 }
 
 $messages.addEventListener("click", (e) => {
+  // "from agent <name>" on a message another agent sent: open that chat.
+  // Skipped if the sender has since been removed.
+  const sender = e.target.closest("[data-open-agent]");
+  if (sender && $messages.contains(sender)) {
+    const id = sender.getAttribute("data-open-agent");
+    if (id && agents.some((a) => a.id === id)) selectAgent(id);
+    return;
+  }
   const target = e.target.closest("[data-toggle]");
   if (!target || !$messages.contains(target)) return;
   const key = target.getAttribute("data-toggle");

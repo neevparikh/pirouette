@@ -284,7 +284,7 @@ overridden per host under `[hosts.<name>.dotfiles]`.
 |---|---|
 | `pru launch <name>` | Create a new pi agent (`--project`, `--model`, `--thinking` optional) |
 | `pru list` | List all agents and their state (`--archived` includes archived ones) |
-| `pru send <agent> <msg>` | Send a message to an agent |
+| `pru send <agent> <msg>` | Send a message to an agent (`--message-file`, `--follow-up`; from inside an agent it's signed as that agent, `--as-user` to opt out) |
 | `pru interrupt <agent>` | Cancel the agent's current turn; the session stays alive |
 | `pru handoff [agent]` | Replace an agent with a fresh one in the same worktree (defaults to self) |
 | `pru rename <agent> <name>` | Rename a chat (display name only; one argument renames self) |
@@ -475,6 +475,16 @@ conversation, which is the point — use `/fork` when you want the history.
 
 Deleting either agent with `--worktree` leaves the shared worktree alone as
 long as the other still points at it.
+
+**Agents talking to agents.** `pru send` run from inside an agent is sent
+*as that agent*. The recipient gets it as a new turn headed with who sent
+it and the `pru send <id>` command to reply with, and the dashboard shows
+it as a blue "from agent <name>" row (the name opens that chat) rather than
+as something you typed. From your own shell `pru send` is still a plain
+user message, and `--as-user` forces that from inside an agent. Under the
+hood it's a pi custom message, which pi hands the model as a user turn, so
+it works with any provider. The packaged `agent-messaging` skill teaches
+agents to delegate, brief, check a helper actually started, and reply.
 
 ### Runaway commands: the bash deadline
 
