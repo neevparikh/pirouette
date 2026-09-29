@@ -7,6 +7,13 @@ follow [SemVer](https://semver.org).
 
 ## Unreleased — self-update actually brings the agents back
 
+### Fixed
+
+- **The model and theme pickers no longer get covered by autofill.** Their
+  search boxes had browser autofill on, so focusing one opened the browser's
+  own white history popup on top of the picker list. Autofill, autocorrect,
+  autocapitalize and spellcheck are now off on both.
+
 ### Added
 
 - **`pru archive` exists.** The dashboard could archive a chat and handoff
