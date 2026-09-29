@@ -41,6 +41,13 @@ import {
   keepSharedExtensionRuntimeActive,
   type ExtensionsResult,
 } from "./extension-runtime.js";
+import {
+  AGENT_MESSAGE_TYPE,
+  agentMessageDetails,
+  agentMessageText,
+  type AgentMessageDetails,
+  type AgentMessageSender,
+} from "./agent-message.js";
 import { createWorktree, removeWorktree } from "./git.js";
 import { resolveAgentModel } from "./model-resolution.js";
 import { setupWorktreeDataTools } from "./worktree-setup.js";
@@ -1174,6 +1181,21 @@ export class AgentManager {
           ts: msg.timestamp,
           ...(images.length > 0 ? { images } : {}),
         });
+      } else if (msg.role === "custom") {
+        // Agent-to-agent messages render as a user-style row labelled with
+        // the sender, showing the body without the model-facing header.
+        // Other custom types (extension bookkeeping) stay hidden.
+        const agentMessage = agentMessageDetails(msg);
+        if (agentMessage) {
+          const images = pickImageContent(msg.content);
+          result.push({
+            role: "user",
+            content: agentMessage.body,
+            from: agentMessage.from,
+            ts: msg.timestamp,
+            ...(images.length > 0 ? { images } : {}),
+          });
+        }
       } else if (msg.role === "compactionSummary") {
         result.push({
           role: "system",
@@ -1181,7 +1203,7 @@ export class AgentManager {
           ts: msg.timestamp,
         });
       }
-      // Skip bashExecution, branchSummary, custom, thinking — not needed in chat
+      // Skip bashExecution, branchSummary, other custom types, thinking — not needed in chat
     }
 
     return result;
@@ -1851,6 +1873,10 @@ export class AgentManager {
        *  Pi's `ImageContent` shape is `{ type: "image", data, mimeType }`;
        *  callers pass us the raw `{ data, mimeType }` and we wrap. */
       images?: Array<{ data: string; mimeType: string }>;
+      /** Set when another agent sent this (`pru send` from inside an
+       *  agent). Delivered as an agent-message custom entry instead of a
+       *  user message — see agent-message.ts. */
+      from?: AgentMessageSender;
     } = {},
   ): Promise<void> {
     // Critical: do NOT hold the agent lock across `await session.prompt()`.
@@ -1906,6 +1932,47 @@ export class AgentManager {
         handle.config.errorMessage = null;
       }
       this.setAgentState(id, "running");
+
+      if (opts.from) {
+        // A peer's message. Custom messages skip pi's prompt pipeline
+        // (extension commands, prompt templates, `input` /
+        // `before_agent_start` hooks) — deliberately for commands: one
+        // agent shouldn't be able to run `/fast` in another. Idle: this
+        // starts a turn and resolves when it ends, like prompt(), so box
+        // it. Streaming: a quick enqueue onto the steer/follow-up queue.
+        //
+        // The `input` hook we run by hand: it's where extensions screen
+        // prompts (e.g. stripping hidden characters), and text relayed by
+        // another agent is exactly what should be screened.
+        const screened = await this.screenAgentMessageInput(handle, message, images, mode);
+        if (screened.blocked) {
+          return {
+            promptPromise: Promise.reject(
+              new Error(`message from agent ${opts.from.name} was blocked by an extension`),
+            ),
+          };
+        }
+        const body = screened.text;
+        const content = [
+          { type: "text" as const, text: agentMessageText(opts.from, body) },
+          ...(screened.images ?? []),
+        ];
+        const custom = {
+          customType: AGENT_MESSAGE_TYPE,
+          content,
+          display: true,
+          details: { from: opts.from, body } satisfies AgentMessageDetails,
+        };
+        console.log(
+          `[agent-manager] delivering agent message from ${opts.from.name} (${opts.from.id})` +
+            (handle.session.isStreaming ? ` as ${mode}` : " as a new turn"),
+        );
+        if (handle.session.isStreaming) {
+          await handle.session.sendCustomMessage(custom, { deliverAs: mode });
+          return null;
+        }
+        return { promptPromise: handle.session.sendCustomMessage(custom, { triggerTurn: true }) };
+      }
 
       // Pi's API quirk: prompt() takes options object `{images}`, but
       // steer/followUp take a plain `images` arg as the 2nd parameter.
@@ -1966,6 +2033,36 @@ export class AgentManager {
     } else {
       console.log(`[agent-manager] ${mode} enqueued for ${id}`);
     }
+  }
+
+  /** Run an agent message through extensions' `input` hooks, which
+   *  `sendCustomMessage` bypasses. Mirrors what `prompt()` does with the
+   *  result: "handled" swallows the message, "transform" replaces it.
+   *  Reached through pi's private `_extensionRunner` (as
+   *  `isExtensionCommand` does); if it isn't there, nothing to run. */
+  private async screenAgentMessageInput(
+    handle: AgentHandle,
+    text: string,
+    images: Array<{ type: "image"; data: string; mimeType: string }> | undefined,
+    mode: "steer" | "followUp",
+  ): Promise<{ blocked: boolean; text: string; images: typeof images }> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const runner = (handle.session as any)._extensionRunner;
+    if (!runner || typeof runner.emitInput !== "function") return { blocked: false, text, images };
+    if (typeof runner.hasHandlers === "function" && !runner.hasHandlers("input")) {
+      return { blocked: false, text, images };
+    }
+    const result = await runner.emitInput(
+      text,
+      images,
+      "rpc",
+      handle.session.isStreaming ? mode : undefined,
+    );
+    if (result?.action === "handled") return { blocked: true, text, images };
+    if (result?.action === "transform") {
+      return { blocked: false, text: result.text, images: result.images ?? images };
+    }
+    return { blocked: false, text, images };
   }
 
   /** A `prompt()` that rejected without the turn ever starting (bad auth,

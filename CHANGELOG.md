@@ -9,6 +9,22 @@ follow [SemVer](https://semver.org).
 
 ### Added
 
+- **Agents can tell a peer's message from the user's.** `pru send` from
+  inside an agent used to arrive as an ordinary user message, so the
+  recipient (and anyone reading its transcript) took a delegating agent's
+  words for the user's. It is now sent as the calling agent: the CLI reads
+  the sender from `PI_SESSION_FILE`, the server delivers it as a
+  `pirouette-agent-message` custom message, and the model sees a header
+  naming the sender, saying it wasn't typed by the user, and giving the
+  `pru send <id>` command to reply with. Pi maps custom messages to user
+  turns for the model, so every provider handles them. The dashboard draws
+  them as a blue "from agent <name>" row whose name opens the sender's
+  chat. A peer can't trigger slash commands this way.
+
+  `pru send` also gains `--message-file`, `--follow-up` and `--as-user`,
+  and a new packaged `agent-messaging` skill covers delegating, briefing,
+  checking a helper started, and replying.
+
 - **`pru archive` exists.** The dashboard could archive a chat and handoff
   archived one for you, but the CLI had no verb for it, so the only way to
   get a finished chat out of the way from a shell was `pru rm` — which

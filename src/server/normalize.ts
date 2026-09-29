@@ -5,6 +5,7 @@
 
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { NormalizedEvent } from "./types.js";
+import { agentMessageDetails } from "./agent-message.js";
 
 function normalizeMessageText(content: unknown): string | undefined {
   if (typeof content === "string") return content;
@@ -93,6 +94,21 @@ export function normalizeEvent(event: AgentSessionEvent): NormalizedEvent {
     case "message_start":
     case "message_end": {
       const content = (event.message as { content?: unknown }).content;
+      // A message from another agent (see agent-message.ts). Sent to the
+      // client as a user row plus `from`, with the sender's own text
+      // rather than the model-facing header — the same shape
+      // `getMessages()` returns, so live and history render alike.
+      const agentMessage = agentMessageDetails(event.message);
+      if (agentMessage) {
+        const images = event.type === "message_end" ? userMessageImages(content) : [];
+        return {
+          type: event.type,
+          role: "user",
+          text: agentMessage.body,
+          from: agentMessage.from,
+          ...(images.length > 0 ? { images } : {}),
+        };
+      }
       if (event.message.role === "user") {
         // User messages are rendered straight from the event stream (that's
         // how a message from `pru send`, from another agent, or from a

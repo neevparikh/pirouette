@@ -322,6 +322,11 @@ export interface SendMessageRequest {
   /** Image attachments. Forwarded into pi's `session.prompt({images})`
  *  so the model sees them as part of this user message. */
   images?: InboundImage[];
+  /** Id (or unique name) of the agent sending this. `pru send` sets it
+   *  when run from inside an agent. The message is then delivered as an
+   *  agent message — labelled with the sender, not shown as the user —
+   *  instead of a user message. Unknown senders are rejected (400). */
+  from?: string;
 }
 
 /** What an interrupt actually cancelled. Mirrors the things pi's TUI
@@ -360,6 +365,10 @@ export interface ChatMessage {
    *  -- same way pi's JSONL session file stores them. Cap at
    *  MAX_IMAGES_PER_MESSAGE * MAX_IMAGE_BYTES on the inbound side. */
   images?: ChatImage[];
+  /** On a `user` row: set when another agent sent it rather than the
+   *  user. `content` is then the sender's text without the header the
+   *  model sees. */
+  from?: { id: string; name: string };
 }
 
 /** A single image attachment formatted for the frontend. */
