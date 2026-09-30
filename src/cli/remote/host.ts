@@ -12,7 +12,8 @@
 
 import { execFileSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
-import { readdirSync, renameSync, unlinkSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -424,14 +425,7 @@ export class Host {
     execFileSync("npm", ["run", "build"], { cwd: repoRoot, stdio: "inherit" });
 
     console.log("npm pack...");
-    const packOut = execFileSync("npm", ["pack", "--json"], {
-      cwd: repoRoot,
-      stdio: ["ignore", "pipe", "inherit"],
-    }).toString();
-    const parsed = JSON.parse(packOut) as Array<{ filename: string }>;
-    const tarballName = parsed[0]?.filename;
-    if (!tarballName) throw new Error("npm pack did not report a filename");
-    const onDisk = findTarball(repoRoot, tarballName);
+    const onDisk = packTarball(repoRoot);
 
     const remoteDir = remoteTarballsDir(c.persistent_root);
     const remoteName = path.basename(onDisk);
@@ -450,11 +444,7 @@ export class Host {
     console.log("restarting server...");
     await this.restartServer();
 
-    try {
-      unlinkSync(onDisk);
-    } catch {
-      /* best effort */
-    }
+    rmSync(path.dirname(onDisk), { recursive: true, force: true });
 
     console.log("  sync complete.");
     console.log("  pru logs     # verify it came back up");
@@ -556,20 +546,29 @@ export function validateLines(raw: string | undefined): string {
   return String(Math.floor(n));
 }
 
-function findTarball(dir: string, reported: string): string {
-  const reportedPath = path.join(dir, reported);
-  const flat = reported.replace(/^@/, "").replace("/", "-");
-  const flatPath = path.join(dir, flat);
-  for (const p of [reportedPath, flatPath]) {
-    try {
-      readdirSync(path.dirname(p));
-      renameSync(p, p);
-      return p;
-    } catch {
-      /* keep looking */
+/** `npm pack` the package at `dir` into a fresh temp directory and return the
+ *  tarball's path. The caller owns (and should remove) its parent directory.
+ *
+ *  We locate the tarball on disk rather than parsing `npm pack --json`: npm
+ *  runs `prepare` during pack (npm 10.9 does so even with --ignore-scripts)
+ *  and lifecycle-script output goes to the same stdout as the JSON, so the
+ *  build's log lines made the JSON unparseable. */
+export function packTarball(dir: string): string {
+  const dest = mkdtempSync(path.join(os.tmpdir(), "pirouette-pack-"));
+  try {
+    execFileSync("npm", ["pack", "--ignore-scripts", "--pack-destination", dest], {
+      cwd: dir,
+      stdio: ["ignore", "inherit", "inherit"],
+    });
+    const tarballs = readdirSync(dest).filter((f) => f.endsWith(".tgz"));
+    if (tarballs.length !== 1) {
+      throw new Error(`expected one tarball from npm pack in ${dest}, found ${tarballs.length}`);
     }
+    return path.join(dest, tarballs[0]!);
+  } catch (err) {
+    rmSync(dest, { recursive: true, force: true });
+    throw err;
   }
-  throw new Error(`could not locate npm pack output (tried ${reportedPath}, ${flatPath})`);
 }
 
 function findPackageRoot(): string {
