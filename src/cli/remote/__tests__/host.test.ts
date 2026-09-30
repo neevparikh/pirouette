@@ -1,12 +1,16 @@
-/** Unit tests for the pure helpers in host.ts: shell quoting, the `pru logs`
+/** Unit tests for the helpers in host.ts: shell quoting, the `pru logs`
  *  `--lines` validator, and the logs command builder. These are the only bits
  *  of host.ts that don't require a live SSH connection — and shellQuote /
  *  validateLines are the only guards on values interpolated into remote
  *  shell commands, so they're worth pinning down. */
 
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
-import { Host, shellQuote, validateLines } from "../host.js";
+import { Host, packTarball, shellQuote, validateLines } from "../host.js";
 import type { EffectiveHostConfig } from "../../../config.js";
 
 function hostCfg(over: Partial<EffectiveHostConfig> = {}): EffectiveHostConfig {
@@ -95,5 +99,29 @@ describe("buildLogsCommand", () => {
 
   it("rejects a bad --lines value", () => {
     expect(() => host.buildLogsCommand({ lines: "nope" })).toThrow(/--lines/);
+  });
+});
+
+describe("packTarball", () => {
+  it("returns the tarball path even when a lifecycle script writes to stdout", () => {
+    const pkgDir = mkdtempSync(path.join(os.tmpdir(), "pirouette-pack-test-"));
+    let tarball: string | undefined;
+    try {
+      writeFileSync(
+        path.join(pkgDir, "package.json"),
+        JSON.stringify({
+          name: "@scope/pack-fixture",
+          version: "1.2.3",
+          scripts: { prepare: "echo '  vendored something (not json)'" },
+        }),
+      );
+      writeFileSync(path.join(pkgDir, "index.js"), "");
+      tarball = packTarball(pkgDir);
+      expect(path.basename(tarball)).toBe("scope-pack-fixture-1.2.3.tgz");
+      expect(existsSync(tarball)).toBe(true);
+    } finally {
+      rmSync(pkgDir, { recursive: true, force: true });
+      if (tarball) rmSync(path.dirname(tarball), { recursive: true, force: true });
+    }
   });
 });
