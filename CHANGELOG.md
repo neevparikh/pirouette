@@ -9,6 +9,15 @@ follow [SemVer](https://semver.org).
 
 ### Fixed
 
+- **It's now clear what's a link in the transcript.** Underline is reserved
+  for clickable links: h1/h2 headings are no longer underlined (every heading
+  level now shows its `#` prefix instead), and links whose URL isn't
+  clickable (`file:`, `javascript:` …) render as plain text rather than
+  blue-and-underlined. The `(url)` shown after a `[text](url)` link is now a
+  link too, instead of dead grey text. Links get a pointer cursor and a hover
+  state, and a link that wraps across words is one `<a>` so the whole thing
+  highlights. Wrapping no longer splits `(`, a URL and `)` across lines.
+
 - **The model and theme pickers no longer get covered by autofill.** Their
   search boxes had browser autofill on, so focusing one opened the browser's
   own white history popup on top of the picker list. Autofill, autocorrect,

@@ -148,7 +148,21 @@ export function wrapRuns(runs, width) {
     curW = 0;
   }
 
-  for (const tok of tokens) {
+  // Width of the "word" starting at each token: consecutive non-ws
+  // tokens from different runs (e.g. `(` + link + `)`, or `**bold**.`)
+  // have no break opportunity between them, so wrap them as a unit.
+  const wordWidth = new Array(tokens.length).fill(0);
+  for (let k = tokens.length - 1; k >= 0; k--) {
+    if (tokens[k].isWs) continue;
+    wordWidth[k] = tokens[k].width + (k + 1 < tokens.length ? wordWidth[k + 1] : 0);
+  }
+
+  for (let k = 0; k < tokens.length; k++) {
+    const tok = tokens[k];
+    const wordStart = !tok.isWs && (k === 0 || tokens[k - 1].isWs);
+    if (wordStart && curW > 0 && curW + wordWidth[k] > width && wordWidth[k] <= width) {
+      flush();
+    }
     // Long unbreakable token -- char-by-char break
     if (tok.width > width && !tok.isWs) {
       if (cur.length > 0) flush();
@@ -235,12 +249,26 @@ export function inlineToRuns(tokens, classes = []) {
         // "text (href)". For mailto: strip the prefix when comparing.
         const hrefForCmp = href.startsWith("mailto:") ? href.slice(7) : href;
         const showUrlParens = href && innerText !== href && innerText !== hrefForCmp;
-        out.push({ text: innerText, classes: classes.concat("pi-link"), href });
+        // Only style something as a link if it will actually render as a
+        // clickable <a>. Unsafe/unsupported schemes (file:, javascript:,
+        // relative paths ...) render as plain text so nothing looks
+        // clickable that isn't.
+        const clickable = !!safeLinkUrl(href);
+        if (clickable) {
+          out.push({ text: innerText, classes: classes.concat("pi-link"), href });
+        } else {
+          out.push({ text: innerText, classes });
+        }
         if (showUrlParens) {
-          out.push({
-            text: ` (${href})`,
-            classes: classes.concat("pi-link-url"),
-          });
+          // The URL in parens is clickable too (same target), styled as a
+          // muted link, so a visible URL is never dead text.
+          out.push({ text: " (", classes });
+          if (clickable) {
+            out.push({ text: href, classes: classes.concat("pi-link", "pi-link-url"), href });
+          } else {
+            out.push({ text: href, classes: classes.concat("pi-link-url-plain") });
+          }
+          out.push({ text: ")", classes });
         }
         break;
       }
@@ -279,9 +307,28 @@ export function inlineToRuns(tokens, classes = []) {
 
 // ---------- runs → HTML ----------
 
+/** Merge adjacent runs that point at the same link (wrapRuns splits a
+ *  link into one run per word) so each visual link is a single <a>:
+ *  hover/focus highlight the whole link, not one word of it. */
+function mergeLinkRuns(runs) {
+  const out = [];
+  for (const run of runs) {
+    const prev = out[out.length - 1];
+    if (
+      prev && run.href && prev.href === run.href && !prev._isHtml && !run._isHtml &&
+      (prev.classes || []).join(" ") === (run.classes || []).join(" ")
+    ) {
+      out[out.length - 1] = { ...prev, text: prev.text + run.text };
+    } else {
+      out.push(run);
+    }
+  }
+  return out;
+}
+
 function runsToHtml(runs) {
   let out = "";
-  for (const run of runs) {
+  for (const run of mergeLinkRuns(runs)) {
     if (!run.text) continue;
     const cls =
       run.classes && run.classes.length ? run.classes.join(" ") : "";
@@ -332,16 +379,14 @@ function renderHeading(token, width) {
   const level = Math.max(1, Math.min(6, token.depth || 1));
   const baseClasses = ["pi-heading", `pi-h${level}`];
   const inner = inlineToRuns(token.tokens || []);
-  let runs;
-  if (level >= 3) {
-    const prefix = "#".repeat(level) + " ";
-    runs = [
-      { text: prefix, classes: baseClasses },
-      ...withClasses(inner, baseClasses),
-    ];
-  } else {
-    runs = withClasses(inner, baseClasses);
-  }
+  // Every level gets its literal `#` prefix. pi-tui underlines h1/h2
+  // instead, but in the dashboard underline is reserved for clickable
+  // links, so an underlined heading reads as a link.
+  const prefix = "#".repeat(level) + " ";
+  const runs = [
+    { text: prefix, classes: baseClasses.concat("pi-heading-marker") },
+    ...withClasses(inner, baseClasses),
+  ];
   return wrapRuns(runs, width);
 }
 

@@ -167,7 +167,7 @@
        *     (`->`, `!=`, `>=`, `|>`) kick in across the whole UI.
        *   - Headings: bold + yellow, with explicit `### ` prefix on
        *     h3+ (mirrors pi's TUI which always prints the `#` marker
-       *     for sub-headings). h1 also underlined.
+       *     for sub-headings). Underline is reserved for links.
        *   - Blockquotes: left bar `│` styling, italic, muted color.
        *   - Tables: compact, single-cell-pixel borders that visually
        *     approximate pi-tui's box-drawing (`┌─┬─┐` etc.).
@@ -209,11 +209,10 @@
       .md p + p { margin-top: 0.75rem; }
       /* Headings
          --------
-         pi-tui prints `# `, `## `, `### ` literally for h1–h6 (h1 and
-         h2 styled bold/underline; h3+ also get the explicit prefix in
-         the body text). We replicate via ::before content so the
-         visual fidelity matches without modifying the rendered HTML.
-         All same size; hierarchy comes from prefix + spacing. */
+         Every level gets a literal `#` prefix via ::before (pi-tui
+         underlines h1/h2 instead, but here underline is reserved for
+         clickable links). All same size; hierarchy comes from prefix +
+         spacing. */
       .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 {
         margin: 1.1rem 0 0.4rem;
         font-weight: 700;
@@ -221,7 +220,8 @@
         color: rgb(var(--color-base16-yellow));
         font-family: inherit;
       }
-      .md h1 { text-decoration: underline; text-underline-offset: 3px; }
+      .md h1::before { content: "# "; opacity: 0.6; }
+      .md h2::before { content: "## "; opacity: 0.6; }
       .md h3::before { content: "### "; opacity: 0.6; }
       .md h4::before { content: "#### "; opacity: 0.6; }
       .md h5::before { content: "##### "; opacity: 0.6; }
@@ -233,10 +233,20 @@
       .md li { margin: 0.1rem 0; }
       .md li::marker { color: rgb(var(--color-base16-cyan)); }
       .md li > p { display: inline; }
-      .md a {
+      /* Links: underline is the clickable cue and nothing else in the
+         transcript is underlined at rest. Hover/focus thicken the
+         underline and shift color so it's obvious before clicking. */
+      .md a, .pi-md a.pi-link {
         color: rgb(var(--color-base16-blue));
         text-decoration: underline;
+        text-decoration-thickness: 1px;
         text-underline-offset: 2px;
+        cursor: pointer;
+      }
+      .md a:hover, .md a:focus-visible,
+      .pi-md a.pi-link:hover, .pi-md a.pi-link:focus-visible {
+        color: rgb(var(--color-base16-cyan));
+        text-decoration-thickness: 2px;
       }
       .md strong { font-weight: 700; color: rgb(var(--color-base16-700)); }
       .md em { font-style: italic; }
@@ -394,15 +404,15 @@
       .pi-em     { font-style: italic; }
       .pi-del    { text-decoration: line-through; color: rgb(var(--color-base16-500)); }
       .pi-code   { color: rgb(var(--color-base16-cyan)); }
-      .pi-link, .pi-link a { color: rgb(var(--color-base16-blue)); text-decoration: underline; text-underline-offset: 2px; }
-      .pi-link-url { color: rgb(var(--color-base16-500)); }
-      /* Headings: yellow + bold across all levels, h1/h2 also underlined.
-         h3+ get the `### ` prefix as a literal text run from the
-         renderer (not a ::before pseudo-element), so we don't need any
-         pseudo-element CSS here. */
+      /* Links (styled above with .md a): only runs that render as a real
+         <a> get .pi-link. The "(url)" suffix of `[text](url)` is a link to
+         the same target, in a muted color. */
+      .pi-md a.pi-link-url { color: rgb(var(--color-base16-500)); }
+      /* Headings: yellow + bold across all levels, never underlined
+         (underline means "link"). Every level gets the literal `#`
+         prefix as a text run from the renderer. */
       .pi-heading { color: rgb(var(--color-base16-yellow)); font-weight: 700; }
-      .pi-h1 { text-decoration: underline; text-underline-offset: 3px; }
-      .pi-h2 { text-decoration: underline; text-underline-offset: 3px; }
+      .pi-heading-marker { opacity: 0.6; }
       /* List bullets: cyan to match pi-tui's `listBullet`. */
       .pi-list-bullet { color: rgb(var(--color-base16-cyan)); }
       /* Blockquote: the `│ ` bar in cyan + italic muted body. */
