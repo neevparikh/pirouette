@@ -14,6 +14,7 @@ import { ssh } from "./commands/ssh.js";
 import { send } from "./commands/send.js";
 import { stop } from "./commands/stop.js";
 import { interrupt } from "./commands/interrupt.js";
+import { notify } from "./commands/notify.js";
 import { handoff } from "./commands/handoff.js";
 import { archive, unarchive } from "./commands/archive.js";
 import { rename } from "./commands/rename.js";
@@ -109,6 +110,18 @@ program
   .option("--follow-up", "If the agent is mid-turn, queue until the turn ends instead of steering")
   .option("--as-user", "Send as the user even from inside an agent")
   .action(send);
+
+program
+  .command("notify [message]")
+  .description(
+    "Raise a desktop notification in open dashboards (where the notify toggle is on). " +
+      "Attributed to the agent running the command unless --agent is given.",
+  )
+  .option("-a, --agent <agent>", "Agent the notification is about (default: the agent running the command)")
+  .option("-t, --title <title>", "Notification title (default: the agent's name)")
+  .option("-u, --url <url>", "Open this http(s) URL when the notification is clicked")
+  .option("-f, --message-file <path>", "Read the message from a file")
+  .action(notify);
 
 program
   .command("interrupt <agent>")

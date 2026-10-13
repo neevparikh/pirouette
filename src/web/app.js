@@ -340,13 +340,40 @@ function notificationsAvailable() {
   return typeof window !== "undefined" && "Notification" in window;
 }
 
-function notificationsEnabled() {
-  return (
-    notificationsAvailable() &&
-    Notification.permission === "granted" &&
-    localStorage.getItem(NOTIFY_PREF_KEY) === "1"
-  );
+/** Which notifications this dashboard shows, from the sidebar's `notify`
+ *  toggle (stored per browser):
+ *    - "off":      none.
+ *    - "requests": only ones an agent explicitly asks for (`pru notify`).
+ *    - "all":      requests plus turn-end / error pings.
+ *  The pref used to be on/off ("1"/"0"); "1" reads as "all" so anyone who
+ *  had it on keeps what they had. */
+function notifyMode() {
+  const v = localStorage.getItem(NOTIFY_PREF_KEY);
+  if (v === "1" || v === "all") return "all";
+  if (v === "requests") return "requests";
+  return "off";
 }
+
+function notificationsPermitted() {
+  return notificationsAvailable() && Notification.permission === "granted";
+}
+
+/** Turn-end / error pings: only in "all" mode. */
+function notificationsEnabled() {
+  return notificationsPermitted() && notifyMode() === "all";
+}
+
+/** `pru notify` requests: in "requests" and "all" modes. */
+function agentNotificationsEnabled() {
+  return notificationsPermitted() && notifyMode() !== "off";
+}
+
+const NOTIFY_MODE_TITLES = {
+  off: "Notifications off. Click to get notifications agents explicitly request (pru notify).",
+  requests:
+    "Notifying only when an agent explicitly asks (pru notify). Click to also notify when an agent finishes its turn.",
+  all: "Notifying on agent requests and when an agent finishes its turn. Click to turn notifications off.",
+};
 
 function applyNotifyToggleStyle() {
   // Single-word label ("notify") with state expressed through color
@@ -355,12 +382,14 @@ function applyNotifyToggleStyle() {
   // "pirouette" + "theme" in the same row, the group could overflow the
   // 256-px sidebar. Matches the pattern of the `raw` action pill.
   $notifyBtn.textContent = "notify";
+  $notifyBtn.dataset.notifyMode = notifyMode();
 
   // Reset state classes each time — simpler than tracking what was
-  // previously applied. We toggle between three visual states: blue
-  // (enabled), red (blocked at browser level), default-gray (off).
+  // previously applied. Visual states: blue (all), yellow (requests
+  // only), red (blocked at browser level), default-gray (off).
   $notifyBtn.classList.remove(
     "bg-base16-blue/20", "text-base16-blue",
+    "bg-base16-yellow/20", "text-base16-yellow",
     "bg-base16-red/20", "text-base16-red",
     "bg-base16-300/40", "text-base16-500",
     "opacity-50", "cursor-not-allowed",
@@ -378,17 +407,18 @@ function applyNotifyToggleStyle() {
     $notifyBtn.classList.add("bg-base16-red/20", "text-base16-red");
     return;
   }
-  const enabled = notificationsEnabled();
-  $notifyBtn.title = enabled
-    ? "Notifications enabled. Click to disable."
-    : "Click to enable browser notifications when an agent finishes its turn.";
-  if (enabled) {
+  const mode = notificationsPermitted() ? notifyMode() : "off";
+  $notifyBtn.title = NOTIFY_MODE_TITLES[mode];
+  if (mode === "all") {
     $notifyBtn.classList.add("bg-base16-blue/20", "text-base16-blue");
+  } else if (mode === "requests") {
+    $notifyBtn.classList.add("bg-base16-yellow/20", "text-base16-yellow");
   } else {
     $notifyBtn.classList.add("bg-base16-300/40", "text-base16-500");
   }
 }
 
+/** Cycle off → requests → all → off. */
 async function toggleNotifications() {
   if (!notificationsAvailable()) return;
   if (Notification.permission === "denied") {
@@ -399,13 +429,13 @@ async function toggleNotifications() {
     );
     return;
   }
-  const currentlyEnabled = notificationsEnabled();
-  if (currentlyEnabled) {
-    localStorage.setItem(NOTIFY_PREF_KEY, "0");
+  const current = notificationsPermitted() ? notifyMode() : "off";
+  const next = { off: "requests", requests: "all", all: "off" }[current];
+  if (next === "off") {
+    localStorage.setItem(NOTIFY_PREF_KEY, "off");
     applyNotifyToggleStyle();
     return;
   }
-  // Not enabled yet — either need permission or already have it.
   if (Notification.permission === "default") {
     const result = await Notification.requestPermission();
     if (result !== "granted") {
@@ -413,14 +443,21 @@ async function toggleNotifications() {
       return;
     }
   }
-  localStorage.setItem(NOTIFY_PREF_KEY, "1");
+  localStorage.setItem(NOTIFY_PREF_KEY, next);
   applyNotifyToggleStyle();
-  // Confirm-fire so the user can see what notifications will look like.
+  // Confirm-fire so the user can see what notifications will look like
+  // and which mode they're now in.
   try {
-    const n = new Notification("pirouette notifications enabled", {
-      body: "You'll get a ping when an agent finishes its turn.",
-      tag: "pirouette-test",
-    });
+    const n = new Notification(
+      next === "all" ? "pirouette: all notifications" : "pirouette: agent requests only",
+      {
+        body:
+          next === "all"
+            ? "You'll be notified when an agent asks (pru notify) and when one finishes its turn."
+            : "You'll be notified only when an agent explicitly asks (pru notify). Click notify again to add turn-end pings.",
+        tag: "pirouette-test",
+      },
+    );
     setTimeout(() => n.close(), 3000);
   } catch {
     /* some platforms throw if not in a secure context, etc. */
@@ -700,6 +737,39 @@ document.addEventListener(
   },
   true,
 );
+
+/** Fire a notification an agent (or a script it runs) asked for with
+ *  `pru notify`. Unlike turn-end notifications these aren't suppressed
+ *  while the dashboard is focused — something explicitly asked for the
+ *  user's attention — and they stay up until dismissed
+ *  (`requireInteraction`), since they're usually "go do X" prompts
+ *  (approve a login, unblock a run) that are easy to miss. Clicking opens
+ *  `url` when one was sent, otherwise focuses the dashboard on the agent. */
+let agentNotifySeq = 0;
+function fireAgentNotification(envelope) {
+  if (!agentNotificationsEnabled()) return;
+  try {
+    const n = new Notification(envelope.title, {
+      body: envelope.body,
+      // A tag per notification, not per agent: a shared tag makes the
+      // browser replace an unread notification (e.g. a login code) with
+      // the agent's next one.
+      tag: `pirouette-notify-${envelope.agentId}-${Date.now()}-${++agentNotifySeq}`,
+      requireInteraction: true,
+    });
+    n.onclick = () => {
+      if (envelope.url) {
+        window.open(envelope.url, "_blank", "noopener,noreferrer");
+      } else {
+        window.focus();
+        selectAgent(envelope.agentId);
+      }
+      n.close();
+    };
+  } catch {
+    /* ignore — notifications can fail in non-secure contexts, etc. */
+  }
+}
 
 function maybeNotifyStateChange(agent, prevState, newState) {
   // Only the meaningful transitions. Filter out boot/startup runs of
@@ -1466,6 +1536,11 @@ function handleWsMessage(envelope) {
       // answered, AbortSignal fired, or the agent was stopped). Drop it
       // from the queue and close the modal if it's the one on screen.
       dropExtensionUIRequest(envelope.agentId, envelope.requestId);
+      break;
+
+    case "agent_notify":
+      // Explicit desktop notification (`pru notify`).
+      fireAgentNotification(envelope);
       break;
 
     case "extension_ui_notify":

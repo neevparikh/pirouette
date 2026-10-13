@@ -285,6 +285,7 @@ overridden per host under `[hosts.<name>.dotfiles]`.
 | `pru launch <name>` | Create a new pi agent (`--project`, `--model`, `--thinking` optional) |
 | `pru list` | List all agents and their state (`--archived` includes archived ones) |
 | `pru send <agent> <msg>` | Send a message to an agent (`--message-file`, `--follow-up`; from inside an agent it's signed as that agent, `--as-user` to opt out) |
+| `pru notify <msg>` | Raise a desktop notification in open dashboards (`--title`, `--url` opens on click, `--agent`; defaults to self) |
 | `pru interrupt <agent>` | Cancel the agent's current turn; the session stays alive |
 | `pru handoff [agent]` | Replace an agent with a fresh one in the same worktree (defaults to self) |
 | `pru rename <agent> <name>` | Rename a chat (display name only; one argument renames self) |
@@ -485,6 +486,21 @@ user message, and `--as-user` forces that from inside an agent. Under the
 hood it's a pi custom message, which pi hands the model as a user turn, so
 it works with any provider. The packaged `agent-messaging` skill teaches
 agents to delegate, brief, check a helper actually started, and reply.
+
+**Getting your attention: `pru notify`.** The dashboard's `notify` toggle
+already pings you when an agent finishes a turn, but that ping only ever
+says "your turn". `pru notify "<message>"` lets an agent, or a long-running
+script it started, raise a notification that says what it needs: "the AWS
+login expired, approve code ABCD-EFGH". Add `--url` and clicking the
+notification opens that page (a login or PR link) instead of the chat;
+`--title` overrides the default title (the agent's name). These fire even
+while the dashboard has focus and stay up until dismissed, but only in
+dashboards that are open at that moment: nothing is queued for later.
+
+The `notify` toggle cycles through three settings: off (gray), agent
+requests only (yellow: just `pru notify`), and all (blue: requests plus
+turn-end and error pings). If it was on before this setting existed, it
+starts on all.
 
 ### Runaway commands: the bash deadline
 

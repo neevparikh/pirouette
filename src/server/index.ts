@@ -19,6 +19,7 @@ import { WebSocket, WebSocketServer } from "ws";
 
 import { getConfig } from "../config.js";
 import { AgentManager } from "./agent-manager.js";
+import { parseNotifyRequest } from "./agent-notify.js";
 import { ProjectManager } from "./project-manager.js";
 import { StateManager } from "./state.js";
 import { dashboardCsp, IMAGE_DOCUMENT_CSP } from "./content-security.js";
@@ -984,6 +985,33 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
         } catch (err) {
           error(res, 400, err instanceof Error ? err.message : String(err));
         }
+        return;
+      }
+
+      // Ask open dashboards to raise a desktop notification on this
+      // agent's behalf (`pru notify`). Body: { body, title?, url? }; see
+      // agent-notify.ts. Nothing is stored: a dashboard that isn't open
+      // when this fires never sees it.
+      if (method === "POST" && sub === "/notify") {
+        const agent = agentManager.getAgent(agentId);
+        if (!agent) {
+          error(res, 404, "Agent not found");
+          return;
+        }
+        let raw: unknown;
+        try {
+          raw = JSON.parse(await readBody(req));
+        } catch {
+          error(res, 400, "body must be valid JSON");
+          return;
+        }
+        const parsed = parseNotifyRequest(raw, agent.name);
+        if (!parsed.ok) {
+          error(res, 400, parsed.error);
+          return;
+        }
+        broadcast({ kind: "agent_notify", agentId, ...parsed.notification });
+        json(res, 200, { delivered: wsClients.size });
         return;
       }
 
