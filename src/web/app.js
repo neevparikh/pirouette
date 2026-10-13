@@ -701,6 +701,35 @@ document.addEventListener(
   true,
 );
 
+/** Fire a notification an agent (or a script it runs) asked for with
+ *  `pru notify`. Unlike turn-end notifications these aren't suppressed
+ *  while the dashboard is focused — something explicitly asked for the
+ *  user's attention — and they stay up until dismissed
+ *  (`requireInteraction`), since they're usually "go do X" prompts
+ *  (approve a login, unblock a run) that are easy to miss. Clicking opens
+ *  `url` when one was sent, otherwise focuses the dashboard on the agent. */
+function fireAgentNotification(envelope) {
+  if (!notificationsEnabled()) return;
+  try {
+    const n = new Notification(envelope.title, {
+      body: envelope.body,
+      tag: `pirouette-notify-${envelope.agentId}`,
+      requireInteraction: true,
+    });
+    n.onclick = () => {
+      if (envelope.url) {
+        window.open(envelope.url, "_blank", "noopener,noreferrer");
+      } else {
+        window.focus();
+        selectAgent(envelope.agentId);
+      }
+      n.close();
+    };
+  } catch {
+    /* ignore — notifications can fail in non-secure contexts, etc. */
+  }
+}
+
 function maybeNotifyStateChange(agent, prevState, newState) {
   // Only the meaningful transitions. Filter out boot/startup runs of
   // "running" -> "waiting_input" that happen before we have a prevState
@@ -1466,6 +1495,11 @@ function handleWsMessage(envelope) {
       // answered, AbortSignal fired, or the agent was stopped). Drop it
       // from the queue and close the modal if it's the one on screen.
       dropExtensionUIRequest(envelope.agentId, envelope.requestId);
+      break;
+
+    case "agent_notify":
+      // Explicit desktop notification (`pru notify`).
+      fireAgentNotification(envelope);
       break;
 
     case "extension_ui_notify":

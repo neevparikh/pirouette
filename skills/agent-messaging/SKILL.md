@@ -101,6 +101,21 @@ if a message matters and the recipient was interrupted, resend it.
   over each other. The exception is `pru handoff` (see the handoff skill).
 - If you're done with a helper, `pru archive <id> --stop` it.
 
+## Getting the user's attention
+
+`pru send` reaches agents; to reach the *user* when something needs them
+now (a login to approve, a run blocked on a decision), raise a desktop
+notification:
+
+```bash
+pru notify "AWS login expired: approve code ABCD-EFGH" \
+  --title "backfill paused" --url "https://example.com/device?user_code=ABCD-EFGH"
+```
+
+It shows in dashboards that are open with notifications on, and isn't
+queued, so also say it in your transcript. Use it sparingly: it's for
+"you need to act", not progress updates.
+
 ## Doing it without the CLI
 
 ```bash

@@ -180,6 +180,17 @@ export type WsEnvelope =
       message: string;
       notifyType?: "info" | "warning" | "error";
     }
+  /** A desktop notification requested via POST /api/agents/:id/notify
+   *  (`pru notify`). Dashboards fire it as a browser Notification when
+   *  the user has notifications on; clicking opens `url` if given, else
+   *  selects the agent. */
+  | {
+      kind: "agent_notify";
+      agentId: string;
+      title: string;
+      body: string;
+      url?: string;
+    }
   /** Persistent status line set by an extension (e.g. badge in the agent
    *  header). `text === null` clears the slot. Maps to setStatus(). */
   | {
