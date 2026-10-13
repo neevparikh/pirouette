@@ -495,8 +495,12 @@ login expired, approve code ABCD-EFGH". Add `--url` and clicking the
 notification opens that page (a login or PR link) instead of the chat;
 `--title` overrides the default title (the agent's name). These fire even
 while the dashboard has focus and stay up until dismissed, but only in
-dashboards that are open with the toggle on at that moment: nothing is
-queued for later.
+dashboards that are open at that moment: nothing is queued for later.
+
+The `notify` toggle cycles through three settings: off (gray), agent
+requests only (yellow: just `pru notify`), and all (blue: requests plus
+turn-end and error pings). If it was on before this setting existed, it
+starts on all.
 
 ### Runaway commands: the bash deadline
 

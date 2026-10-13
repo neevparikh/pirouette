@@ -26,8 +26,13 @@ follow [SemVer](https://semver.org).
   body. `--url` makes a click open that http(s) page instead of selecting
   the agent, `--title` overrides the default (the agent's name), and
   `--agent` attributes it to another chat. Unlike turn-end pings they fire
-  even when the dashboard has focus and stay up until dismissed. Nothing is
-  queued: only dashboards open at the time see it.
+  even when the dashboard has focus and stay up until dismissed, and each
+  is its own notification, so a newer one doesn't replace one you haven't
+  read. Nothing is queued: only dashboards open at the time see it.
+- **The `notify` toggle has a requests-only setting.** It now cycles off →
+  agent requests only (yellow) → all (blue), so you can get `pru notify`
+  requests without a ping at every turn end. If it was on before, it
+  starts on all, which is what you had.
 - **Agents can tell a peer's message from the user's.** `pru send` from
   inside an agent used to arrive as an ordinary user message, so the
   recipient (and anyone reading its transcript) took a delegating agent's

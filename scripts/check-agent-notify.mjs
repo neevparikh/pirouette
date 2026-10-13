@@ -191,11 +191,13 @@ const agentNotify = (agentId, title, body, url) => ({
   ...(url ? { url } : {}),
 });
 
-async function withNotifications(enabled, body) {
-  await withDashboard(async (page, stub) => {
-    await page.evaluate((on) => localStorage.setItem("pirouette-notifications", on ? "1" : "0"), enabled);
-    await body(page, stub);
-  });
+/** Run with the notify toggle in `mode` ("off" | "requests" | "all", or a
+ *  raw legacy value like "1"). */
+let pendingMode = "off";
+async function withNotifications(mode, body) {
+  // Stored before the dashboard loads, as on a real visit.
+  pendingMode = mode;
+  await withDashboard(body);
 }
 
 // Install the recorders before app.js runs in every page.
@@ -206,6 +208,7 @@ chromium.launch = async (...args) => {
   browser.newPage = async (...pageArgs) => {
     const page = await newPage(...pageArgs);
     await page.addInitScript(RECORDERS);
+    await page.addInitScript((m) => localStorage.setItem("pirouette-notifications", m), pendingMode);
     return page;
   };
   return browser;
@@ -213,8 +216,22 @@ chromium.launch = async (...args) => {
 
 const settle = (page) => page.waitForTimeout(250);
 
+/** Simulate agent-2 finishing a turn while you're looking elsewhere (turn-end
+ *  pings are skipped while the dashboard has focus), and return how many
+ *  "your turn" notifications it raised. */
+async function turnEndPings(page, stub) {
+  await page.evaluate(() => {
+    document.hasFocus = () => false;
+  });
+  stub.broadcast({ kind: "agent_state_change", agentId: "agent-2", state: "running" });
+  await settle(page);
+  stub.broadcast({ kind: "agent_state_change", agentId: "agent-2", state: "waiting_input" });
+  await settle(page);
+  return page.evaluate(() => window.__notifications.filter((n) => n.title.includes("your turn")).length);
+}
+
 console.log("a notification with a URL:");
-await withNotifications(true, async (page, stub) => {
+await withNotifications("all", async (page, stub) => {
   stub.broadcast(agentNotify("agent-2", "AWS login needed", "approve code ABCD-EFGH", "https://example.com/device?user_code=ABCD-EFGH"));
   await settle(page);
   expect("fires one notification with the requested text", await fired(page), [
@@ -230,7 +247,7 @@ await withNotifications(true, async (page, stub) => {
 });
 
 console.log("a notification without a URL:");
-await withNotifications(true, async (page, stub) => {
+await withNotifications("all", async (page, stub) => {
   stub.broadcast(agentNotify("agent-2", "second-chat", "the deploy is waiting on you"));
   await settle(page);
   expect("fires even while the dashboard is focused", (await fired(page)).length, 1);
@@ -245,10 +262,45 @@ await withNotifications(true, async (page, stub) => {
 });
 
 console.log("with the notify toggle off:");
-await withNotifications(false, async (page, stub) => {
+await withNotifications("off", async (page, stub) => {
   stub.broadcast(agentNotify("agent-1", "first-chat", "should stay quiet"));
   await settle(page);
   expect("fires nothing", (await fired(page)).length, 0);
+});
+
+console.log("in requests-only mode:");
+await withNotifications("requests", async (page, stub) => {
+  stub.broadcast(agentNotify("agent-1", "first-chat", "requests still come through"));
+  await settle(page);
+  expect("agent requests still fire", (await fired(page)).length, 1);
+  expect("turn-end pings don't", await turnEndPings(page, stub), 0);
+});
+
+console.log("with the toggle on from before it had three settings:");
+await withNotifications("1", async (page, stub) => {
+  expect("reads as all", await page.getAttribute("#notify-btn", "data-notify-mode"), "all");
+  expect("turn-end pings stay on", await turnEndPings(page, stub), 1);
+});
+
+console.log("two notifications from one agent:");
+await withNotifications("requests", async (page, stub) => {
+  stub.broadcast(agentNotify("agent-1", "first-chat", "login code ABCD"));
+  stub.broadcast(agentNotify("agent-1", "first-chat", "run halted"));
+  await settle(page);
+  const tags = await page.evaluate(() => window.__notifications.map((n) => n.options.tag));
+  expect("both fire", tags.length, 2);
+  expect("with different tags, so the second doesn't replace the first", new Set(tags).size, 2);
+});
+
+console.log("clicking the toggle:");
+await withNotifications("off", async (page) => {
+  const modes = [];
+  for (let i = 0; i < 3; i++) {
+    await page.click("#notify-btn");
+    await page.waitForTimeout(50);
+    modes.push(await page.getAttribute("#notify-btn", "data-notify-mode"));
+  }
+  expect("cycles off → requests → all → off", modes, ["requests", "all", "off"]);
 });
 
 if (failures.length) {
