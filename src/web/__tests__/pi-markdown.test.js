@@ -136,14 +136,28 @@ describe("inlineToRuns", () => {
     expect(runs[0].href).toBe("https://x.com");
     expect(runs[0].classes).toContain("pi-link");
   });
-  it("emits ' (href)' suffix when link text differs from href", () => {
+  it("emits a clickable ' (href)' suffix when link text differs from href", () => {
     const runs = inlineToRuns([
       { type: "link", href: "https://x.com", tokens: [{ type: "text", text: "site" }] },
     ]);
-    expect(runs).toHaveLength(2);
-    expect(runs[0].text).toBe("site");
-    expect(runs[1].text).toBe(" (https://x.com)");
-    expect(runs[1].classes).toContain("pi-link-url");
+    expect(runs.map((r) => r.text).join("")).toBe("site (https://x.com)");
+    expect(runs[0].href).toBe("https://x.com");
+    const url = runs.find((r) => r.text === "https://x.com");
+    expect(url.href).toBe("https://x.com");
+    expect(url.classes).toContain("pi-link");
+    expect(url.classes).toContain("pi-link-url");
+    // Parens are plain text, not part of the link.
+    expect(runs.filter((r) => r.text.includes("(") || r.text.includes(")")).every((r) => !r.href)).toBe(true);
+  });
+  it("does not style unclickable links as links", () => {
+    const runs = inlineToRuns([
+      { type: "link", href: "file:///etc/passwd", tokens: [{ type: "text", text: "pw" }] },
+    ]);
+    expect(runs.map((r) => r.text).join("")).toBe("pw (file:///etc/passwd)");
+    for (const r of runs) {
+      expect(r.href).toBeUndefined();
+      expect(r.classes || []).not.toContain("pi-link");
+    }
   });
 });
 
@@ -180,12 +194,22 @@ describe("renderMarkdownPi", () => {
     const html = renderMarkdownPi("hello world", 80);
     expect(html).toBe("hello world");
   });
-  it("emits an h1 with the pi-h1 class and no '# ' prefix (it's underlined visually)", () => {
+  it("emits an h1 with the pi-h1 class and a literal '# ' prefix (never underlined)", () => {
     const html = renderMarkdownPi("# Big Title", 80);
     expect(html).toContain('class="pi-heading pi-h1"');
-    expect(stripSpans(html)).toContain("Big Title");
-    // h1/h2 don't get the prefix baked into the text (pi-tui omits it too).
-    expect(html).not.toContain("# Big Title");
+    expect(stripSpans(html)).toContain("# Big Title");
+    expect(html).toContain("pi-heading-marker");
+  });
+  it("renders a wrapped multi-word link as a single <a>", () => {
+    const html = renderMarkdownPi("[the pull request](https://x.com/pr/1)", 80);
+    expect(html.match(/<a /g)).toHaveLength(2); // label + (url)
+    expect(html).toContain(">the pull request</a>");
+    expect(html).toContain(">https://x.com/pr/1</a>");
+  });
+  it("keeps '(' url ')' together when wrapping", () => {
+    const html = renderMarkdownPi("aaaa bbbb [x](https://x.com/abc)", 20);
+    const lines = stripSpans(html).replace(/<[^>]+>/g, "").split("\n");
+    expect(lines).toContain("(https://x.com/abc)");
   });
   it("emits an h3 with literal '### ' prefix", () => {
     const html = renderMarkdownPi("### Sub", 80);
