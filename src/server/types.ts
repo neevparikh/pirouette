@@ -291,7 +291,11 @@ export interface NormalizedEvent {
 
 /** Request body for POST /api/agents. */
 export interface CreateAgentRequest {
-  name: string;
+  /** Required unless `autoNameFrom` is given. */
+  name?: string;
+  /** Let the chat's model name it from this text (its first message). Only
+   *  used when `name` is absent. */
+  autoNameFrom?: string;
   /** Which project this agent belongs to. Defaults to `scratchpad`. */
   projectName?: string;
   model?: string;

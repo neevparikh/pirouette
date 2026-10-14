@@ -2599,7 +2599,7 @@ function updateInputPlaceholder() {
   } else {
     $input.placeholder = mobile
       ? `@name your message…`
-      : `@name your message (creates one in ${selectedProjectName} if new)`;
+      : `@name your message (creates one in ${selectedProjectName} if new; "@ " to auto-name)`;
   }
 }
 
@@ -2670,19 +2670,22 @@ async function selectAgent(id) {
   if (!isMobileViewport()) $input.focus();
 }
 
-/** Parse the input for an `@name ` prefix.
- *  @returns {{name: string, body: string} | null} */
+/** Parse the input for an `@name ` prefix, or a bare `@ ` (new chat, named
+ *  by the model from the message — `name` is null then).
+ *  @returns {{name: string | null, body: string} | null} */
 function parseAtMention(text) {
-  const m = text.match(/^@([a-zA-Z0-9_-]+)\s+([\s\S]+)$/);
+  const m = text.match(/^@([a-zA-Z0-9_-]*)\s+([\s\S]+)$/);
   if (!m) return null;
-  return { name: m[1], body: m[2] };
+  return { name: m[1] || null, body: m[2] };
 }
 
-async function createAgentQuick(name, projectName) {
+/** Create a chat. `name: null` asks the server to have the chat's model
+ *  name it from `autoNameFrom` (its first message). */
+async function createAgentQuick(name, projectName, autoNameFrom) {
   const res = await fetch("/api/agents", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name, projectName }),
+    body: JSON.stringify(name ? { name, projectName } : { autoNameFrom, projectName }),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
@@ -2692,6 +2695,9 @@ async function createAgentQuick(name, projectName) {
   rememberCreatedAgent(agent);
   return agent.id;
 }
+
+/** True while sendMessage is creating a chat for an `@name` / `@ ` send. */
+let creatingChat = false;
 
 async function sendMessage() {
   const text = $input.value.trim();
@@ -2705,22 +2711,36 @@ async function sendMessage() {
   let body = text;
   if (mention) {
     body = mention.body;
-    const existing = agents.find((a) => a.name === mention.name);
+    const existing = mention.name && agents.find((a) => a.name === mention.name);
     if (existing) {
       targetId = existing.id;
     } else {
-      // Create a new agent with this name in the currently-selected project.
+      // Create a new agent in the currently-selected project — with the
+      // given name, or (bare `@ `) one the model picks from the message.
+      // Creation takes a few seconds (naming, worktree, session start), so
+      // hold the draft read-only meanwhile: a second Enter must not create
+      // a second chat, and the text must survive if creation fails.
+      if (creatingChat) return;
+      creatingChat = true;
+      $input.readOnly = true;
+      $sendBtn.disabled = true;
+      $input.classList.add("opacity-60");
       try {
-        targetId = await createAgentQuick(mention.name, selectedProjectName);
+        targetId = await createAgentQuick(mention.name, selectedProjectName, body);
       } catch (err) {
-        alert(`Could not create @${mention.name}: ${err.message}`);
+        alert(`Could not create ${mention.name ? `@${mention.name}` : "a new chat"}: ${err.message}`);
         return;
+      } finally {
+        creatingChat = false;
+        $input.readOnly = false;
+        $sendBtn.disabled = false;
+        $input.classList.remove("opacity-60");
       }
     }
   } else if (selectedAgentId) {
     targetId = selectedAgentId;
   } else {
-    alert("No agent selected. Start your message with @name or click an agent in the sidebar.");
+    alert("No agent selected. Start your message with @name (or \"@ \" for an auto-named new chat) or click an agent in the sidebar.");
     return;
   }
 
