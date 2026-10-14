@@ -296,7 +296,10 @@ overridden per host under `[hosts.<name>.dotfiles]`.
 | `pru status` | Show host + server health |
 
 You can also create agents from the web UI by typing `@<newname> message`
-in the input bar.
+in the input bar. Type just `@ message` (an `@` followed by a space) and the
+new chat's model — the same one it will run on (`PIROUETTE_DEFAULT_MODEL`) —
+names it from your message, e.g. `fix-flaky-login-test`. If the model can't
+answer, the name falls back to the first few words of the message.
 
 **Renaming a chat.** A chat gets its name before anyone knows what the work
 will become, and the name you want ("pr-42") usually only exists later. Click

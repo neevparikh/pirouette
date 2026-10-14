@@ -11,6 +11,7 @@ let socket;
 let responseAgent;
 let broadcastBeforeResponse;
 let sentMessages;
+let createRequests;
 
 function makeAgent(id, projectName = "other-project") {
   return {
@@ -46,6 +47,7 @@ beforeAll(async () => {
     let data = {};
     if (opts.method === "POST") {
       if (url === "/api/agents" || /\/(fork|handoff)$/.test(url)) {
+        if (url === "/api/agents") createRequests.push(JSON.parse(opts.body));
         if (broadcastBeforeResponse) broadcast({ kind: "agent_created", agent: responseAgent });
         data = responseAgent;
       } else if (url.endsWith("/message")) {
@@ -63,6 +65,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   sentMessages = [];
+  createRequests = [];
   responseAgent = makeAgent("created-in-this-tab", "scratchpad");
   broadcastBeforeResponse = true;
   broadcast({ kind: "projects_list", projects });
@@ -146,6 +149,18 @@ for (const order of ["broadcast first", "response first"]) {
       await vi.waitFor(() => expect(sentMessages).toHaveLength(1));
       expect(sentMessages[0].url).toBe(`/api/agents/${responseAgent.id}/message`);
       expect(sentMessages[0].body.message).toBe("hello");
+      expect(createRequests).toEqual([{ name: responseAgent.name, projectName: "scratchpad" }]);
+      checkSelectionAndLateBroadcast();
+    });
+
+    it("creates a model-named chat for a bare `@ ` and selects it", async () => {
+      await send("@ fix the flaky login test");
+      await vi.waitFor(() => expect(sentMessages).toHaveLength(1));
+      expect(createRequests).toEqual([
+        { autoNameFrom: "fix the flaky login test", projectName: "scratchpad" },
+      ]);
+      expect(sentMessages[0].url).toBe(`/api/agents/${responseAgent.id}/message`);
+      expect(sentMessages[0].body.message).toBe("fix the flaky login test");
       checkSelectionAndLateBroadcast();
     });
 

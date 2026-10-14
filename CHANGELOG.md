@@ -25,6 +25,15 @@ follow [SemVer](https://semver.org).
 
 ### Added
 
+- **`@ message` starts a new chat and lets the model name it.** Begin a
+  message in the dashboard with a bare `@ ` (no name) and pirouette creates a
+  chat in the selected project, asking the model that chat will run on for a
+  short kebab-case name based on your message (made unique, so it's always a
+  valid `@mention`). The name also lands in the worktree and branch. If the
+  model errors or takes longer than 15s, the name falls back to the first
+  few words of the message — naming never stops the chat from starting.
+  `POST /api/agents` accepts `autoNameFrom` in place of `name` for this.
+
 - **`pru notify` raises a desktop notification that says what's needed.**
   Turn-end notifications only ever say "<agent> — your turn", so an agent
   (or a background script it started) that needed you for something

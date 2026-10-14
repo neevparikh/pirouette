@@ -50,6 +50,7 @@ import {
 } from "./agent-message.js";
 import { createWorktree, removeWorktree } from "./git.js";
 import { resolveAgentModel } from "./model-resolution.js";
+import { generateChatName } from "./chat-naming.js";
 import { setupWorktreeDataTools } from "./worktree-setup.js";
 import { ProjectManager } from "./project-manager.js";
 import { StateManager } from "./state.js";
@@ -1221,12 +1222,26 @@ export class AgentManager {
    *    starting → error (worktree create or session start failed)
    */
   async createAgent(opts: {
-    name: string;
+    /** Display name. Optional only when `nameFromMessage` is given. */
+    name?: string;
+    /** No name given: have the chat's model pick one from this (the chat's
+     *  first message). See `suggestChatName`. */
+    nameFromMessage?: string;
     projectName?: string;
     model?: string;
     thinkingLevel?: string;
   }): Promise<AgentConfig> {
-    const trimmedName = opts.name.trim();
+    let trimmedName = opts.name?.trim() ?? "";
+    if (!trimmedName && opts.nameFromMessage?.trim()) {
+      // Check the project before spending a model call on naming.
+      const projectName = opts.projectName ?? DEFAULT_PROJECT_NAME;
+      if (!this.projectManager.getProject(projectName)) {
+        throw new Error(
+          `project "${projectName}" not found. Use \`pru project add ${projectName}\` first.`,
+        );
+      }
+      trimmedName = await this.suggestChatName(opts.nameFromMessage, opts.model);
+    }
     if (!trimmedName) throw new Error("agent name is required");
 
     // Resolve the project first — we refuse to create an agent against a
@@ -2525,29 +2540,7 @@ export class AgentManager {
     // Bedrock (or another unintended provider) when the user has AWS SSO
     // credentials lying around. If the caller specified a model, it must
     // resolve; otherwise we use whatever is set in PIROUETTE_DEFAULT_MODEL.
-    const envDefault = process.env.PIROUETTE_DEFAULT_MODEL;
-    if (!config.model && !envDefault) {
-      throw new Error(
-        `No model specified. Pass --model to \`pru launch\`, or set ` +
-          `PIROUETTE_DEFAULT_MODEL in the container environment (e.g. "anthropic/claude-sonnet-4-5").`,
-      );
-    }
-    const requested = config.model ?? envDefault!;
-
-    // Resolve against the registry *and* pre-flight the provider's
-    // credentials. Both failures throw, which surfaces at `pru launch` /
-    // the dashboard and parks the agent in `error` — see model-resolution.ts
-    // for why an unauthenticated provider must not be allowed this far.
-    const model = await resolveAgentModel(requested, {
-      // Custom providers (e.g. `hawk`) often have `models: []` in
-      // models.json, so `find()` misses them and the available list is
-      // the only place they show up.
-      find: (p, id) => this.modelRegistry.find(p, id),
-      // The runtime's async getAvailable() refreshes the availability
-      // snapshot; the synchronous registry facade only reads it.
-      getAvailable: () => this.modelRuntime.getAvailable(),
-      checkAuth: (m) => this.checkProviderAuth(m.provider),
-    });
+    const model = await this.resolveModelForAgent(config.model);
 
     // Persist the actual resolved model string so the UI can display what's
     // really being used (not just what was requested — which may have been
@@ -2704,6 +2697,73 @@ export class AgentManager {
    *  resolves on demand) — a model that fails here is one whose first
    *  prompt would throw "No API key found". Asking it at session start
    *  turns that into a launch-time error. */
+  /** The model an agent with `requested` (its configured model, or null)
+   *  would start on: the explicit model, else PIROUETTE_DEFAULT_MODEL.
+   *  Resolved against the registry *and* pre-flighted for credentials. Both
+   *  failures throw, which surfaces at `pru launch` / the dashboard and
+   *  parks the agent in `error` — see model-resolution.ts for why an
+   *  unauthenticated provider must not be allowed this far.
+   *
+   *  Callers must have run `ensureResourceLoader()` first. */
+  private async resolveModelForAgent(requested: string | null | undefined) {
+    const envDefault = process.env.PIROUETTE_DEFAULT_MODEL;
+    if (!requested && !envDefault) {
+      throw new Error(
+        `No model specified. Pass --model to \`pru launch\`, or set ` +
+          `PIROUETTE_DEFAULT_MODEL in the container environment (e.g. "anthropic/claude-sonnet-4-5").`,
+      );
+    }
+    return resolveAgentModel(requested || envDefault!, {
+      // Custom providers (e.g. `hawk`) often have `models: []` in
+      // models.json, so `find()` misses them and the available list is
+      // the only place they show up.
+      find: (p, id) => this.modelRegistry.find(p, id),
+      // The runtime's async getAvailable() refreshes the availability
+      // snapshot; the synchronous registry facade only reads it.
+      getAvailable: () => this.modelRuntime.getAvailable(),
+      checkAuth: (m) => this.checkProviderAuth(m.provider),
+    });
+  }
+
+  /** Pick a name for a new chat from its first message, using the same
+   *  model the chat will run on (`model`, else PIROUETTE_DEFAULT_MODEL).
+   *  Never throws: if the model can't be resolved or doesn't answer, the
+   *  name is derived from the message text instead (and an unresolvable
+   *  model will fail loudly moments later, when the session starts). */
+  async suggestChatName(message: string, model?: string | null): Promise<string> {
+    const log = (msg: string) => console.log(`[agent-manager] chat naming: ${msg}`);
+    const existingNames = this.stateManager.getAgents().map((a) => a.name);
+    let resolved: Awaited<ReturnType<AgentManager["resolveModelForAgent"]>>;
+    try {
+      await this.ensureResourceLoader();
+      resolved = await this.resolveModelForAgent(model);
+    } catch (err) {
+      log(`no usable model (${err instanceof Error ? err.message : String(err)})`);
+      return generateChatName(
+        message,
+        async () => {
+          throw new Error("no model");
+        },
+        { existingNames },
+      );
+    }
+    const name = await generateChatName(
+      message,
+      ({ systemPrompt, message: text }, signal) =>
+        this.modelRuntime.completeSimple(
+          resolved,
+          {
+            systemPrompt,
+            messages: [{ role: "user", content: text, timestamp: Date.now() }],
+          },
+          { maxTokens: 256, signal, cacheRetention: "none" },
+        ),
+      { existingNames, log },
+    );
+    log(`"${name}" via ${resolved.provider}/${resolved.id}`);
+    return name;
+  }
+
   private async checkProviderAuth(
     provider: string,
   ): Promise<{ ok: boolean; error?: string }> {

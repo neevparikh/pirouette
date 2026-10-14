@@ -370,11 +370,18 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
     if (method === "POST" && pathname === "/api/agents") {
       try {
         const body = JSON.parse(await readBody(req)) as CreateAgentRequest;
-        const name = validateName(body.name);
+        // `autoNameFrom` (the dashboard's bare `@ <message>`) lets the chat's
+        // model pick the name; otherwise a name is required as before.
+        const autoNameFrom =
+          body.name == null && typeof body.autoNameFrom === "string" && body.autoNameFrom.trim()
+            ? body.autoNameFrom
+            : undefined;
+        const name = autoNameFrom ? undefined : validateName(body.name);
         const projectName =
           body.projectName != null ? validateName(body.projectName) : undefined;
         const config = await agentManager.createAgent({
           name,
+          nameFromMessage: autoNameFrom,
           projectName,
           model: body.model,
           thinkingLevel: body.thinkingLevel,
