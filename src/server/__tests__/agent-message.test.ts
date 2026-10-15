@@ -13,6 +13,8 @@ import {
   AGENT_MESSAGE_TYPE,
   agentMessageDetails,
   agentMessageText,
+  WATCH_MESSAGE_TYPE,
+  watchMessageDetails,
 } from "../agent-message.js";
 import { normalizeEvent } from "../normalize.js";
 import { ProjectManager } from "../project-manager.js";
@@ -206,5 +208,65 @@ describe("rendering agent messages", () => {
       text: "body text",
       from: FROM,
     });
+  });
+});
+
+describe("watch messages", () => {
+  const WATCH = { id: "w3", kind: "pr", summary: "PR #12 all 2 checks passed." };
+  const custom = {
+    role: "custom",
+    customType: WATCH_MESSAGE_TYPE,
+    content: [{ type: "text", text: "[Watch w3 fired ...]\n\nbody" }],
+    display: true,
+    details: { watch: WATCH, body: "body" },
+    timestamp: 7,
+  };
+
+  it("are delivered as a custom message carrying the watch, without input screening", async () => {
+    const session = makeSession();
+    const screened: unknown[] = [];
+    Object.assign(session._extensionRunner, {
+      hasHandlers: () => true,
+      emitInput: async (...args: unknown[]) => {
+        screened.push(args);
+        return { action: "handled" };
+      },
+    });
+    const manager = await makeManager(session);
+    const sent = manager.sendMessage("deadbeef", "[Watch w3 fired ...]\n\nbody", {
+      watch: WATCH,
+      watchBody: "body",
+      mode: "followUp",
+    });
+    await vi.waitFor(() => expect(session.customCalls).toHaveLength(1));
+    const { message, options } = session.customCalls[0];
+    expect(options).toEqual({ triggerTurn: true });
+    expect(message.customType).toBe(WATCH_MESSAGE_TYPE);
+    expect(message.details).toEqual({ watch: WATCH, body: "body" });
+    expect(screened).toEqual([]);
+    expect(session.promptCalls).toEqual([]);
+    session.finish();
+    await sent;
+  });
+
+  it("render as a user row labelled with the watch, in history and live", async () => {
+    const session = makeSession();
+    session.messages.push(custom);
+    const manager = await makeManager(session);
+    expect(manager.getMessages("deadbeef")).toEqual([
+      { role: "user", content: "body", watch: WATCH, ts: 7 },
+    ]);
+    expect(normalizeEvent({ type: "message_end", message: custom } as never)).toEqual({
+      type: "message_end",
+      role: "user",
+      text: "body",
+      watch: WATCH,
+    });
+  });
+
+  it("malformed entries aren't watch messages", () => {
+    expect(watchMessageDetails({ ...custom, details: { body: "x" } })).toBeNull();
+    expect(watchMessageDetails({ ...custom, customType: AGENT_MESSAGE_TYPE })).toBeNull();
+    expect(watchMessageDetails(custom)).toEqual({ watch: WATCH, body: "body" });
   });
 });

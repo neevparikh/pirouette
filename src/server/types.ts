@@ -384,6 +384,9 @@ export interface ChatMessage {
    *  user. `content` is then the sender's text without the header the
    *  model sees. */
   from?: { id: string; name: string };
+  /** On a `user` row: set when a fired watch (`pru watch`) sent it.
+   *  `content` is the message without the header the model sees. */
+  watch?: { id: string; kind: string; summary: string };
 }
 
 /** A single image attachment formatted for the frontend. */

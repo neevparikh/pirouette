@@ -25,6 +25,30 @@ follow [SemVer](https://semver.org).
 
 ### Added
 
+- **`pru watch` wakes an agent when something it's waiting on happens.**
+  Agents used to wait on CI or a long job by polling inside a tool call
+  (hitting the bash deadline, and dying with any restart) or by ending the
+  turn and hoping someone poked them. `pru watch pr <n>` (checks fail or
+  all pass, new review/comment, merged/closed, new merge conflict),
+  `pru watch cmd '<command>'` (background command exits),
+  `pru watch until '<command>'` (command exits 0) and
+  `pru watch timer <duration>` hand the waiting to the server, which sends
+  the agent a `pirouette-watch-message` when the watch fires: what
+  happened, the note left with it, and the details (failing checks with
+  links, review text, exit code and output tail). It's queued behind the
+  current turn unless `--steer`, and shows in the dashboard as a yellow
+  "watch wN fired" row. Watches persist in `state/watches.json` across
+  restarts (a `cmd` killed by the restart is reported as such), follow an
+  agent through a handoff, and are dropped with it on removal. `pru watch
+  ls` / `pru watch rm`, and `GET /api/watches`,
+  `GET|POST /api/agents/:id/watches`, `DELETE /api/watches/:id`.
+- **A `captain` skill for agents that run a crew.** A captain plans an
+  area of work, briefs and launches crew agents (telling each to report
+  back with `pru send` and to watch its own PR), tracks them with watches,
+  reviews what they ship, and reports to the user as a short
+  needs-you / new / in-progress digest. A `watch` skill teaches agents
+  to use `pru watch` instead of polling, and `agent-messaging` points at
+  both.
 - **`@ message` starts a new chat and lets the model name it.** Begin a
   message in the dashboard with a bare `@ ` (no name) and pirouette creates a
   chat in the selected project, asking the model that chat will run on for a

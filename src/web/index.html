@@ -543,6 +543,19 @@
       }
       .agent-msg-sender:focus-visible { outline: 1px solid rgb(var(--color-base16-blue)); outline-offset: 2px; }
       .pi-row-agent-msg .message-expand { color: rgb(var(--color-base16-blue)); }
+      /* A message from a fired watch (`pru watch`): same idea in yellow. */
+      .pi-row-watch-msg {
+        background: rgb(var(--color-base16-yellow) / 0.07);
+        box-shadow: inset 3px 0 0 rgb(var(--color-base16-yellow) / 0.65);
+      }
+      .watch-msg-label {
+        color: rgb(var(--color-base16-yellow));
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .pi-row-watch-msg .message-expand { color: rgb(var(--color-base16-yellow)); }
       /* Thinking is a separate, theme-aware panel rather than assistant
          output. Inset borders preserve the Markdown renderer's text width. */
       .pi-row-thinking {

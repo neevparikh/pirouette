@@ -24,6 +24,15 @@ describe("reduceEvent", () => {
     });
   });
 
+  it("a watch message doesn't confirm a pending row with the same text", () => {
+    const s0 = { ...initialTranscriptState(), messages: [{ role: "user", content: "same", ts: 0, pending: true }] };
+    const watch = { id: "w1", kind: "timer", summary: "Timer finished (1h)." };
+    const s1 = reduceEvent(s0, { type: "message_end", role: "user", text: "same", watch }, 5);
+    expect(s1.messages).toHaveLength(2);
+    expect(s1.messages[0].pending).toBe(true);
+    expect(s1.messages[1]).toEqual({ role: "user", content: "same", ts: 5, watch });
+  });
+
   it("accumulates text deltas", () => {
     const s0 = initialTranscriptState();
     const s1 = reduceEvent(s0, { type: "message_start", role: "assistant" });
@@ -569,6 +578,17 @@ describe("renderMessage", () => {
     expect(html).toContain('data-open-agent="a1b2c3d4"');
     expect(html).toContain("&lt;b&gt;parent&lt;/b&gt;");
     expect(html).toContain("run it");
+  });
+
+  it("a message from a fired watch is labelled with the watch", () => {
+    const html = renderMessage(
+      { role: "user", content: "PR #12 was merged.", ts: 0, watch: { id: "w3", kind: "pr", summary: "<i>merged</i>" } },
+      0,
+    );
+    expect(html).toContain("pi-row-watch-msg");
+    expect(html).not.toContain("pi-row-user");
+    expect(html).toContain("watch w3 fired");
+    expect(html).toContain("&lt;i&gt;merged&lt;/i&gt;");
   });
 
   it("user message renders as a flat pi-cli row with escaped content", () => {

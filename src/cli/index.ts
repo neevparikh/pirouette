@@ -15,6 +15,7 @@ import { send } from "./commands/send.js";
 import { stop } from "./commands/stop.js";
 import { interrupt } from "./commands/interrupt.js";
 import { notify } from "./commands/notify.js";
+import { watchCmd, watchList, watchPr, watchRm, watchTimer, watchUntil } from "./commands/watch.js";
 import { handoff } from "./commands/handoff.js";
 import { archive, unarchive } from "./commands/archive.js";
 import { rename } from "./commands/rename.js";
@@ -122,6 +123,76 @@ program
   .option("-u, --url <url>", "Open this http(s) URL when the notification is clicked")
   .option("-f, --message-file <path>", "Read the message from a file")
   .action(notify);
+
+const watchCmdGroup = program
+  .command("watch")
+  .description(
+    "Wake an agent with a message when something happens: a PR's checks or reviews, " +
+      "a background command exiting, a condition becoming true, or a timer. " +
+      "From inside an agent it wakes that agent.",
+  );
+
+/** Options every `pru watch <kind>` takes. */
+function withWatchOptions(cmd: Command, timeoutHelp: string | null): Command {
+  cmd
+    .option("-a, --agent <agent>", "Agent to wake (default: the agent running the command)")
+    .option("-n, --note <text>", "Reminder included in the wake-up message (what to do next)")
+    .option("--steer", "If the agent is mid-turn, deliver after its current step instead of after the turn");
+  if (timeoutHelp) cmd.option("-t, --timeout <duration>", timeoutHelp);
+  return cmd;
+}
+
+withWatchOptions(
+  watchCmdGroup
+    .command("pr <pr>")
+    .description(
+      "Watch a GitHub PR (number or URL): fires when its checks have all passed or one fails, " +
+        "a new review or comment arrives, it's merged or closed, or it gets a merge conflict",
+    )
+    .option("-R, --repo <owner/name>", "Repository (default: the one in the current directory)")
+    .option("--on <events>", "Comma-separated subset of checks,reviews,merged,conflict (default: all)")
+    .option("-e, --every <duration>", "How often to check (default 60s)"),
+  "Give up after this long (default 24h)",
+).action(watchPr);
+
+withWatchOptions(
+  watchCmdGroup
+    .command("cmd <command...>")
+    .description(
+      "Run a shell command in the background (in the current directory); fires when it exits, " +
+        "with the exit code and the end of its output. Quote the command.",
+    ),
+  "Kill the command and fire if it runs longer than this (default: no limit)",
+).action(watchCmd);
+
+withWatchOptions(
+  watchCmdGroup
+    .command("until <command...>")
+    .description(
+      "Re-run a shell command (in the current directory) until it exits 0, then fire with its output. " +
+        "Quote the command.",
+    )
+    .option("-e, --every <duration>", "How often to run it (default 60s)"),
+  "Give up after this long (default 24h)",
+).action(watchUntil);
+
+withWatchOptions(
+  watchCmdGroup.command("timer <duration>").description("Fire after a delay, e.g. 30m, 2h, 1d"),
+  null,
+).action(watchTimer);
+
+watchCmdGroup
+  .command("ls")
+  .alias("list")
+  .description("List pending watches (yours, from inside an agent; otherwise all)")
+  .option("-a, --agent <agent>", "Only this agent's watches")
+  .option("--all", "Every agent's watches, even from inside an agent")
+  .action(watchList);
+
+watchCmdGroup
+  .command("rm <ids...>")
+  .description("Cancel watches (kills a running `watch cmd`)")
+  .action(watchRm);
 
 program
   .command("interrupt <agent>")
