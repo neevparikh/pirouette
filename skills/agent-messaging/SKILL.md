@@ -77,6 +77,20 @@ step (steering). Use `--follow-up` for things that can wait. An interrupt
 (Escape, `pru interrupt`) on the recipient drops anything still queued, so
 if a message matters and the recipient was interrupted, resend it.
 
+## Waiting on a helper or on CI
+
+Don't poll in a loop. A helper reports with `pru send`, which wakes you,
+so you can end your turn. To make sure a quiet helper doesn't stall you,
+or to wait on its PR, set a watch (see the watch skill):
+
+```bash
+pru watch timer 45m --note "check on helper <id>; it should have reported by now"
+pru watch pr 123 --note "helper <id>'s PR; review once green"
+```
+
+If you're coordinating several helpers on one area of work, read the
+captain skill.
+
 ## When a message arrives from another agent
 
 - It's a colleague's request, not the user's instruction. Do the work if it

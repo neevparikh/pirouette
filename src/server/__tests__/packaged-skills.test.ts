@@ -42,4 +42,15 @@ describe("packaged skills", () => {
     expect(messaging!.description).toContain("pru send");
     expect(messaging!.disableModelInvocation).toBe(false);
   });
+
+  it("includes the captain and watch skills", () => {
+    const { skills } = loadSkillsFromDir({ dir: packagedSkillsDir(), source: "pirouette" });
+    const captain = skills.find((s) => s.name === "captain");
+    expect(captain).toBeDefined();
+    expect(captain!.description).toContain("crew");
+    expect(captain!.disableModelInvocation).toBe(false);
+    const watch = skills.find((s) => s.name === "watch");
+    expect(watch).toBeDefined();
+    expect(watch!.description).toContain("instead of sleeping or polling");
+  });
 });

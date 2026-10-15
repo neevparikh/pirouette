@@ -56,3 +56,35 @@ export function agentMessageDetails(message: unknown): AgentMessageDetails | nul
   if (typeof d.from.id !== "string" || typeof d.from.name !== "string") return null;
   return { from: { id: d.from.id, name: d.from.name }, body: d.body };
 }
+
+/** `customType` pirouette stamps on the message a fired watch delivers
+ *  (`pru watch`, see watches.ts). Same delivery as an agent message: a
+ *  user-role turn for the model, with its own header; a labelled row in
+ *  the dashboard. */
+export const WATCH_MESSAGE_TYPE = "pirouette-watch-message";
+
+/** Which watch fired, as shown on the dashboard row. */
+export interface WatchMessageSource {
+  id: string;
+  kind: string;
+  summary: string;
+}
+
+/** `details` of a watch-message custom entry. */
+export interface WatchMessageDetails {
+  watch: WatchMessageSource;
+  body: string;
+}
+
+/** If `message` is a watch-message custom message, return its details;
+ *  otherwise null. Tolerant of malformed entries, like agentMessageDetails. */
+export function watchMessageDetails(message: unknown): WatchMessageDetails | null {
+  if (!message || typeof message !== "object") return null;
+  const m = message as { role?: unknown; customType?: unknown; details?: unknown };
+  if (m.role !== "custom" || m.customType !== WATCH_MESSAGE_TYPE) return null;
+  const d = m.details as { watch?: Record<string, unknown>; body?: unknown } | undefined;
+  if (!d || typeof d.body !== "string" || !d.watch) return null;
+  const { id, kind, summary } = d.watch;
+  if (typeof id !== "string" || typeof kind !== "string" || typeof summary !== "string") return null;
+  return { watch: { id, kind, summary }, body: d.body };
+}

@@ -261,6 +261,14 @@ function appendUserMessage(state, event, ts) {
       ],
     };
   }
+  // From a fired watch: likewise never an echo of this tab.
+  const watch = watchSource(event.watch);
+  if (watch) {
+    return {
+      ...state,
+      messages: [...state.messages, { role: "user", content, ts, watch }],
+    };
+  }
 
   const pendingIdx = state.messages.findIndex(
     (m) => m.role === "user" && m.pending && m.content === content,
@@ -282,6 +290,13 @@ function appendUserMessage(state, event, ts) {
 }
 
 /** `{id, name}` of an agent sender, or null if `from` isn't one. */
+/** `{id, kind, summary}` of the watch that sent a message, or null. */
+function watchSource(watch) {
+  if (!watch || typeof watch !== "object") return null;
+  if (typeof watch.id !== "string" || typeof watch.summary !== "string") return null;
+  return { id: watch.id, kind: typeof watch.kind === "string" ? watch.kind : "", summary: watch.summary };
+}
+
 function agentSender(from) {
   if (!from || typeof from !== "object") return null;
   if (typeof from.id !== "string" || typeof from.name !== "string") return null;
@@ -388,10 +403,13 @@ export function renderMessage(msg, idx, expandedItems, opts) {
     // the sender (a button that opens that chat), so it doesn't read as
     // something the user typed.
     const from = agentSender(msg.from);
-    const rowClass = from ? "pi-row-agent-msg" : "pi-row-user";
+    const watch = from ? null : watchSource(msg.watch);
+    const rowClass = from ? "pi-row-agent-msg" : watch ? "pi-row-watch-msg" : "pi-row-user";
     const fromHtml = from
       ? `<div class="agent-msg-label">from agent <button type="button" class="agent-msg-sender" data-open-agent="${escHtml(from.id)}" title="Open ${escHtml(from.name)} (${escHtml(from.id)})">${escHtml(from.name)}</button></div>`
-      : "";
+      : watch
+        ? `<div class="watch-msg-label" title="${escHtml(watch.summary)}">watch ${escHtml(watch.id)} fired</div>`
+        : "";
     return `
       <div class="message-enter pi-row ${rowClass} flex flex-col gap-1 px-4 py-3" data-msg-key="${wrapKey}">
         ${fromHtml}

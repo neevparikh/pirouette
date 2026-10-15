@@ -5,7 +5,7 @@
 
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { NormalizedEvent } from "./types.js";
-import { agentMessageDetails } from "./agent-message.js";
+import { agentMessageDetails, watchMessageDetails } from "./agent-message.js";
 
 function normalizeMessageText(content: unknown): string | undefined {
   if (typeof content === "string") return content;
@@ -107,6 +107,16 @@ export function normalizeEvent(event: AgentSessionEvent): NormalizedEvent {
           text: agentMessage.body,
           from: agentMessage.from,
           ...(images.length > 0 ? { images } : {}),
+        };
+      }
+      // A fired watch (watches.ts): same idea, labelled with the watch.
+      const watchMessage = watchMessageDetails(event.message);
+      if (watchMessage) {
+        return {
+          type: event.type,
+          role: "user",
+          text: watchMessage.body,
+          watch: watchMessage.watch,
         };
       }
       if (event.message.role === "user") {

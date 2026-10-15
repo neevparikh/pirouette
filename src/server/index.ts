@@ -21,6 +21,7 @@ import { getConfig } from "../config.js";
 import { AgentManager } from "./agent-manager.js";
 import { parseNotifyRequest } from "./agent-notify.js";
 import { ProjectManager } from "./project-manager.js";
+import { parseWatchRequest, WatchManager, type WatchMessage } from "./watches.js";
 import { StateManager } from "./state.js";
 import { dashboardCsp, IMAGE_DOCUMENT_CSP } from "./content-security.js";
 import type {
@@ -108,6 +109,36 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
   const projectManager = new ProjectManager(stateManager, dataDir);
   const agentManager = new AgentManager(stateManager, projectManager, dataDir);
   const wsClients = new Set<WebSocket>();
+
+  // Watches (`pru watch`): the server waits on a timer / command / PR and
+  // messages the agent when it fires. Delivery resumes a stopped agent,
+  // like POST /message does.
+  const watchManager = new WatchManager({
+    stateDir,
+    agentExists: (id) => agentManager.getAgent(id) !== undefined,
+    deliver: async (agentId: string, msg: WatchMessage) => {
+      if (!agentManager.isRunning(agentId)) await agentManager.resumeAgent(agentId);
+      // sendMessage on an idle agent resolves only when the turn it starts
+      // ends. Treat "no error within a few seconds" as delivered, and
+      // keep logging anything after that, as POST /message does.
+      const sent = agentManager.sendMessage(agentId, msg.text, {
+        mode: msg.mode,
+        watch: msg.watch,
+        watchBody: msg.body,
+      });
+      const outcome = await Promise.race([
+        sent.then(
+          () => "ok" as const,
+          (err: unknown) => err,
+        ),
+        new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 5000).unref()),
+      ]);
+      if (outcome !== "ok" && outcome !== "pending") throw outcome;
+      if (outcome === "pending") {
+        sent.catch((err) => console.error(`[watches] turn for ${agentId} failed: ${err}`));
+      }
+    },
+  });
 
   // Wire agent events → WebSocket broadcast
   agentManager.onEvent((agentId, event) => {
@@ -453,6 +484,21 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
         }
         return;
       }
+    }
+
+    // ---- watches (pru watch) ----
+    if (method === "GET" && pathname === "/api/watches") {
+      json(res, 200, { watches: watchManager.list() });
+      return;
+    }
+    const watchMatch = pathname.match(/^\/api\/watches\/(w\d+)$/);
+    if (watchMatch && method === "DELETE") {
+      if (!watchManager.cancel(watchMatch[1])) {
+        error(res, 404, `No watch ${watchMatch[1]} (it may have fired already)`);
+        return;
+      }
+      json(res, 200, { cancelled: watchMatch[1] });
+      return;
     }
 
     const agentMatch = pathname.match(/^\/api\/agents\/([^/]+)(\/.*)?$/);
@@ -937,6 +983,9 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
             name,
             message: body.message,
           });
+          // Whatever the outgoing agent was waiting on now wakes its successor.
+          const moved = watchManager.reassign(agentId, successor.id);
+          if (moved) console.log(`[watches] moved ${moved} watch(es) ${agentId} → ${successor.id}`);
           broadcast({ kind: "agent_created", agent: successor });
           json(res, 201, successor);
         } catch (err) {
@@ -999,6 +1048,48 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
       // agent's behalf (`pru notify`). Body: { body, title?, url? }; see
       // agent-notify.ts. Nothing is stored: a dashboard that isn't open
       // when this fires never sees it.
+      // Watches on this agent: list, or create one (see watches.ts).
+      if (method === "GET" && sub === "/watches") {
+        json(res, 200, { watches: watchManager.list(agentId) });
+        return;
+      }
+      if (method === "POST" && sub === "/watches") {
+        let raw: unknown;
+        try {
+          raw = JSON.parse(await readBody(req));
+        } catch {
+          error(res, 400, "body must be valid JSON");
+          return;
+        }
+        const parsed = parseWatchRequest(raw);
+        if (!parsed.ok) {
+          error(res, 400, parsed.error);
+          return;
+        }
+        // `createdBy` arrives as an agent ref (id or name), like `from`.
+        let createdBy: string | null = null;
+        if (parsed.value.createdBy) {
+          const setter = agentManager.resolveAgentRef(parsed.value.createdBy);
+          if (!setter || "ambiguous" in setter) {
+            error(res, 400, `Unknown or ambiguous agent "${parsed.value.createdBy}" in createdBy`);
+            return;
+          }
+          createdBy = setter.id;
+        }
+        const agent = agentManager.getAgent(agentId);
+        try {
+          const watch = await watchManager.create(agentId, {
+            ...parsed.value,
+            createdBy,
+            cwd: parsed.value.cwd ?? agent?.worktreePath ?? null,
+          });
+          json(res, 201, watch);
+        } catch (err) {
+          error(res, 400, err instanceof Error ? err.message : String(err));
+        }
+        return;
+      }
+
       if (method === "POST" && sub === "/notify") {
         const agent = agentManager.getAgent(agentId);
         if (!agent) {
@@ -1077,6 +1168,7 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
             }
           }
           await agentManager.removeAgent(agentId, deleteOpts);
+          watchManager.cancelForAgent(agentId);
           broadcast({ kind: "agent_removed", agentId });
           json(res, 200, { removed: true, ...deleteOpts });
         } catch (err) {
@@ -1337,6 +1429,7 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
   await projectManager.warnAboutOrphanedRepos();
 
   await agentManager.resumeAll();
+  await watchManager.start();
 
   await new Promise<void>((resolve) => {
     server.listen(port, host, () => {
@@ -1347,6 +1440,7 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
 
   const shutdown = async () => {
     console.log("\n[pirouette] shutting down...");
+    await watchManager.stop();
     await agentManager.shutdown();
     for (const ws of wsClients) ws.close();
     wss.close();

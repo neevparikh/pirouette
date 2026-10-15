@@ -47,6 +47,10 @@ import {
   agentMessageText,
   type AgentMessageDetails,
   type AgentMessageSender,
+  WATCH_MESSAGE_TYPE,
+  watchMessageDetails,
+  type WatchMessageDetails,
+  type WatchMessageSource,
 } from "./agent-message.js";
 import { createWorktree, removeWorktree } from "./git.js";
 import { resolveAgentModel } from "./model-resolution.js";
@@ -1187,6 +1191,7 @@ export class AgentManager {
         // the sender, showing the body without the model-facing header.
         // Other custom types (extension bookkeeping) stay hidden.
         const agentMessage = agentMessageDetails(msg);
+        const watchMessage = agentMessage ? null : watchMessageDetails(msg);
         if (agentMessage) {
           const images = pickImageContent(msg.content);
           result.push({
@@ -1195,6 +1200,13 @@ export class AgentManager {
             from: agentMessage.from,
             ts: msg.timestamp,
             ...(images.length > 0 ? { images } : {}),
+          });
+        } else if (watchMessage) {
+          result.push({
+            role: "user",
+            content: watchMessage.body,
+            watch: watchMessage.watch,
+            ts: msg.timestamp,
           });
         }
       } else if (msg.role === "compactionSummary") {
@@ -1892,6 +1904,11 @@ export class AgentManager {
        *  agent). Delivered as an agent-message custom entry instead of a
        *  user message — see agent-message.ts. */
       from?: AgentMessageSender;
+      /** Set when a fired watch sent this (watches.ts). `message` is then
+       *  the full model-facing text and `watchBody` what the dashboard
+       *  shows. Delivered as a watch-message custom entry. */
+      watch?: WatchMessageSource;
+      watchBody?: string;
     } = {},
   ): Promise<void> {
     // Critical: do NOT hold the agent lock across `await session.prompt()`.
@@ -1947,6 +1964,29 @@ export class AgentManager {
         handle.config.errorMessage = null;
       }
       this.setAgentState(id, "running");
+
+      if (opts.watch) {
+        // A fired watch. Built by the server, not typed by anyone, so no
+        // input screening; same custom-message delivery as a peer's.
+        const custom = {
+          customType: WATCH_MESSAGE_TYPE,
+          content: [{ type: "text" as const, text: message }],
+          display: true,
+          details: {
+            watch: opts.watch,
+            body: opts.watchBody ?? message,
+          } satisfies WatchMessageDetails,
+        };
+        console.log(
+          `[agent-manager] delivering watch ${opts.watch.id}` +
+            (handle.session.isStreaming ? ` as ${mode}` : " as a new turn"),
+        );
+        if (handle.session.isStreaming) {
+          await handle.session.sendCustomMessage(custom, { deliverAs: mode });
+          return null;
+        }
+        return { promptPromise: handle.session.sendCustomMessage(custom, { triggerTurn: true }) };
+      }
 
       if (opts.from) {
         // A peer's message. Custom messages skip pi's prompt pipeline

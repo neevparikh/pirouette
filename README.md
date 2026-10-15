@@ -286,6 +286,7 @@ overridden per host under `[hosts.<name>.dotfiles]`.
 | `pru list` | List all agents and their state (`--archived` includes archived ones) |
 | `pru send <agent> <msg>` | Send a message to an agent (`--message-file`, `--follow-up`; from inside an agent it's signed as that agent, `--as-user` to opt out) |
 | `pru notify <msg>` | Raise a desktop notification in open dashboards (`--title`, `--url` opens on click, `--agent`; defaults to self) |
+| `pru watch pr\|cmd\|until\|timer …` | Wake an agent with a message when a PR's checks/reviews land, a background command exits, a condition comes true, or a timer runs out (`--note`, `--agent`, `--timeout`; `pru watch ls`, `pru watch rm <id>`) |
 | `pru interrupt <agent>` | Cancel the agent's current turn; the session stays alive |
 | `pru handoff [agent]` | Replace an agent with a fresh one in the same worktree (defaults to self) |
 | `pru rename <agent> <name>` | Rename a chat (display name only; one argument renames self) |
@@ -504,6 +505,37 @@ The `notify` toggle cycles through three settings: off (gray), agent
 requests only (yellow: just `pru notify`), and all (blue: requests plus
 turn-end and error pings). If it was on before this setting existed, it
 starts on all.
+
+**Waiting without polling: `pru watch`.** An agent that has pushed a PR
+or started a long job can hand the waiting to the server and end its turn:
+
+```bash
+pru watch pr 123 --note "if green, mark ready for review"
+pru watch cmd 'npm run e2e' --timeout 1h
+pru watch until 'curl -sf https://staging.example.com/health' --every 30s
+pru watch timer 2h
+```
+
+When the watch fires, the server sends the agent a message (queued behind
+its current turn; `--steer` to deliver after the current step) saying what
+happened: the failing checks with links, the new review, the exit code and
+last lines of output. The dashboard shows it as a yellow "watch w3 fired"
+row. A `pr` watch fires when a check fails or all pass, on a new review or
+comment, on merge/close, or on a new merge conflict (`--on` narrows that).
+`pr` and `until` give up after 24h by default and say so. Every watch fires
+once. Watches live in `state/watches.json` and survive a server restart,
+except `cmd`, whose process the restart kills; the agent is told. They move
+to the successor on handoff and are dropped when their agent is removed.
+From your own shell, pass `--agent`. The packaged `watch` skill teaches
+agents when to use it.
+
+**Captains.** The packaged `captain` skill turns an agent into a long-lived
+coordinator for one area of work: it plans, launches and briefs a crew of
+agents (each told to report back with `pru send` and to watch its own PR),
+tracks them with watches, reviews what they ship, and gives you a short
+"needs you / new / in progress" digest instead of every detail. Start one
+with something like `pru launch payments-captain` and a first message of
+"You're the captain for <area>. Use the captain skill."
 
 ### Runaway commands: the bash deadline
 
