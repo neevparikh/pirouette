@@ -53,4 +53,12 @@ describe("packaged skills", () => {
     expect(watch).toBeDefined();
     expect(watch!.description).toContain("instead of sleeping or polling");
   });
+
+  it("includes the compact skill", () => {
+    const { skills } = loadSkillsFromDir({ dir: packagedSkillsDir(), source: "pirouette" });
+    const compact = skills.find((s) => s.name === "compact");
+    expect(compact).toBeDefined();
+    expect(compact!.description).toContain("pru compact");
+    expect(compact!.disableModelInvocation).toBe(false);
+  });
 });

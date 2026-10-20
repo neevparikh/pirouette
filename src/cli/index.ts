@@ -17,6 +17,7 @@ import { interrupt } from "./commands/interrupt.js";
 import { notify } from "./commands/notify.js";
 import { watchCmd, watchList, watchPr, watchRm, watchTimer, watchUntil } from "./commands/watch.js";
 import { handoff } from "./commands/handoff.js";
+import { compact } from "./commands/compact.js";
 import { archive, unarchive } from "./commands/archive.js";
 import { rename } from "./commands/rename.js";
 import { rm } from "./commands/rm.js";
@@ -210,6 +211,19 @@ program
   .option("-m, --message <text>", "Briefing sent to the successor as its first message")
   .option("-f, --message-file <path>", "Read the briefing from a file")
   .action(handoff);
+
+program
+  .command("compact [agent]")
+  .description(
+    "Compact an agent's context in place (summarise the conversation). Waits for the " +
+      "current turn to end, so an agent can compact itself. Defaults to the agent running the command.",
+  )
+  .option("-i, --instructions <text>", "What the summary should keep or focus on")
+  .option("-f, --instructions-file <path>", "Read the summary instructions from a file")
+  .option("-m, --message <text>", "Message sent as a new turn after compacting (self default: 'continue')")
+  .option("--no-continue", "Don't send any message after compacting")
+  .option("--now", "Compact immediately, aborting the agent's current turn (not for self)")
+  .action(compact);
 
 program
   .command("archive [agent]")

@@ -288,6 +288,7 @@ overridden per host under `[hosts.<name>.dotfiles]`.
 | `pru notify <msg>` | Raise a desktop notification in open dashboards (`--title`, `--url` opens on click, `--agent`; defaults to self) |
 | `pru watch pr\|cmd\|until\|timer …` | Wake an agent with a message when a PR's checks/reviews land, a background command exits, a condition comes true, or a timer runs out (`--note`, `--agent`, `--timeout`; `pru watch ls`, `pru watch rm <id>`) |
 | `pru interrupt <agent>` | Cancel the agent's current turn; the session stays alive |
+| `pru compact [agent]` | Compact an agent's context in place, after its current turn (`--instructions`, `--message`, `--no-continue`, `--now`; defaults to self) |
 | `pru handoff [agent]` | Replace an agent with a fresh one in the same worktree (defaults to self) |
 | `pru rename <agent> <name>` | Rename a chat (display name only; one argument renames self) |
 | `pru archive [agent]` | Hide a finished chat from the chat list (`--stop` also stops it; defaults to self) |
@@ -423,6 +424,18 @@ or as `PIROUETTE_AUTO_COMPACT_AT` / `PIROUETTE_AUTO_COMPACT_MODELS` in the
 server's environment. It re-derives on a model switch, so moving an agent
 from a 1M-token model to a 200k one doesn't leave it compacting every turn.
 `/compact [instructions]` still compacts on demand.
+
+Agents can compact *themselves*: `pru compact` with no argument targets the
+caller, and waits for its current turn to end rather than aborting the tool
+call that asked for it. Once the summary is written the agent gets a
+"continue" message as a new turn, so it picks the task back up on its own:
+
+```bash
+pru compact --instructions "keep the repro steps and the PR state; drop the log dumps"
+pru compact other-agent --message "carry on with the migration"  # or --now to abort its turn
+```
+
+The packaged `compact` skill tells agents when to reach for it.
 
 To use different thresholds for different models, add ordered rules:
 

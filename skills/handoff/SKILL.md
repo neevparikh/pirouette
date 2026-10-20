@@ -22,7 +22,8 @@ briefing.
   failed approach, a giant log dump) that the remaining work doesn't need.
 - The user says "hand off", "start fresh", "new agent", or similar.
 
-Prefer a handoff over `/compact` when the *useful* state is small and lives
+Prefer a handoff over compacting yourself (`pru compact`, see the `compact`
+skill) when the *useful* state is small and lives
 in files anyway. Prefer compaction when the conversation itself is the state
 (a design discussion, a review thread).
 
