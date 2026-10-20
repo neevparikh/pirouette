@@ -920,34 +920,58 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
         return;
       }
 
-      // Manual context compaction. Optional `instructions` body field gets
-      // passed through to pi.session.compact() as custom summarisation
-      // guidance. The compaction itself happens asynchronously and emits
+      // Manual context compaction. Body fields (all optional):
+      //   instructions  custom summarisation guidance for pi.session.compact()
+      //   afterTurn     wait for the current turn to end instead of aborting
+      //                 it (what `pru compact` uses, so an agent can compact
+      //                 itself from inside a tool call)
+      //   message       sent as a new turn once compaction finishes
+      // The compaction itself happens asynchronously and emits
       // compaction_start / compaction_end events; we accept-and-return.
       if (method === "POST" && sub === "/compact") {
         try {
           const rawBody = await readBody(req).catch(() => "");
           let instructions: string | undefined;
+          let afterTurn = false;
+          let continueMessage: string | undefined;
           if (rawBody) {
             try {
-              const parsed = JSON.parse(rawBody) as { instructions?: string };
+              const parsed = JSON.parse(rawBody) as {
+                instructions?: string;
+                afterTurn?: boolean;
+                message?: string;
+              };
               if (typeof parsed.instructions === "string" && parsed.instructions.trim()) {
                 instructions = parsed.instructions.trim();
+              }
+              afterTurn = parsed.afterTurn === true;
+              if (typeof parsed.message === "string" && parsed.message.trim()) {
+                continueMessage = parsed.message.trim();
               }
             } catch {
               // ignore body parse errors; treat as no instructions
             }
           }
-          // Fire-and-forget: compaction can take seconds (LLM call). We
-          // surface progress via compaction_start / compaction_end events.
-          agentManager.compactAgent(agentId, instructions).catch((err) => {
+          if (!agentManager.isRunning(agentId)) {
+            error(res, 409, "Agent is not running");
+            return;
+          }
+          if (afterTurn && agentManager.hasPendingCompaction(agentId)) {
+            error(res, 409, "A compaction is already queued for this agent");
+            return;
+          }
+          const deferred = afterTurn && agentManager.isBusy(agentId);
+          // Fire-and-forget: compaction can take seconds (LLM call), and a
+          // deferred one waits out the rest of the turn. We surface
+          // progress via compaction_start / compaction_end events.
+          agentManager.compactAgent(agentId, instructions, { afterTurn, continueMessage }).catch((err) => {
             console.error(`[server] compactAgent error for ${agentId}: ${err}`);
             broadcast({
               kind: "error",
               message: `Compaction failed for agent ${agentId}: ${err instanceof Error ? err.message : String(err)}`,
             });
           });
-          json(res, 202, { accepted: true });
+          json(res, 202, { accepted: true, deferred });
         } catch (err) {
           error(res, 500, err instanceof Error ? err.message : String(err));
         }

@@ -25,6 +25,18 @@ follow [SemVer](https://semver.org).
 
 ### Added
 
+- **Agents can compact themselves with `pru compact`.** `/compact` from the
+  dashboard aborts whatever the agent is doing, so an agent couldn't use it
+  on itself: the compaction would kill the very tool call that asked for it.
+  `pru compact [agent]` queues the compaction behind the current turn
+  instead (`POST /api/agents/:id/compact` with `afterTurn: true`), runs it
+  as soon as the turn ends, and then wakes the agent with a "continue"
+  message so it carries on from the summary. `--instructions` steers the
+  summary, `--message` replaces the continue message, `--no-continue` skips
+  it, and `--now` compacts another agent immediately. With no argument it
+  targets the agent running it; the new packaged `compact` skill says when
+  to compact versus hand off.
+
 - **`pru watch` wakes an agent when something it's waiting on happens.**
   Agents used to wait on CI or a long job by polling inside a tool call
   (hitting the bash deadline, and dying with any restart) or by ending the

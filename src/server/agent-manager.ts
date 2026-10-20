@@ -110,6 +110,10 @@ const DEFAULT_SELF_UPDATE_RESUME_MESSAGE =
  *  the call before its result (the successor's id) ever reaches it. */
 const HANDOFF_PARENT_STOP_DELAY_MS = 5_000;
 
+/** How often a compaction queued behind a running turn (`pru compact`)
+ *  checks whether the turn has ended. */
+const COMPACT_AFTER_TURN_POLL_MS = 500;
+
 /** Name for the agent taking over from `name`: `foo` → `foo-2` → `foo-3`.
  *  Successive handoffs on a long-running task read as one numbered series
  *  in the sidebar instead of `foo-handoff-handoff-handoff`. */
@@ -238,6 +242,10 @@ export class AgentManager {
    *  given agent runs through `withAgentLock(id, ...)` to prevent races
    *  (e.g. sendMessage arriving mid-resume, double-stop, etc). */
   private agentLocks = new Map<string, Promise<unknown>>();
+
+  /** Agents with a compaction queued behind their current turn
+   *  (`compactAgent(..., { afterTurn: true })`). */
+  private pendingCompactions = new Set<string>();
 
   /** Pending ExtensionUIContext requests waiting on a browser response.
    *  Keyed by requestId (unique across all agents). Entries are added by
@@ -2326,20 +2334,100 @@ export class AgentManager {
    *  guidance for the summary (e.g. "keep the architecture decisions,
    *  drop the debugging tangents").
    *
+   *  `afterTurn` defers the compaction until the agent's current turn has
+   *  ended instead of aborting it. That is what an agent compacting
+   *  *itself* (`pru compact` from its own bash tool) needs: an immediate
+   *  compact would abort the very tool call that asked for it, and the
+   *  summary would be cut off mid-thought. Idle agents compact right away
+   *  either way.
+   *
+   *  `continueMessage` is sent as a new turn once the compaction has
+   *  finished (or failed — then with the error prepended), so an agent
+   *  that compacted itself mid-task picks the work back up instead of
+   *  sitting idle on a fresh summary.
+   *
    *  No agent lock: compact() internally aborts any in-flight prompt and
    *  then runs its own LLM call. Taking pirouette's lock would deadlock
    *  for the same reason stopAgent() can't (sendMessage holds the lock
    *  across the streaming turn). pi's session is internally serialized,
    *  so concurrent compact + prompt is safe. */
-  async compactAgent(id: string, instructions?: string): Promise<void> {
+  async compactAgent(
+    id: string,
+    instructions?: string,
+    opts: { afterTurn?: boolean; continueMessage?: string } = {},
+  ): Promise<void> {
     const handle = this.handles.get(id);
     if (!handle) throw new Error(`Agent ${id} is not running`);
     console.log(
-      `[agent-manager] compactAgent ${handle.config.name} (${id})${instructions ? ` with instructions` : ""}`,
+      `[agent-manager] compactAgent ${handle.config.name} (${id})` +
+        `${instructions ? ` with instructions` : ""}${opts.afterTurn ? " after turn" : ""}`,
     );
-    // session.compact() emits compaction_start / compaction_end events
-    // that already flow to clients via the existing event subscription.
-    await handle.session.compact(instructions);
+    if (opts.afterTurn && !this.sessionIsIdle(handle)) {
+      if (this.pendingCompactions.has(id)) {
+        throw new Error(`A compaction is already queued for agent ${id}`);
+      }
+      this.pendingCompactions.add(id);
+      try {
+        const stillOurs = await this.waitUntilIdle(id, handle);
+        if (!stillOurs) {
+          console.log(`[agent-manager] queued compaction for ${id} dropped: session went away`);
+          return;
+        }
+      } finally {
+        this.pendingCompactions.delete(id);
+      }
+      console.log(`[agent-manager] ${handle.config.name} (${id}) turn ended; running queued compaction`);
+    }
+
+    let failure: string | null = null;
+    try {
+      // session.compact() emits compaction_start / compaction_end events
+      // that already flow to clients via the existing event subscription.
+      await handle.session.compact(instructions);
+    } catch (err) {
+      failure = err instanceof Error ? err.message : String(err);
+      if (opts.continueMessage == null) throw err;
+    }
+
+    if (opts.continueMessage != null && this.handles.get(id) === handle) {
+      const message = failure
+        ? `[pirouette] The compaction you asked for failed: ${failure}\n\n${opts.continueMessage}`
+        : opts.continueMessage;
+      this.sendMessage(id, message).catch((err) => {
+        console.error(`[agent-manager] post-compaction continue failed for ${id}: ${err}`);
+      });
+    }
+    if (failure) throw new Error(failure);
+  }
+
+  /** Whether the agent is mid-turn (or retrying / compacting). False for
+   *  agents that aren't running. */
+  isBusy(id: string): boolean {
+    const handle = this.handles.get(id);
+    return handle ? !this.sessionIsIdle(handle) : false;
+  }
+
+  /** Whether a compaction is queued behind the agent's current turn. */
+  hasPendingCompaction(id: string): boolean {
+    return this.pendingCompactions.has(id);
+  }
+
+  /** No turn, queued continuation, retry or compaction in flight. */
+  private sessionIsIdle(handle: AgentHandle): boolean {
+    const s = handle.session as AgentSession & { isRetrying?: boolean; isCompacting?: boolean };
+    return !s.isStreaming && !s.isRetrying && !s.isCompacting;
+  }
+
+  /** Poll until the agent's session is idle. Returns false if the session
+   *  was stopped or replaced meanwhile (then there's nothing to compact).
+   *  Polling rather than `waitForIdle()` so a disposed session can't leave
+   *  us hanging forever. */
+  private async waitUntilIdle(id: string, handle: AgentHandle): Promise<boolean> {
+    for (;;) {
+      if (this.handles.get(id) !== handle) return false;
+      if (this.sessionIsIdle(handle)) return true;
+      await sleep(COMPACT_AFTER_TURN_POLL_MS);
+    }
   }
 
   /** Discard the agent's current session and start a fresh one in the same
