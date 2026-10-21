@@ -9,6 +9,11 @@ follow [SemVer](https://semver.org).
 
 ### Fixed
 
+- **You can scroll up while a reply is streaming.** Scrolling up a little
+  used to get yanked back to the bottom by the next token, so the view
+  jittered in place instead of letting go. Any scroll up (wheel, touch,
+  PageUp/ArrowUp/Home, scrollbar drag) now stops the auto-follow straight
+  away, and scrolling back down to the bottom turns it back on.
 - **It's now clear what's a link in the transcript.** Underline is reserved
   for clickable links: h1/h2 headings are no longer underlined (every heading
   level now shows its `#` prefix instead), and links whose URL isn't

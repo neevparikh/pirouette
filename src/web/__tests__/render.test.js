@@ -19,6 +19,7 @@ import {
   renderMarkdown,
   shortenPath,
   shouldStickToBottom,
+  nextFollowState,
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
@@ -508,32 +509,97 @@ describe("formatDocumentTitle", () => {
 });
 
 describe("shouldStickToBottom", () => {
-  /** A transcript taller than its viewport, scrolled `fromBottom` px up. */
-  const view = (fromBottom, extra = {}) => ({
-    scrollHeight: 5000,
-    clientHeight: 800,
-    scrollTop: 5000 - 800 - fromBottom,
-    ...extra,
-  });
+  const tall = { scrollHeight: 5000, clientHeight: 800 };
 
-  it("follows along when the user is parked at the bottom", () => {
-    expect(shouldStickToBottom(view(0))).toBe(true);
-    expect(shouldStickToBottom(view(10))).toBe(true);
+  it("follows along while the user is following the bottom", () => {
+    expect(shouldStickToBottom({ ...tall, following: true })).toBe(true);
   });
 
   it("leaves the view alone when the user scrolled up to read", () => {
-    expect(shouldStickToBottom(view(400))).toBe(false);
+    expect(shouldStickToBottom({ ...tall, following: false })).toBe(false);
   });
 
-  it("pins regardless of where the scrollbar sits", () => {
-    // The agent-switch case: scrollTop is a leftover from the previous
-    // chat, so the near-bottom arithmetic is meaningless here.
-    expect(shouldStickToBottom({ ...view(3000), pinned: true })).toBe(true);
+  it("pins regardless of the follow state", () => {
+    // The agent-switch case: scrollTop is a leftover from the previous chat.
+    expect(shouldStickToBottom({ ...tall, following: false, pinned: true })).toBe(true);
   });
 
   it("sticks when the content is shorter than the viewport", () => {
     expect(
-      shouldStickToBottom({ scrollHeight: 200, clientHeight: 800, scrollTop: 0 }),
+      shouldStickToBottom({ scrollHeight: 200, clientHeight: 800, following: false }),
+    ).toBe(true);
+  });
+});
+
+describe("nextFollowState", () => {
+  /** A 5000px transcript in an 800px viewport, scrolled `fromBottom` px up. */
+  const at = (fromBottom, scrollHeight = 5000) => scrollHeight - 800 - fromBottom;
+  const step = (following, fromLast, fromNow, extra = {}) =>
+    nextFollowState({
+      following,
+      lastScrollTop: at(fromLast),
+      scrollTop: at(fromNow, extra.scrollHeight),
+      scrollHeight: 5000,
+      lastScrollHeight: 5000,
+      clientHeight: 800,
+      ...extra,
+    });
+
+  it("lets go on a small scroll up, even while still near the bottom", () => {
+    // The streaming jitter bug: one wheel notch (or the first frame of a
+    // smooth scroll) is well within any "near the bottom" slack.
+    expect(step(true, 0, 10)).toBe(false);
+    expect(step(true, 0, 100)).toBe(false);
+  });
+
+  it("stays detached while new content grows under a parked view", () => {
+    expect(step(false, 600, 600)).toBe(false);
+    // Content grew by 300px: scrollTop unchanged, gap is now bigger.
+    expect(
+      nextFollowState({
+        following: false,
+        lastScrollTop: at(600),
+        scrollTop: at(600),
+        scrollHeight: 5300,
+        lastScrollHeight: 5000,
+        clientHeight: 800,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not re-attach just because an upward scroll hasn't moved far yet", () => {
+    expect(step(false, 5, 5)).toBe(false);
+  });
+
+  it("re-attaches when the user scrolls back down to the bottom", () => {
+    expect(step(false, 600, 300)).toBe(false);
+    expect(step(false, 300, 10)).toBe(true);
+    expect(step(false, 300, 0)).toBe(true);
+  });
+
+  it("keeps following when content shrinks and the browser clamps scrollTop", () => {
+    expect(
+      nextFollowState({
+        following: true,
+        lastScrollTop: at(0, 5000),
+        scrollTop: at(0, 4800),
+        scrollHeight: 4800,
+        lastScrollHeight: 5000,
+        clientHeight: 800,
+      }),
+    ).toBe(true);
+  });
+
+  it("follows at the bottom when there's no previous position yet", () => {
+    expect(
+      nextFollowState({
+        following: false,
+        lastScrollTop: null,
+        scrollTop: at(0),
+        scrollHeight: 5000,
+        lastScrollHeight: null,
+        clientHeight: 800,
+      }),
     ).toBe(true);
   });
 });

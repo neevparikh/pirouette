@@ -16,6 +16,7 @@ import {
   relTime,
   shortenPath,
   shouldStickToBottom,
+  nextFollowState,
   SIDEBAR_DEFAULT_WIDTH,
 } from "./render.js";
 import {
@@ -1675,16 +1676,19 @@ function updateStreamingElement(elementId, text, kind) {
     return;
   }
 
-  // Snapshot scroll state BEFORE mutating the DOM. A single markdown
+  // Decide BEFORE mutating the DOM whether to follow. A single markdown
   // re-render can add many lines at once (a paragraph reflows, a table
-  // or code block appears), so measuring "near the bottom" after the
-  // swap would see the freshly-added content as a large gap and wrongly
-  // conclude the user had scrolled away — detaching auto-scroll after a
-  // line or two. Capturing the pre-mutation state keeps the follow
-  // behavior stable across big incremental jumps.
+  // or code block appears), so measuring after the swap would see the
+  // fresh content as a gap and wrongly detach. `isFollowingBottom` also
+  // folds in any scroll-up the user made since the last frame, so a
+  // wheel notch isn't undone by the next token.
   const $m = document.getElementById("messages");
-  const wasNearBottom = $m
-    ? $m.scrollHeight - $m.scrollTop - $m.clientHeight < 200
+  const wasFollowing = $m
+    ? shouldStickToBottom({
+        scrollHeight: $m.scrollHeight,
+        clientHeight: $m.clientHeight,
+        following: isFollowingBottom(),
+      })
     : false;
 
   if (kind === "text") {
@@ -1724,11 +1728,11 @@ function updateStreamingElement(elementId, text, kind) {
     if (hadFocus) el.querySelector("button[data-toggle]")?.focus({ preventScroll: true });
   }
 
-  // Outer scroll follow: only if the user was already near the bottom of
-  // the messages list before this update. Avoids yanking scroll if they
-  // scrolled up to read.
-  if ($m && wasNearBottom) {
-    $m.scrollTop = $m.scrollHeight;
+  // Outer scroll follow: only if the user is still following the bottom.
+  // Avoids yanking scroll if they scrolled up to read.
+  if ($m && wasFollowing) {
+    jumpToBottom();
+    followBottom = true;
   }
 }
 
@@ -2316,6 +2320,51 @@ let pinBottomAgentId = null;
  *  scroll-to-bottom can tell whether the user moved under it. */
 let userScrollSeq = 0;
 
+/** Is the user following the bottom of the transcript (auto-scroll on new
+ *  content)? Sticky: cleared by any upward scroll, set again by reaching
+ *  the bottom. See `nextFollowState` in render.js. */
+let followBottom = true;
+/** `$messages.scrollTop` as of the last time we looked, so an upward move
+ *  by the user can be told apart from our own jumps (which only go down). */
+let lastScrollTop = null;
+let lastScrollHeight = null;
+
+/** Fold the current scroll position into `followBottom` and return it.
+ *  Called on every `scroll` event and again right before any auto-scroll,
+ *  because a WebSocket delta can land after the user moved the view but
+ *  before the browser dispatched the `scroll` event for it. */
+function isFollowingBottom() {
+  followBottom = nextFollowState({
+    following: followBottom,
+    scrollTop: $messages.scrollTop,
+    lastScrollTop,
+    scrollHeight: $messages.scrollHeight,
+    lastScrollHeight,
+    clientHeight: $messages.clientHeight,
+  });
+  lastScrollTop = $messages.scrollTop;
+  lastScrollHeight = $messages.scrollHeight;
+  return followBottom;
+}
+
+/** Programmatic jump to the bottom, recorded so it isn't mistaken for a
+ *  user scroll. */
+function jumpToBottom() {
+  $messages.scrollTop = $messages.scrollHeight;
+  lastScrollTop = $messages.scrollTop;
+  lastScrollHeight = $messages.scrollHeight;
+}
+
+/** The user signalled they want to read history: stop following now,
+ *  before the scroll itself lands (smooth wheel scrolling animates over
+ *  several frames, and a streaming delta that jumps to the bottom mid-
+ *  animation cancels it — that was the jitter). */
+function stopFollowingBottom() {
+  followBottom = false;
+  pinBottomAgentId = null;
+  userScrollSeq += 1;
+}
+
 // --- pi-md width measurement ---
 //
 // The pi-tui-style markdown renderer takes a character-column count
@@ -2434,14 +2483,14 @@ function renderMessages() {
   }
 
   // Snapshot scroll state before mutating. We auto-scroll to the new
-  // bottom only if the user was already pinned there (within ~40px), or if
-  // we just switched into this agent. This keeps the view stable when
-  // they've scrolled up to read history while the agent is still working.
+  // bottom only if the user is following it, or if we just switched into
+  // this agent. This keeps the view stable when they've scrolled up to
+  // read history while the agent is still working.
   const pinned = pinBottomAgentId !== null && pinBottomAgentId === selectedAgentId;
   const stick = shouldStickToBottom({
     scrollHeight: $messages.scrollHeight,
-    scrollTop: $messages.scrollTop,
     clientHeight: $messages.clientHeight,
+    following: isFollowingBottom(),
     pinned,
   });
 
@@ -2613,13 +2662,15 @@ function updateInputPlaceholder() {
  *  the bottom right after switching chats. Skipped if the user scrolled
  *  away in between (their pin got cleared). */
 function scrollToBottom() {
-  $messages.scrollTop = $messages.scrollHeight;
+  jumpToBottom();
+  followBottom = true;
   const agentAtSchedule = selectedAgentId;
   const seqAtSchedule = userScrollSeq;
   requestAnimationFrame(() => {
     if (selectedAgentId !== agentAtSchedule) return;
     if (userScrollSeq !== seqAtSchedule) return;
-    $messages.scrollTop = $messages.scrollHeight;
+    if (!isFollowingBottom()) return;
+    jumpToBottom();
   });
 }
 
@@ -2628,6 +2679,9 @@ async function selectAgent(id) {
   // Open at the bottom: `#messages` is shared across chats, so its
   // scrollTop is still pointing wherever the previous chat was parked.
   pinBottomAgentId = id;
+  followBottom = true;
+  lastScrollTop = null;
+  lastScrollHeight = null;
   // Park the previous agent's toasts, paint this agent's status pills and
   // release anything that queued up while we were looking elsewhere.
   extensionUI.setSelectedAgent(id);
@@ -3950,12 +4004,40 @@ applyRawBtnStyle();
 // pin: if the user is already reading history while the fetch is still in
 // flight, don't yank them back down when it lands. Gestures rather than
 // the `scroll` event, which also fires for our own programmatic jumps.
-for (const evt of ["wheel", "touchmove"]) {
-  $messages.addEventListener(evt, () => {
+//
+// Upward gestures also stop the auto-follow immediately (see
+// stopFollowingBottom); the `scroll` handler then re-attaches once the
+// user scrolls back down to the bottom.
+$messages.addEventListener("wheel", (e) => {
+  if (e.deltaY < 0) stopFollowingBottom();
+  else {
     pinBottomAgentId = null;
     userScrollSeq += 1;
-  }, { passive: true });
-}
+  }
+}, { passive: true });
+let touchLastY = null;
+$messages.addEventListener("touchstart", (e) => {
+  touchLastY = e.touches[0]?.clientY ?? null;
+}, { passive: true });
+$messages.addEventListener("touchmove", (e) => {
+  const y = e.touches[0]?.clientY ?? null;
+  // Finger moving down the screen scrolls the content up.
+  if (y != null && touchLastY != null && y > touchLastY) stopFollowingBottom();
+  else {
+    pinBottomAgentId = null;
+    userScrollSeq += 1;
+  }
+  touchLastY = y;
+}, { passive: true });
+document.addEventListener("keydown", (e) => {
+  if (!["PageUp", "ArrowUp", "Home"].includes(e.key)) return;
+  // Only when the key would scroll the transcript, not move a caret.
+  const t = /** @type {HTMLElement | null} */ (e.target);
+  if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+  if (t && t !== document.body && !$messages.contains(t)) return;
+  stopFollowingBottom();
+});
+$messages.addEventListener("scroll", () => { isFollowingBottom(); }, { passive: true });
 
 $messages.addEventListener("click", (e) => {
   // "from agent <name>" on a message another agent sent: open that chat.

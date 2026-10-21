@@ -620,27 +620,69 @@ export function formatDocumentTitle(projectName, agentName) {
  *  arithmetic is rarely 0, so we need some slack. */
 export const STICK_TO_BOTTOM_SLACK = 40;
 
+/** Is the user still following the bottom of the transcript?
+ *
+ *  Called whenever we look at the scroll container (on `scroll` events and
+ *  right before any auto-scroll), with the `scrollTop` / `scrollHeight` we
+ *  last saw.
+ *
+ *    - Moved up since we last looked: not following. Our own jumps only
+ *      ever go *down* to the bottom, so an upward move is the user (wheel,
+ *      touch, keyboard, scrollbar drag) asking to read history. Exception:
+ *      the content shrank and the browser clamped `scrollTop` to the new
+ *      bottom — that's not the user.
+ *    - Moved down into the last `slack` px: following again. This is how
+ *      you re-attach — scroll back down to the end.
+ *    - Anything else: unchanged.
+ *
+ *  Tracking this as sticky state rather than re-deriving "near the bottom"
+ *  on every streaming delta is what lets a scroll-up escape the follow: a
+ *  single wheel notch only moves ~50-100px (less on the first frame of a
+ *  smooth scroll), which used to still count as "near the bottom" and got
+ *  yanked straight back down by the next token, so the view jittered in
+ *  place instead of letting go. */
+export function nextFollowState({
+  following,
+  scrollTop,
+  lastScrollTop,
+  scrollHeight,
+  lastScrollHeight,
+  clientHeight,
+  slack = STICK_TO_BOTTOM_SLACK,
+}) {
+  const nearBottom = scrollHeight - scrollTop - clientHeight < slack;
+  if (lastScrollTop == null) return following || nearBottom;
+  const moved = scrollTop - lastScrollTop;
+  if (moved < -1) {
+    const clamped = nearBottom && lastScrollHeight != null && scrollHeight < lastScrollHeight;
+    return clamped ? following : false;
+  }
+  if (moved > 1 && nearBottom) return true;
+  return following;
+}
+
 /** Should the transcript be scrolled to the bottom after this render?
  *
- *  Two ways to say yes:
+ *  Yes when:
  *    - `pinned`: the caller knows the view should start at the bottom
  *      regardless of where the scrollbar happens to sit. That's the case
  *      right after an agent switch, where the container's `scrollTop` is
  *      still a leftover from the *previous* chat and says nothing about
  *      where the user wants to be in this one.
- *    - the user was already parked within `slack` px of the bottom, so
- *      they're following along and want to keep following.
+ *    - `following`: the user hasn't scrolled away from the bottom (see
+ *      `nextFollowState`).
+ *    - the content doesn't overflow the viewport yet, so there's nothing
+ *      to have scrolled away from.
  *
  *  Otherwise they scrolled up to read history: leave the view alone. */
 export function shouldStickToBottom({
   scrollHeight,
-  scrollTop,
   clientHeight,
+  following,
   pinned = false,
-  slack = STICK_TO_BOTTOM_SLACK,
 }) {
-  if (pinned) return true;
-  return scrollHeight - scrollTop - clientHeight < slack;
+  if (pinned || following) return true;
+  return scrollHeight <= clientHeight + 1;
 }
 
 // --- sidebar width ---
