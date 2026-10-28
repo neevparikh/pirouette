@@ -284,7 +284,7 @@ overridden per host under `[hosts.<name>.dotfiles]`.
 |---|---|
 | `pru launch <name>` | Create a new pi agent (`--project`, `--model`, `--thinking` optional) |
 | `pru list` | List all agents and their state (`--archived` includes archived ones) |
-| `pru send <agent> <msg>` | Send a message to an agent (`--message-file`, `--follow-up`; from inside an agent it's signed as that agent, `--as-user` to opt out) |
+| `pru send <agent> <msg>` | Send a message to an agent (`--message-file`, `--follow-up`, `--attach <file>` (repeatable); from inside an agent it's signed as that agent, `--as-user` to opt out) |
 | `pru notify <msg>` | Raise a desktop notification in open dashboards (`--title`, `--url` opens on click, `--agent`; defaults to self) |
 | `pru watch pr\|cmd\|until\|timer …` | Wake an agent with a message when a PR's checks/reviews land, a background command exits, a condition comes true, or a timer runs out (`--note`, `--agent`, `--timeout`; `pru watch ls`, `pru watch rm <id>`) |
 | `pru interrupt <agent>` | Cancel the agent's current turn; the session stays alive |
@@ -390,6 +390,17 @@ not assumed successful. Input and output expansion are independent.
 Long user messages and thinking traces also default to an eight-line preview,
 measured after wrapping so a pasted paragraph stays compact on mobile.
 Thinking renders Markdown both during streaming and after completion.
+
+### Attaching files
+
+Click **attach** next to **send**, drop files on the input bar, or paste
+them. Small PNG/JPEG/WebP/GIF images go to the model inline, as when you
+paste a screenshot. Any other file (and any image over 5 MB) is uploaded
+to the host at `<data_dir>/uploads/<date>/`, and its path is added to the
+end of your message so the agent can read it with its tools. Uploads are
+capped at 100 MB each, and they live outside every worktree, so they never
+show up in `git status`. From a shell, `pru send <agent> "msg" --attach
+report.pdf` does the same.
 
 ### Math in chat
 

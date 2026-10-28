@@ -1101,7 +1101,8 @@
              steering or follow-up messages (mirroring pi's TUI). -->
         <div id="queue-strip" class="hidden mb-2 flex flex-wrap gap-1.5"></div>
 
-        <!-- Image-attachment preview strip. -->
+        <!-- Attachment preview strip: pasted/picked/dropped images and
+             uploaded files. -->
         <div id="attachment-strip" class="hidden mb-2 flex flex-wrap gap-2"></div>
 
         <div class="flex items-end gap-3">
@@ -1120,6 +1121,17 @@
                matches pi's TUI default. Styled as a quiet text-button --
                pi-cli has no send button (Enter sends), but web users on
                mobile need an obvious affordance. -->
+          <!-- File attachments: opens the picker. Files can also be dropped
+               on the input bar or pasted. Images go inline to the model;
+               other files are uploaded to the host and their paths added
+               to the message. -->
+          <input id="attach-input" type="file" multiple class="hidden" />
+          <button
+            id="attach-btn"
+            class="text-base16-500 hover:text-base16-700 cursor-pointer text-sm font-mono whitespace-nowrap"
+            title="Attach files (or drop / paste them here)"
+            aria-label="attach files"
+          >attach</button>
           <div class="flex flex-col gap-0.5 items-end">
             <button
               id="send-btn"

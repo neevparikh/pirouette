@@ -54,6 +54,21 @@ export async function apiPost<T = unknown>(path: string, body?: unknown): Promis
   return res.json() as Promise<T>;
 }
 
+/** Upload raw bytes to POST /api/uploads; resolves to the saved file's
+ *  `{ path, name, size }` on the server host. */
+export async function apiUpload<T = unknown>(name: string, data: Uint8Array<ArrayBuffer>): Promise<T> {
+  const res = await fetch(`${baseUrl()}/api/uploads?name=${encodeURIComponent(name)}`, {
+    method: "POST",
+    headers: { "content-type": "application/octet-stream" },
+    body: data,
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    throw new Error((body.error as string) ?? `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<T>;
+}
+
 export async function apiDelete<T = unknown>(path: string): Promise<T> {
   const res = await fetch(`${baseUrl()}${path}`, { method: "DELETE" });
   if (!res.ok) {

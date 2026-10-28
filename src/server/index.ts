@@ -24,6 +24,7 @@ import { ProjectManager } from "./project-manager.js";
 import { parseWatchRequest, WatchManager, type WatchMessage } from "./watches.js";
 import { StateManager } from "./state.js";
 import { dashboardCsp, IMAGE_DOCUMENT_CSP } from "./content-security.js";
+import { saveUpload, UploadError } from "./uploads.js";
 import type {
   CreateAgentRequest,
   CreateProjectRequest,
@@ -386,6 +387,39 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
     // affects autocomplete.
     if (method === "GET" && pathname === "/api/commands") {
       json(res, 200, { commands: agentManager.getExtensionCommands() });
+      return;
+    }
+
+    // Upload a file to attach to a prompt. The raw bytes are the request
+    // body and the original file name is the `name` query param; the file
+    // is saved under <dataDir>/uploads/ and its absolute path returned, for
+    // the client to reference in the message it sends. See uploads.ts.
+    //
+    // Requires `content-type: application/octet-stream`. That isn't a
+    // CORS-safelisted type, so a cross-origin page can't send it without a
+    // preflight — which we refuse (OPTIONS → 405) — and so can't fill the
+    // disk with a plain form POST.
+    if (method === "POST" && pathname === "/api/uploads") {
+      const contentType = (req.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
+      if (contentType !== "application/octet-stream") {
+        error(res, 415, "upload body must be content-type application/octet-stream");
+        return;
+      }
+      const name = url.searchParams.get("name") ?? "";
+      if (!name || name.length > 1000) {
+        error(res, 400, "name query param is required (max 1000 chars)");
+        return;
+      }
+      try {
+        const saved = await saveUpload(dataDir, name, req);
+        json(res, 201, saved);
+      } catch (err) {
+        // Close the connection: the client may still be streaming a body
+        // we've stopped reading (e.g. after a 413).
+        res.setHeader("connection", "close");
+        if (err instanceof UploadError) error(res, err.status, err.message);
+        else error(res, 500, err instanceof Error ? err.message : String(err));
+      }
       return;
     }
 

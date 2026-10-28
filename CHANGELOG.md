@@ -7,6 +7,15 @@ follow [SemVer](https://semver.org).
 
 ## Unreleased — self-update actually brings the agents back
 
+### Added
+
+- **You can attach files to a message.** The composer has an **attach**
+  button, and you can also drop files on the input bar or paste them. Small
+  images still go to the model inline. Other files are uploaded to the host
+  under `<data_dir>/uploads/`, and their paths are added to the message so
+  the agent can open them. `pru send --attach <file>` (repeatable) does the
+  same from a shell.
+
 ### Fixed
 
 - **You can scroll up while a reply is streaming.** Scrolling up a little

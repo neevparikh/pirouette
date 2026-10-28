@@ -31,6 +31,13 @@ import { syncMessagePreviews } from "./message-preview.js";
 import { ExtensionUISurface } from "./extension-ui.js";
 import { VimMode } from "./vim.js";
 import { escapeAction } from "./keys.js";
+import {
+  attachmentKind,
+  formatBytes,
+  MAX_UPLOAD_BYTES,
+  uploadFile,
+  withAttachmentNote,
+} from "./attachments.js";
 
 // Resource errors do not bubble. Capture them for dynamically rendered
 // thumbnails instead of embedding handlers that would require unsafe-inline.
@@ -120,6 +127,9 @@ const $sendBtn = document.getElementById("send-btn");
 const $sendModeBtn = document.getElementById("send-mode-btn");
 const $queueStrip = document.getElementById("queue-strip");
 const $attachmentStrip = document.getElementById("attachment-strip");
+const $attachBtn = document.getElementById("attach-btn");
+const $attachInput = document.getElementById("attach-input");
+const $inputBar = document.getElementById("input-bar");
 const $newProjectBtn = document.getElementById("new-project-btn");
 const $projModal = document.getElementById("new-project-modal");
 const $projModalName = document.getElementById("proj-modal-name");
@@ -2756,8 +2766,25 @@ let creatingChat = false;
 async function sendMessage() {
   const text = $input.value.trim();
   // Empty text is OK if we have images attached -- mirroring pi's TUI,
-  // which lets you send an image-only message.
-  if (!text && pendingImages.length === 0) return;
+  // which lets you send an image-only message. Same for files.
+  if (!text && pendingImages.length === 0 && pendingFiles.length === 0) return;
+
+  // Files upload as soon as they're attached; wait for any still in
+  // flight. A failed upload blocks the send (with the draft intact) rather
+  // than silently dropping the file -- remove its pill to send without it.
+  if (pendingFiles.some((f) => f.status === "uploading")) {
+    $sendBtn.disabled = true;
+    try {
+      await Promise.allSettled(pendingFiles.map((f) => f.promise));
+    } finally {
+      $sendBtn.disabled = false;
+    }
+  }
+  const failedUpload = pendingFiles.find((f) => f.status === "error");
+  if (failedUpload) {
+    alert(`Upload of ${failedUpload.name} failed: ${failedUpload.error}\nRemove it to send without it.`);
+    return;
+  }
 
   // Resolve target: explicit @name overrides sidebar selection.
   const mention = parseAtMention(text);
@@ -2805,6 +2832,12 @@ async function sendMessage() {
   // would need to re-paste.
   const imagesForThisSend = pendingImages.slice();
   pendingImages = [];
+  // Uploaded files are referenced by path in the message text.
+  body = withAttachmentNote(
+    body,
+    pendingFiles.map((f) => f.result),
+  );
+  pendingFiles = [];
   renderAttachmentStrip();
 
   // Optimistic local append so the user sees their message immediately.
@@ -3826,25 +3859,34 @@ $input.addEventListener("input", () => {
   updateSlashPopup();
 });
 
-// --- image attachments via paste ---
+// --- attachments: paste, drag-and-drop, and the "attach" picker ---
 //
-// Same UX as pi's TUI (Ctrl+V on a clipboard image): the bytes get pulled
-// out of the paste event, base64-encoded, and shown as a preview pill
-// under the input. On send, the images travel with the message body to
-// POST /api/agents/:id/message and the server forwards them into pi's
-// session.prompt({images}) so the model sees them as part of the user
-// message.
+// Images: same UX as pi's TUI (Ctrl+V on a clipboard image) -- the bytes
+// are base64-encoded and shown as a preview pill under the input. On send,
+// they travel with the message body to POST /api/agents/:id/message and
+// the server forwards them into pi's session.prompt({images}) so the model
+// sees them as part of the user message.
 //
-// State is a plain array of {dataUrl, mimeType, data}. dataUrl is for
-// the preview <img>; mimeType + data go on the wire. Cleared after
-// successful send (in sendMessage()), but NOT on paste-failure so the
-// user can retry.
-const PASTE_ALLOWED_MIME = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+// Files (anything that isn't a small PNG/JPEG/WebP/GIF): uploaded straight
+// away to POST /api/uploads, which saves them under the host's data dir.
+// On send, their paths are appended to the message text (see
+// withAttachmentNote) so the agent can read them with its tools.
+//
+// Both lists are cleared on send (in sendMessage()). A failed upload stays
+// in the strip, marked, until removed.
+
 /** @type {{ dataUrl: string, mimeType: string, data: string }[]} */
 let pendingImages = [];
+/** @type {{ name: string, size: number, status: "uploading" | "done" | "error",
+ *    promise: Promise<void>, result?: { path: string, name: string, size: number },
+ *    error?: string }[]} */
+let pendingFiles = [];
+
+const ATTACHMENT_PILL =
+  "relative inline-flex items-center bg-base16-200 border border-base16-300 rounded-lg p-1 pr-2 gap-2";
 
 function renderAttachmentStrip() {
-  if (pendingImages.length === 0) {
+  if (pendingImages.length === 0 && pendingFiles.length === 0) {
     $attachmentStrip.classList.add("hidden");
     $attachmentStrip.innerHTML = "";
     return;
@@ -3854,60 +3896,149 @@ function renderAttachmentStrip() {
   for (let i = 0; i < pendingImages.length; i++) {
     const img = pendingImages[i];
     html += `
-      <div class="relative inline-flex items-center bg-base16-200 border border-base16-300 rounded-lg p-1 pr-2 gap-2">
-        <img src="${img.dataUrl}" class="h-12 w-12 object-cover rounded" alt="attached ${img.mimeType}" />
+      <div class="${ATTACHMENT_PILL}">
+        <img src="${img.dataUrl}" class="h-12 w-12 object-cover rounded" alt="attached ${escHtml(img.mimeType)}" />
         <span class="text-[10px] text-base16-500 font-mono">${escHtml(img.mimeType.replace("image/", ""))}</span>
         <button class="text-base16-500 hover:text-base16-red text-xs cursor-pointer px-1" data-remove-image="${i}" aria-label="remove attachment">×</button>
+      </div>`;
+  }
+  for (let i = 0; i < pendingFiles.length; i++) {
+    const f = pendingFiles[i];
+    const status =
+      f.status === "uploading"
+        ? `<span class="text-base16-500">uploading…</span>`
+        : f.status === "error"
+          ? `<span class="text-base16-red" title="${escHtml(f.error ?? "")}">failed</span>`
+          : `<span class="text-base16-500">${escHtml(formatBytes(f.size))}</span>`;
+    html += `
+      <div class="${ATTACHMENT_PILL} h-14 pl-2" title="${escHtml(f.result?.path ?? f.name)}">
+        <span class="text-xs text-base16-600 font-mono max-w-[16rem] truncate">${escHtml(f.name)}</span>
+        <span class="text-[10px] font-mono">${status}</span>
+        <button class="text-base16-500 hover:text-base16-red text-xs cursor-pointer px-1" data-remove-file="${i}" aria-label="remove attachment">×</button>
       </div>`;
   }
   $attachmentStrip.innerHTML = html;
 }
 
 $attachmentStrip.addEventListener("click", (e) => {
-  const btn = e.target.closest("[data-remove-image]");
-  if (!btn) return;
-  const idx = Number(btn.getAttribute("data-remove-image"));
-  if (Number.isInteger(idx) && idx >= 0 && idx < pendingImages.length) {
-    pendingImages.splice(idx, 1);
-    renderAttachmentStrip();
+  const imgBtn = e.target.closest("[data-remove-image]");
+  if (imgBtn) {
+    const idx = Number(imgBtn.getAttribute("data-remove-image"));
+    if (Number.isInteger(idx) && idx >= 0 && idx < pendingImages.length) {
+      pendingImages.splice(idx, 1);
+      renderAttachmentStrip();
+    }
+    return;
+  }
+  const fileBtn = e.target.closest("[data-remove-file]");
+  if (fileBtn) {
+    const idx = Number(fileBtn.getAttribute("data-remove-file"));
+    if (Number.isInteger(idx) && idx >= 0 && idx < pendingFiles.length) {
+      // An in-flight upload still completes server-side; the file just
+      // isn't referenced by the message.
+      pendingFiles.splice(idx, 1);
+      renderAttachmentStrip();
+    }
   }
 });
 
+function attachImage(blob) {
+  // FileReader is async; the strip updates as each load resolves so the
+  // previews appear in order.
+  const reader = new FileReader();
+  reader.onload = () => {
+    const dataUrl = reader.result;
+    if (typeof dataUrl !== "string") return;
+    // Strip the `data:<mime>;base64,` prefix; pi's ImageContent wants raw base64.
+    const commaIdx = dataUrl.indexOf(",");
+    const data = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl;
+    pendingImages.push({ dataUrl, mimeType: blob.type, data });
+    renderAttachmentStrip();
+  };
+  reader.readAsDataURL(blob);
+}
+
+function attachUpload(file) {
+  const entry = { name: file.name || "pasted-file", size: file.size, status: "uploading" };
+  if (file.size > MAX_UPLOAD_BYTES) {
+    entry.status = "error";
+    entry.error = `too large (max ${formatBytes(MAX_UPLOAD_BYTES)})`;
+    entry.promise = Promise.resolve();
+  } else {
+    entry.promise = uploadFile(file).then(
+      (result) => {
+        entry.status = "done";
+        entry.result = result;
+        renderAttachmentStrip();
+      },
+      (err) => {
+        entry.status = "error";
+        entry.error = err instanceof Error ? err.message : String(err);
+        renderAttachmentStrip();
+      },
+    );
+  }
+  pendingFiles.push(entry);
+  renderAttachmentStrip();
+}
+
+/** Attach files from a paste, drop or the picker. */
+function attachFiles(files) {
+  for (const file of files) {
+    if (attachmentKind(file) === "image") attachImage(file);
+    else attachUpload(file);
+  }
+}
+
 $input.addEventListener("paste", (e) => {
-  // Pull image items out of the clipboard payload. Browsers expose them
-  // as DataTransferItems with kind="file" + image/* type. Text paste is
-  // handled by the default behavior; we only intercept when image data
-  // is present.
+  // Pull file items out of the clipboard payload. Text paste is handled by
+  // the default behavior; we only intercept when files are present.
   const items = e.clipboardData?.items;
   if (!items) return;
-  const imageItems = [];
+  const files = [];
   for (const item of items) {
-    if (item.kind === "file" && PASTE_ALLOWED_MIME.has(item.type)) {
-      imageItems.push(item);
-    }
+    if (item.kind !== "file") continue;
+    const file = item.getAsFile();
+    if (file) files.push(file);
   }
-  if (imageItems.length === 0) return;
-  // Block default paste so the image's filename/junk text doesn't end up
-  // in the textarea alongside the attachment pill.
+  if (files.length === 0) return;
+  // Block default paste so the file's name/junk text doesn't end up in
+  // the textarea alongside the attachment pill.
   e.preventDefault();
-  for (const item of imageItems) {
-    const blob = item.getAsFile();
-    if (!blob) continue;
-    // Read as base64. FileReader is async; we update the strip when each
-    // load resolves so the user sees the previews appear in paste order.
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result;
-      if (typeof dataUrl !== "string") return;
-      // Strip the `data:<mime>;base64,` prefix; pi's ImageContent wants raw base64.
-      const commaIdx = dataUrl.indexOf(",");
-      const data = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl;
-      pendingImages.push({ dataUrl, mimeType: blob.type, data });
-      renderAttachmentStrip();
-    };
-    reader.readAsDataURL(blob);
-  }
+  attachFiles(files);
 });
+
+$attachBtn.addEventListener("click", () => $attachInput.click());
+$attachInput.addEventListener("change", () => {
+  if ($attachInput.files) attachFiles([...$attachInput.files]);
+  // Reset so picking the same file again still fires `change`.
+  $attachInput.value = "";
+  $input.focus();
+});
+
+// Drag-and-drop onto the input bar. Only react to drags carrying files, so
+// dragging text around the textarea keeps working normally.
+function dragHasFiles(e) {
+  return [...(e.dataTransfer?.types ?? [])].includes("Files");
+}
+$inputBar.addEventListener("dragover", (e) => {
+  if (!dragHasFiles(e)) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "copy";
+  $inputBar.classList.add("bg-base16-200");
+});
+$inputBar.addEventListener("dragleave", (e) => {
+  if (e.relatedTarget && $inputBar.contains(e.relatedTarget)) return;
+  $inputBar.classList.remove("bg-base16-200");
+});
+$inputBar.addEventListener("drop", (e) => {
+  $inputBar.classList.remove("bg-base16-200");
+  if (!dragHasFiles(e)) return;
+  e.preventDefault();
+  attachFiles([...(e.dataTransfer?.files ?? [])]);
+  $input.focus();
+});
+
 $input.addEventListener("blur", () => {
   // Delay so a click inside either popup can fire first.
   setTimeout(() => {
