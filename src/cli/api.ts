@@ -33,8 +33,19 @@ async function baseUrl(): Promise<string> {
   );
 }
 
+/** Fetch `path` from the server. Talking to a server on this machine (as
+ *  every agent does), ask for an uncompressed response: compressing it
+ *  would cost the server more time than it saves on a loopback socket. */
+async function request(path: string, init: RequestInit = {}): Promise<Response> {
+  const base = await baseUrl();
+  if (/^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(base)) {
+    init = { ...init, headers: { ...(init.headers as Record<string, string> | undefined), "accept-encoding": "identity" } };
+  }
+  return fetch(`${base}${path}`, init);
+}
+
 export async function apiGet<T = unknown>(path: string): Promise<T> {
-  const res = await fetch(`${await baseUrl()}${path}`);
+  const res = await request(path);
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     throw new Error((body.error as string) ?? `HTTP ${res.status}`);
@@ -43,7 +54,7 @@ export async function apiGet<T = unknown>(path: string): Promise<T> {
 }
 
 export async function apiPost<T = unknown>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${await baseUrl()}${path}`, {
+  const res = await request(path, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: body != null ? JSON.stringify(body) : undefined,
@@ -58,7 +69,7 @@ export async function apiPost<T = unknown>(path: string, body?: unknown): Promis
 /** Upload raw bytes to POST /api/uploads; resolves to the saved file's
  *  `{ path, name, size }` on the server host. */
 export async function apiUpload<T = unknown>(name: string, data: Uint8Array<ArrayBuffer>): Promise<T> {
-  const res = await fetch(`${await baseUrl()}/api/uploads?name=${encodeURIComponent(name)}`, {
+  const res = await request(`/api/uploads?name=${encodeURIComponent(name)}`, {
     method: "POST",
     headers: { "content-type": "application/octet-stream" },
     body: data,
@@ -71,7 +82,7 @@ export async function apiUpload<T = unknown>(name: string, data: Uint8Array<Arra
 }
 
 export async function apiDelete<T = unknown>(path: string): Promise<T> {
-  const res = await fetch(`${await baseUrl()}${path}`, { method: "DELETE" });
+  const res = await request(path, { method: "DELETE" });
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     throw new Error((data.error as string) ?? `HTTP ${res.status}`);

@@ -835,6 +835,22 @@
         user-select: none;
       }
     </style>
+    <!-- The dashboard's module graph, fetched in parallel up front rather
+         than one import level per round trip (src/web/__tests__/
+         module-preload.test.js keeps this list complete). -->
+    <link rel="modulepreload" href="app.js" />
+    <link rel="modulepreload" href="render.js" />
+    <link rel="modulepreload" href="content-policy.js" />
+    <link rel="modulepreload" href="transcript.js" />
+    <link rel="modulepreload" href="tool-content.js" />
+    <link rel="modulepreload" href="message-markdown.js" />
+    <link rel="modulepreload" href="pi-markdown.js" />
+    <link rel="modulepreload" href="math-markdown.js" />
+    <link rel="modulepreload" href="message-preview.js" />
+    <link rel="modulepreload" href="extension-ui.js" />
+    <link rel="modulepreload" href="vim.js" />
+    <link rel="modulepreload" href="keys.js" />
+    <link rel="modulepreload" href="attachments.js" />
     <!-- Tailwind utilities, compiled at build time (scripts/vendor.mjs).
          Last in <head>, where the old in-browser runtime put its styles. -->
     <link rel="stylesheet" href="vendor/tailwind.css" />
