@@ -7,6 +7,7 @@ import {
   renderMessage,
   renderTranscript,
   renderTranscriptBlocks,
+  OLDER_KEY,
   STREAMING_TEXT_KEY,
   STREAMING_THINKING_KEY,
 } from "../transcript.js";
@@ -508,6 +509,23 @@ describe("renderMessage", () => {
     expect(html).toContain("look");
   });
 
+  it("renders history images by their server URL, and drops other URLs", () => {
+    const url = "/api/agents/abc/images/0123456789abcdef0123456789abcdef";
+    const html = renderMessage(
+      {
+        role: "tool_result",
+        content: "",
+        toolName: "screenshot",
+        toolCallId: "t1",
+        ts: 0,
+        images: [{ url, mimeType: "image/png" }, { url: "https://example.com/x.png", mimeType: "image/png" }],
+      },
+      0,
+    );
+    expect(html).toContain(`src="${url}"`);
+    expect(html).not.toContain("example.com");
+  });
+
   it("user message with image but no text renders only the image", () => {
     const html = renderMessage(
       {
@@ -832,5 +850,44 @@ describe("renderTranscriptBlocks", () => {
     };
     const joined = renderTranscriptBlocks(state).map((b) => b.html).join("");
     expect(joined).toBe(renderTranscript(state));
+  });
+});
+
+describe("renderTranscriptBlocks windowing and caching", () => {
+  const chat = (n) => ({
+    ...initialTranscriptState(),
+    messages: Array.from({ length: n }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `message ${i}`, ts: i })),
+  });
+
+  it("renders only from startIndex, behind an earlier-messages row", () => {
+    const state = chat(10);
+    const blocks = renderTranscriptBlocks(state, new Set(), { startIndex: 7 });
+    expect(blocks.map((b) => b.key)).toEqual([OLDER_KEY, "msg:7", "msg:8", "msg:9"]);
+    expect(blocks[0].html).toContain("7 earlier messages");
+    expect(blocks[0].html).toContain("data-load-older");
+    expect(renderTranscriptBlocks(state, new Set(), { startIndex: 0 })).toHaveLength(10);
+    // Clamped past the end.
+    expect(renderTranscriptBlocks(state, new Set(), { startIndex: 99 }).map((b) => b.key)).toEqual([OLDER_KEY]);
+  });
+
+  it("re-renders a message only when something it shows changes", () => {
+    let state = reduceEvents([
+      { type: "tool_execution_start", toolName: "bash", toolCallId: "c1", args: { command: "pwd" } },
+    ]);
+    const before = renderTranscriptBlocks(state, new Set(), { widthCols: 80 });
+    expect(before[0].html).toContain("tool-status-running");
+    // Same inputs: same (cached) html.
+    expect(renderTranscriptBlocks(state, new Set(), { widthCols: 80 })[0].html).toBe(before[0].html);
+    // The call's row reflects its result.
+    state = reduceEvent(state, { type: "tool_execution_end", toolName: "bash", toolCallId: "c1", result: { content: [{ type: "text", text: "/tmp" }] } });
+    const after = renderTranscriptBlocks(state, new Set(), { widthCols: 80 });
+    expect(after[0].html).toContain("tool-status-completed");
+    // Expanding a row, and a width change, re-render it.
+    const text = Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n");
+    const long = { ...initialTranscriptState(), messages: [{ role: "user", content: text, ts: 1 }] };
+    const collapsed = renderTranscriptBlocks(long, new Set(), { widthCols: 80 })[0].html;
+    expect(renderTranscriptBlocks(long, new Set(["msg:0"]), { widthCols: 80 })[0].html).not.toBe(collapsed);
+    expect(renderTranscriptBlocks(long, new Set(), { widthCols: 40 })[0].html).not.toBe(collapsed);
+    expect(renderTranscriptBlocks(long, new Set(), { widthCols: 80 })[0].html).toBe(collapsed);
   });
 });

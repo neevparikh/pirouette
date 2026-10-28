@@ -15,3 +15,10 @@ export function isRasterDataUrl(value) {
   return typeof value === "string" &&
     /^data:image\/(?:png|jpeg|gif|webp|bmp|x-icon);base64,[a-z0-9+/]+={0,2}$/i.test(value);
 }
+
+// History images are served by the dashboard's own server, by content hash
+// (see src/server/image-store.ts). Only that exact same-origin shape.
+export function isHistoryImageUrl(value) {
+  return typeof value === "string" &&
+    /^\/api\/agents\/[a-z0-9][a-z0-9-]{0,63}\/images\/[a-f0-9]{32}$/.test(value);
+}

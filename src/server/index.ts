@@ -25,6 +25,7 @@ import { parseWatchRequest, WatchManager, type WatchMessage } from "./watches.js
 import { StateManager } from "./state.js";
 import { dashboardCsp, IMAGE_DOCUMENT_CSP } from "./content-security.js";
 import { saveUpload, UploadError } from "./uploads.js";
+import { sendCompressible, StaticFileCache } from "./http-body.js";
 import type {
   CreateAgentRequest,
   CreateProjectRequest,
@@ -222,8 +223,7 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
     // No `Access-Control-Allow-*` headers means cross-origin reads of
     // the response body are blocked by the browser, and JSON-content-type
     // POSTs from another origin fail their preflight.
-    res.writeHead(status, { "content-type": "application/json" });
-    res.end(JSON.stringify(body));
+    sendCompressible(res.req, res, status, { "content-type": "application/json" }, Buffer.from(JSON.stringify(body)));
   }
 
   function error(res: ServerResponse, status: number, message: string): void {
@@ -243,7 +243,9 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
     ".ico": "image/x-icon",
   };
 
-  async function serveStatic(res: ServerResponse, urlPath: string): Promise<boolean> {
+  const staticFiles = new StaticFileCache();
+
+  async function serveStatic(req: IncomingMessage, res: ServerResponse, urlPath: string): Promise<boolean> {
     // Resolve the requested path under webDir. Use `path.resolve` (which
     // collapses `..` segments) plus a separator-aware `startsWith` so
     // sibling-prefix attacks (`/srv/web2/...` matching `/srv/web` prefix)
@@ -255,28 +257,19 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
     if (resolved !== webDir && !resolved.startsWith(webDir + path.sep)) {
       return false;
     }
-    try {
-      const content = await readFile(resolved);
-      const ext = path.extname(resolved);
-      // Cache policy for the dashboard. Pirouette is updated frequently
-      // via `pru sync` and `pru sync --npm`, and aggressive browser
-      // caching on app.js / transcript.js etc. has bitten users -- they
-      // get the new index.html but the old JS, and event listeners for
-      // newly-added UI elements never get attached. Send `no-cache` on
-      // every response: forces a revalidating request on each load, but
-      // 304s when nothing changed (cheap). Vendored libraries under
-      // /vendor/ are content-hashed and effectively immutable, so we
-      // could be more aggressive there, but the simplicity of one rule
-      // beats the marginal byte savings.
-      res.writeHead(200, {
-        "content-type": MIME_TYPES[ext] ?? "application/octet-stream",
-        "cache-control": "no-cache",
-      });
-      res.end(content);
-      return true;
-    } catch {
-      return false;
-    }
+    const ext = path.extname(resolved);
+    // Cache policy for the dashboard. Pirouette is updated frequently
+    // via `pru sync` and `pru sync --npm`, and aggressive browser
+    // caching on app.js / transcript.js etc. has bitten users -- they
+    // get the new index.html but the old JS, and event listeners for
+    // newly-added UI elements never get attached. Send `no-cache` on
+    // every response: forces a revalidating request on each load, which
+    // the ETag turns into a 304 when nothing changed (cheap). Bodies are
+    // cached in memory and served compressed; see http-body.ts.
+    return staticFiles.serve(req, res, resolved, {
+      "content-type": MIME_TYPES[ext] ?? "application/octet-stream",
+      "cache-control": "no-cache",
+    });
   }
 
   /** Build the set of `Host` header values we accept. Anything else gets
@@ -601,6 +594,27 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
         }
         const messages = agentManager.getMessages(agentId);
         json(res, 200, { messages });
+        return;
+      }
+
+      // An image from the agent's history, by the content-addressed key the
+      // history payload links to (see image-store.ts). Raster types only;
+      // the key is a hash of the bytes, so the response never changes.
+      const imageMatch = sub.match(/^\/images\/([a-f0-9]{32})$/);
+      if (method === "GET" && imageMatch) {
+        const image = agentManager.getHistoryImage(agentId, imageMatch[1]);
+        if (!image) {
+          error(res, 404, "Image not found");
+          return;
+        }
+        const buf = Buffer.from(image.data, "base64");
+        res.writeHead(200, {
+          "content-type": image.mimeType,
+          "content-length": String(buf.length),
+          "cache-control": "private, max-age=31536000, immutable",
+          "content-security-policy": IMAGE_DOCUMENT_CSP,
+        });
+        res.end(buf);
         return;
       }
 
@@ -1237,7 +1251,7 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
     }
 
     if (method === "GET") {
-      const served = await serveStatic(res, pathname);
+      const served = await serveStatic(req, res, pathname);
       if (served) return;
     }
 

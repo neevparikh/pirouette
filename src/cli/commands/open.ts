@@ -22,7 +22,7 @@ function openBrowser(url: string): void {
 export async function open(): Promise<void> {
   let url: string;
   try {
-    url = getWebUrl();
+    url = await getWebUrl();
   } catch (err) {
     console.error(`error: ${err instanceof Error ? err.message : err}`);
     process.exit(1);

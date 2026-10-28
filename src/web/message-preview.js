@@ -14,10 +14,19 @@ export function renderMessagePreview(body, key, expanded, label) {
 /** Run after rendering and on resize. Measuring rendered height accounts for
  * word wrapping, Markdown spacing, code fences, and math without guessing. */
 export function syncMessagePreviews(container) {
+  // Measure every preview first, then write. Interleaving the two forced a
+  // fresh layout per preview (setting `hidden` invalidates it, the next
+  // scrollHeight read recomputes it), which on a long chat cost hundreds of
+  // milliseconds per render.
+  const updates = [];
   for (const preview of container.querySelectorAll(".message-preview")) {
     const body = preview.querySelector(".message-preview-body");
     const button = preview.querySelector(".message-expand");
+    if (!body || !button) continue;
     const expanded = button.getAttribute("aria-expanded") === "true";
-    button.hidden = !expanded && body.scrollHeight <= body.clientHeight + 1;
+    updates.push([button, !expanded && body.scrollHeight <= body.clientHeight + 1]);
+  }
+  for (const [button, hidden] of updates) {
+    if (button.hidden !== hidden) button.hidden = hidden;
   }
 }
