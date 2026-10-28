@@ -11,6 +11,8 @@ const text = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join("\n");
 const messages = () => document.getElementById("messages");
 const broadcast = (envelope) => socket.onmessage({ data: JSON.stringify(envelope) });
 const emit = (event) => broadcast({ kind: "agent_event", agentId: agent.id, event });
+// Streaming deltas render on the next animation frame.
+const nextFrame = () => new Promise((resolve) => (globalThis.requestAnimationFrame ?? setTimeout)(resolve, 16));
 const makeAgent = () => ({
   id: `preview-${++nextId}`, name: `preview-${nextId}`, projectName: "scratchpad", state: "running",
   model: "demo", createdAt: new Date().toISOString(), lastActivity: new Date().toISOString(),
@@ -62,14 +64,17 @@ describe("dashboard preview controls", () => {
     expect(messages().querySelector(".pi-row-tool-result code").textContent).not.toContain("line 9");
   });
 
-  it("renders streamed thinking Markdown on the initial and incremental paths", () => {
+  it("renders streamed thinking Markdown on the initial and incremental paths", async () => {
     emit({ type: "message_start", role: "assistant" });
     emit({ type: "message_update", updateType: "thinking_delta", delta: "**plan**\n\n" });
+    await nextFrame();
     expect(messages().querySelector(".thinking-content strong, .thinking-content .pi-strong")).not.toBeNull();
     emit({ type: "message_update", updateType: "thinking_delta", delta: text });
+    await nextFrame();
     const selector = '[data-toggle="streaming-thinking"]';
     messages().querySelector(selector).click();
     emit({ type: "message_update", updateType: "thinking_delta", delta: "\n\n**next**" });
+    await nextFrame();
     expect(messages().querySelector(selector).getAttribute("aria-expanded")).toBe("true");
     expect(messages().querySelectorAll(".thinking-content strong, .thinking-content .pi-strong")).toHaveLength(2);
     expect(document.activeElement).toBe(messages().querySelector(selector));

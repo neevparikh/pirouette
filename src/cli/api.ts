@@ -8,12 +8,13 @@
  *    3. Refuse — throw a clear error directing the user to set one of these.
  */
 
-import { resolveSelectedHost } from "../config.js";
-
-function baseUrl(): string {
+async function baseUrl(): Promise<string> {
   const fromEnv = process.env.PIROUETTE_URL;
   if (fromEnv) return fromEnv.replace(/\/+$/, "");
 
+  // Loaded only when needed: inside an agent PIROUETTE_URL is always set,
+  // and parsing config is a measurable share of a quick command's runtime.
+  const { resolveSelectedHost } = await import("../config.js");
   let host;
   try {
     host = resolveSelectedHost();
@@ -33,7 +34,7 @@ function baseUrl(): string {
 }
 
 export async function apiGet<T = unknown>(path: string): Promise<T> {
-  const res = await fetch(`${baseUrl()}${path}`);
+  const res = await fetch(`${await baseUrl()}${path}`);
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     throw new Error((body.error as string) ?? `HTTP ${res.status}`);
@@ -42,7 +43,7 @@ export async function apiGet<T = unknown>(path: string): Promise<T> {
 }
 
 export async function apiPost<T = unknown>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${baseUrl()}${path}`, {
+  const res = await fetch(`${await baseUrl()}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: body != null ? JSON.stringify(body) : undefined,
@@ -57,7 +58,7 @@ export async function apiPost<T = unknown>(path: string, body?: unknown): Promis
 /** Upload raw bytes to POST /api/uploads; resolves to the saved file's
  *  `{ path, name, size }` on the server host. */
 export async function apiUpload<T = unknown>(name: string, data: Uint8Array<ArrayBuffer>): Promise<T> {
-  const res = await fetch(`${baseUrl()}/api/uploads?name=${encodeURIComponent(name)}`, {
+  const res = await fetch(`${await baseUrl()}/api/uploads?name=${encodeURIComponent(name)}`, {
     method: "POST",
     headers: { "content-type": "application/octet-stream" },
     body: data,
@@ -70,7 +71,7 @@ export async function apiUpload<T = unknown>(name: string, data: Uint8Array<Arra
 }
 
 export async function apiDelete<T = unknown>(path: string): Promise<T> {
-  const res = await fetch(`${baseUrl()}${path}`, { method: "DELETE" });
+  const res = await fetch(`${await baseUrl()}${path}`, { method: "DELETE" });
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     throw new Error((data.error as string) ?? `HTTP ${res.status}`);
@@ -78,6 +79,6 @@ export async function apiDelete<T = unknown>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export function getWebUrl(): string {
+export function getWebUrl(): Promise<string> {
   return baseUrl();
 }

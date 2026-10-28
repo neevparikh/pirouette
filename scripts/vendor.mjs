@@ -17,11 +17,10 @@
 //   - katex/                    (npm: katex, JS + CSS + fonts + license)
 //   - highlight.umd.js           (npm: highlight.js, bundled with esbuild
 //                                 since the package ships only CJS)
-//   - tailwindcss.min.js         (committed at vendor/tailwindcss-3.4.17.min.js
-//                                 since Tailwind v3 has no equivalent npm
-//                                 distribution form)
+//   - tailwind.css               (compiled from the dashboard sources with
+//                                 tailwindcss + scripts/tailwind.config.mjs)
 
-import { cpSync, existsSync, mkdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,7 +29,6 @@ import * as esbuild from "esbuild";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, "..");
 const outDir = path.join(repo, "src", "web", "vendor");
-const repoVendor = path.join(repo, "vendor");
 const nodeModules = path.join(repo, "node_modules");
 
 mkdirSync(outDir, { recursive: true });
@@ -78,12 +76,16 @@ esbuild.buildSync({
 });
 console.log(`  bundled highlight.umd.js (highlight.js/lib/common.js via esbuild)`);
 
-// Tailwind v3 CDN runtime (committed; see vendor/README.md for source URL).
-const tailwindSrc = path.join(repoVendor, "tailwindcss-3.4.17.min.js");
-if (!existsSync(tailwindSrc)) {
-  throw new Error(
-    `vendor copy failed: ${tailwindSrc} not found. See vendor/README.md to re-fetch.`,
-  );
-}
-cpSync(tailwindSrc, path.join(outDir, "tailwindcss.min.js"));
-console.log(`  vendored tailwindcss.min.js (from vendor/tailwindcss-3.4.17.min.js)`);
+// Tailwind: compile the dashboard's utilities into a static stylesheet
+// (see scripts/tailwind.config.mjs for why it's no longer the runtime).
+const tailwindConfig = (await import("./tailwind.config.mjs")).default;
+const { default: postcss } = await import("postcss");
+const { default: tailwindcss } = await import("tailwindcss");
+const { default: autoprefixer } = await import("autoprefixer");
+const tailwindResult = await postcss([tailwindcss(tailwindConfig), autoprefixer()]).process(
+  "@tailwind base;\n@tailwind components;\n@tailwind utilities;\n",
+  { from: undefined },
+);
+const minified = await esbuild.transform(tailwindResult.css, { loader: "css", minify: true });
+writeFileSync(path.join(outDir, "tailwind.css"), minified.code);
+console.log(`  compiled tailwind.css (${(minified.code.length / 1024).toFixed(1)} KB)`);

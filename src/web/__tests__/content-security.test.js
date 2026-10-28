@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { JSDOM } from "jsdom";
-import { safeLinkUrl, isRasterDataUrl } from "../content-policy.js";
+import { safeLinkUrl, isHistoryImageUrl, isRasterDataUrl } from "../content-policy.js";
 import { renderMarkdown, enhanceImagePaths } from "../render.js";
 import { renderMarkdownPi } from "../pi-markdown.js";
 import { renderMathMarkdown } from "../math-markdown.js";
@@ -64,5 +64,14 @@ describe("URL validation", () => {
     expect(isRasterDataUrl("data:image/png;base64,AQID==")).toBe(true);
     expect(isRasterDataUrl("data:image/svg+xml;base64,AQID")).toBe(false);
     expect(isRasterDataUrl('data:image/png;base64,AQID" onerror="x')).toBe(false);
+  });
+  it("only accepts same-origin history image URLs", () => {
+    const key = "0123456789abcdef0123456789abcdef";
+    expect(isHistoryImageUrl(`/api/agents/abc123/images/${key}`)).toBe(true);
+    expect(isHistoryImageUrl(`https://evil.example/api/agents/abc123/images/${key}`)).toBe(false);
+    expect(isHistoryImageUrl(`//evil.example/api/agents/abc123/images/${key}`)).toBe(false);
+    expect(isHistoryImageUrl(`/api/agents/abc123/images/${key}" onerror="x`)).toBe(false);
+    expect(isHistoryImageUrl(`/api/agents/../file?path=x`)).toBe(false);
+    expect(isHistoryImageUrl(null)).toBe(false);
   });
 });

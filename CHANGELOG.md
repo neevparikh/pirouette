@@ -16,6 +16,28 @@ follow [SemVer](https://semver.org).
   the agent can open them. `pru send --attach <file>` (repeatable) does the
   same from a shell.
 
+### Changed
+
+- **Everything is faster.**
+  - `pru` commands start in under 0.1s, down from about 0.7s. Every command
+    used to load the whole server first; now each loads only its own code.
+  - The dashboard loads in about half the time. Tailwind is compiled when
+    pirouette is built, not in the browser on every load. The in-browser
+    version also re-scanned the whole page on every change, so this makes
+    streaming cheaper too.
+  - Long chats open 2-4x faster. A chat opens on its last 150 messages, and
+    scrolling up (or **show all**) loads the earlier ones without moving
+    the view. Rows that haven't changed aren't re-rendered.
+  - Streaming a reply uses about a tenth of the CPU it did. The reply is
+    redrawn at most once per frame, and not at all while the tab is hidden.
+  - Less data goes over the network. Large API responses and dashboard
+    files are compressed. Dashboard files get an ETag, so a reload gets a
+    304 instead of downloading them again. Images in a chat's history are
+    sent as links the browser caches, not inlined in every history fetch.
+    One screenshot-heavy chat went from 2.2 MB to 120 KB.
+  - A stopped agent's history is parsed once and cached until its session
+    files change.
+
 ### Fixed
 
 - **You can scroll up while a reply is streaming.** Scrolling up a little

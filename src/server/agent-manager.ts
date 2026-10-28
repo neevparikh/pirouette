@@ -1,5 +1,6 @@
 /** Manages pi SDK agent sessions — create, resume, stop, send messages. */
 
+import { readdirSync, statSync } from "node:fs";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -53,6 +54,7 @@ import {
   type WatchMessageSource,
 } from "./agent-message.js";
 import { createWorktree, removeWorktree } from "./git.js";
+import { ImageStore } from "./image-store.js";
 import { resolveAgentModel } from "./model-resolution.js";
 import { generateChatName } from "./chat-naming.js";
 import { setupWorktreeDataTools } from "./worktree-setup.js";
@@ -192,8 +194,17 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
  *  for the dashboard. Pi stores images as `{ type: "image", data, mimeType }`
  *  (base64 data); the dashboard wants a ready-to-use `data:<mime>;base64,...`
  *  data URI it can put straight into <img src=...>. */
+/** Image blocks' store keys, so a history rebuild doesn't rehash images
+ *  it has already stored. Keyed by the session's own content block. */
+const imageKeys = new WeakMap<object, string>();
+
+/** Extract a message's image blocks for the dashboard. With an `agentId`
+ *  and `store`, servable images become URLs into the store (see
+ *  image-store.ts); otherwise, or for other types, data URLs. */
 function pickImageContent(
   content: unknown,
+  store?: ImageStore,
+  agentId?: string,
 ): ChatImage[] {
   if (!Array.isArray(content)) return [];
   const out: ChatImage[] = [];
@@ -207,7 +218,17 @@ function pickImageContent(
       "mimeType" in block
     ) {
       const b = block as { data: string; mimeType: string };
-      out.push({ dataUrl: `data:${b.mimeType};base64,${b.data}`, mimeType: b.mimeType });
+      if (store && agentId && typeof b.data === "string" && ImageStore.canStore(b.mimeType)) {
+        let key = imageKeys.get(block);
+        // The cached key may have been evicted from the store; re-put.
+        if (!key || !store.get(key)) {
+          key = store.put(b.mimeType, b.data);
+          imageKeys.set(block, key);
+        }
+        out.push({ url: `/api/agents/${agentId}/images/${key}`, mimeType: b.mimeType });
+      } else {
+        out.push({ dataUrl: `data:${b.mimeType};base64,${b.data}`, mimeType: b.mimeType });
+      }
     }
   }
   return out;
@@ -232,8 +253,32 @@ export type AgentStateCallback = (agentId: string, state: AgentState) => void;
  *  Keeps AgentManager free of any direct WebSocket import. */
 export type WsBroadcastCallback = (envelope: WsEnvelope) => void;
 
+/** How many stopped agents' parsed transcripts `getMessages` keeps. */
+const DISK_MESSAGES_CACHE_MAX = 32;
+
+/** Names, sizes and mtimes of a session dir's .jsonl files: changes whenever
+ *  anything that `SessionManager.continueRecent` would read does. Null if
+ *  the dir can't be read (then nothing is cached). */
+function sessionDirSignature(dir: string): string | null {
+  try {
+    const parts: string[] = [];
+    for (const name of readdirSync(dir).sort()) {
+      if (!name.endsWith(".jsonl")) continue;
+      const st = statSync(path.join(dir, name));
+      parts.push(`${name}:${st.size}:${st.mtimeMs}`);
+    }
+    return parts.join("|");
+  } catch {
+    return null;
+  }
+}
+
 export class AgentManager {
   private handles = new Map<string, AgentHandle>();
+  /** Parsed transcripts of stopped agents, most recently used last. */
+  private diskMessagesCache = new Map<string, { sig: string; messages: ChatMessage[] }>();
+  /** Images referenced by history payloads, served by URL. */
+  readonly imageStore = new ImageStore();
   private eventListeners: AgentEventCallback[] = [];
   private stateListeners: AgentStateCallback[] = [];
   private wsBroadcastCallbacks: WsBroadcastCallback[] = [];
@@ -1061,6 +1106,18 @@ export class AgentManager {
     });
   }
 
+  /** An image from this agent's history, by store key. On a miss (evicted,
+   *  or the server restarted since the client fetched history) rebuild the
+   *  agent's history, which stores its images again. */
+  getHistoryImage(id: string, key: string): { mimeType: string; data: string } | undefined {
+    const hit = this.imageStore.get(key);
+    if (hit) return hit;
+    if (!this.stateManager.getAgent(id)) return undefined;
+    this.diskMessagesCache.delete(id);
+    this.getMessages(id);
+    return this.imageStore.get(key);
+  }
+
   getMessages(id: string): ChatMessage[] {
     const handle = this.handles.get(id);
     let messages: ReadonlyArray<unknown>;
@@ -1082,6 +1139,17 @@ export class AgentManager {
       const config = this.stateManager.getAgent(id);
       if (!config || !config.sessionDir) {
         return [];
+      }
+      // Parsing a session file is the slow part (they run to tens of MB),
+      // and a stopped agent's files don't change, so reuse the last result
+      // until the directory's .jsonl files do.
+      const sig = sessionDirSignature(config.sessionDir);
+      const cached = sig ? this.diskMessagesCache.get(id) : undefined;
+      if (cached && cached.sig === sig) {
+        // Refresh LRU position.
+        this.diskMessagesCache.delete(id);
+        this.diskMessagesCache.set(id, cached);
+        return cached.messages;
       }
       try {
         const sm = SessionManager.continueRecent(config.worktreePath, config.sessionDir);
@@ -1116,7 +1184,7 @@ export class AgentManager {
         // Array form is what pi uses when there are images attached.
         // Extract text + images independently so the UI can render both.
         let content = "";
-        const images = pickImageContent(msg.content);
+        const images = pickImageContent(msg.content, this.imageStore, id);
         if (typeof msg.content === "string") {
           content = msg.content;
         } else {
@@ -1184,7 +1252,7 @@ export class AgentManager {
           .join("\n");
         // The dashboard collapses long output without discarding its contents.
         // Tool results can also include images (e.g. a screenshot tool).
-        const images = pickImageContent(msg.content);
+        const images = pickImageContent(msg.content, this.imageStore, id);
         result.push({
           role: "tool_result",
           content: textContent,
@@ -1201,7 +1269,7 @@ export class AgentManager {
         const agentMessage = agentMessageDetails(msg);
         const watchMessage = agentMessage ? null : watchMessageDetails(msg);
         if (agentMessage) {
-          const images = pickImageContent(msg.content);
+          const images = pickImageContent(msg.content, this.imageStore, id);
           result.push({
             role: "user",
             content: agentMessage.body,
@@ -1225,6 +1293,20 @@ export class AgentManager {
         });
       }
       // Skip bashExecution, branchSummary, other custom types, thinking — not needed in chat
+    }
+
+    if (source === "disk") {
+      const config = this.stateManager.getAgent(id);
+      const sig = config?.sessionDir ? sessionDirSignature(config.sessionDir) : null;
+      if (sig) {
+        this.diskMessagesCache.delete(id);
+        this.diskMessagesCache.set(id, { sig, messages: result });
+        while (this.diskMessagesCache.size > DISK_MESSAGES_CACHE_MAX) {
+          const oldest = this.diskMessagesCache.keys().next().value;
+          if (oldest === undefined) break;
+          this.diskMessagesCache.delete(oldest);
+        }
+      }
     }
 
     return result;

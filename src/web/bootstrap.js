@@ -10,28 +10,5 @@
   if (width > 0) document.documentElement.style.setProperty("--sidebar-width", width + "px");
 })();
 
-// Local Nerd Font first, then webfonts and system monospace fallbacks.
-const mono = [
-  "JetBrainsMono Nerd Font Mono", "JetBrainsMono NFM", "JetBrains Mono NF",
-  "JetBrainsMono Nerd Font", "JetBrains Mono", "Fira Code", "ui-monospace",
-  "SFMono-Regular", "Menlo", "Monaco", "Consolas", "monospace",
-];
-const colors = {};
-for (const name of [100, 200, 300, 400, 500, 600, 700, 800, "red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink"]) {
-  colors[name] = `rgb(var(--color-base16-${name}))`;
-}
-for (const name of ["red", "orange", "yellow", "green", "cyan", "blue"]) {
-  colors[`${name}-bright`] = `rgb(var(--color-base16-${name}-bright, var(--color-base16-${name})))`;
-}
-tailwind.config = {
-  theme: {
-    extend: {
-      fontFamily: {
-        sans: mono,
-        mono,
-        display: ["Zilla Slab", "Roboto Slab", "ui-serif", "Georgia", "serif"],
-      },
-      colors: { base16: colors },
-    },
-  },
-};
+// Tailwind's config (fonts, base16 colours) lives in scripts/tailwind.config.mjs;
+// the stylesheet is compiled at build time.

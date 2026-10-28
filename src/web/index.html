@@ -6,18 +6,19 @@
     <title>pirouette</title>
     <!-- All third-party browser deps are self-hosted under vendor/ so
          the dashboard doesn't depend on CDN reachability or integrity
-         at runtime. See scripts/post-build.mjs and vendor/README.md
+         at runtime. See scripts/vendor.mjs and scripts/post-build.mjs
          for the build / vendoring steps. -->
-    <script src="vendor/tailwindcss.min.js"></script>
-    <script src="vendor/marked.min.js"></script>
-    <script src="vendor/marked-highlight.umd.js"></script>
-    <script src="vendor/purify.min.js"></script>
+    <!-- Libraries only app.js uses: `defer` so they download in parallel
+         without blocking parsing, and still run in order before app.js. -->
+    <script defer src="vendor/marked.min.js"></script>
+    <script defer src="vendor/marked-highlight.umd.js"></script>
+    <script defer src="vendor/purify.min.js"></script>
     <link rel="stylesheet" href="vendor/katex/katex.min.css" />
-    <script src="vendor/katex/katex.min.js"></script>
+    <script defer src="vendor/katex/katex.min.js"></script>
     <!-- highlight.js bundled (with esbuild) from highlight.js/lib/common.js,
          which covers ~36 popular languages. Matches pi-coding-agent's
          markdown renderer setup (auto-detect off; explicit-language only). -->
-    <script src="vendor/highlight.umd.js"></script>
+    <script defer src="vendor/highlight.umd.js"></script>
 
     <!-- Font stack matches neevparikh.github.io:
            body   — Roboto Slab (variable serif)
@@ -36,7 +37,7 @@
          Tailwind config below translates into `bg-base16-100` etc. -->
     <link rel="stylesheet" href="themes.css" />
 
-    <!-- Synchronous theme/sidebar setup and Tailwind config, before paint.
+    <!-- Synchronous theme/sidebar setup, before paint.
          External script so the CSP needs neither inline scripts nor eval. -->
     <script src="bootstrap.js"></script>
     <style>
@@ -834,6 +835,9 @@
         user-select: none;
       }
     </style>
+    <!-- Tailwind utilities, compiled at build time (scripts/vendor.mjs).
+         Last in <head>, where the old in-browser runtime put its styles. -->
+    <link rel="stylesheet" href="vendor/tailwind.css" />
   </head>
   <body class="flex flex-row h-dvh bg-base16-100 text-base16-700 font-sans text-sm overflow-hidden">
 

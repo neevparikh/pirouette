@@ -12,7 +12,7 @@ import {
 } from "./render.js";
 import { renderMessageMarkdown } from "./message-markdown.js";
 import { renderMessagePreview } from "./message-preview.js";
-import { isRasterDataUrl } from "./content-policy.js";
+import { isHistoryImageUrl, isRasterDataUrl } from "./content-policy.js";
 import { renderToolBody, toolLanguageFromPath, toolResultLanguage } from "./tool-content.js";
 
 /**
@@ -335,8 +335,8 @@ export const STREAMING_THINKING_KEY = "streaming-thinking";
  * @param {Set<string>} [expandedItems]
  * @param {{ rawAssistant?: boolean, agentId?: string }} [opts]
  */
-/** Render an array of {dataUrl, mimeType} as a wrapping flex row of small
- *  thumbnails. Click expands the full image in a new tab (data: URL).
+/** Render an array of {dataUrl | url, mimeType} as a wrapping flex row of
+ *  small thumbnails. Click expands the full image in a new tab.
  *  Returns "" for an empty / missing array so callers can interpolate
  *  unconditionally. Used by both user and tool-result message renderers. */
 function renderInlineImages(images) {
@@ -347,8 +347,10 @@ function renderInlineImages(images) {
   // right-aligned bubbles.
   let html = `<div class="flex flex-wrap gap-1 justify-start">`;
   for (const img of images) {
-    if (!img || !isRasterDataUrl(img.dataUrl)) continue;
-    const src = escHtml(img.dataUrl);
+    if (!img) continue;
+    const url = isRasterDataUrl(img.dataUrl) ? img.dataUrl : isHistoryImageUrl(img.url) ? img.url : null;
+    if (!url) continue;
+    const src = escHtml(url);
     html += `<a href="${src}" target="_blank" rel="noopener noreferrer" class="block">
       <img src="${src}" alt="attached ${escHtml(img.mimeType || "image")}" class="max-h-48 max-w-full rounded border border-base16-300 object-contain bg-base16-100" />
     </a>`;
@@ -595,18 +597,28 @@ export function renderTranscriptBlocks(state, expandedItems, opts) {
     if (msg.role === "tool") calls.set(msg.toolCallId, msg);
     if (msg.role === "tool_result") results.set(msg.toolCallId, msg);
   }
-  for (let i = 0; i < msgs.length; i++) {
-    let msg = msgs[i];
+  // Long chats render only their tail; `startIndex` > 0 swaps everything
+  // before it for one "earlier messages" row (see app.js).
+  const start = Math.max(0, Math.min(renderOpts.startIndex ?? 0, msgs.length));
+  if (start > 0) {
+    blocks.push({ key: OLDER_KEY, html: renderOlderRow(start) });
+  }
+  for (let i = start; i < msgs.length; i++) {
+    const orig = msgs[i];
+    let msg = orig;
     const result = msg.toolCallId && results.get(msg.toolCallId);
+    // `dep` is whatever else, besides the message itself, its row reads:
+    // the call's result status, or the result's call args.
+    let dep;
     if (msg.role === "tool" && result) {
-      msg = { ...msg, toolStatus: result.isError ? "failed" : "completed" };
+      dep = result.isError ? "failed" : "completed";
+      msg = { ...msg, toolStatus: dep };
     } else if (msg.role === "tool_result" && msg.toolCallId) {
-      msg = { ...msg, args: calls.get(msg.toolCallId)?.args };
+      dep = calls.get(msg.toolCallId)?.args;
+      msg = { ...msg, args: dep };
     }
-    blocks.push({
-      key: messageKey(msg, i),
-      html: renderMessage(msg, i, expanded, renderOpts),
-    });
+    const key = messageKey(msg, i);
+    blocks.push({ key, html: renderMessageMemo(orig, msg, i, key, dep, expanded, renderOpts) });
   }
 
   // Streaming bubbles use stable keys so they share DOM across deltas.
@@ -649,6 +661,50 @@ export function renderTranscriptBlocks(state, expandedItems, opts) {
     });
   }
   return blocks;
+}
+
+/** Key of the row standing in for messages before `startIndex`. */
+export const OLDER_KEY = "older";
+
+function renderOlderRow(count) {
+  return `
+    <div class="older-messages px-4 py-2 text-center" data-msg-key="${OLDER_KEY}">
+      <button type="button" class="text-xs text-base16-500 hover:text-base16-700 underline-offset-2 hover:underline" data-load-older>
+        ${count} earlier message${count === 1 ? "" : "s"} — show all
+      </button>
+    </div>`;
+}
+
+/** Rendered rows, keyed by message object. The reducer never mutates a
+ *  message (it builds new ones), so a message's identity plus the handful of
+ *  inputs below fully determine its HTML. Without this every transcript
+ *  render — one per tool call, message end, etc. — re-ran markdown and
+ *  syntax highlighting over the entire conversation, which on a long chat
+ *  took hundreds of milliseconds each time. */
+const renderCache = new WeakMap();
+
+function renderMessageMemo(orig, msg, idx, key, dep, expanded, opts) {
+  const isExpanded = expanded.has(key);
+  const widthCols = opts.widthCols;
+  const raw = !!opts.rawAssistant;
+  const agentId = opts.agentId;
+  const agentRunning = opts.agentRunning;
+  const hit = renderCache.get(orig);
+  if (
+    hit &&
+    hit.idx === idx &&
+    hit.dep === dep &&
+    hit.isExpanded === isExpanded &&
+    hit.widthCols === widthCols &&
+    hit.raw === raw &&
+    hit.agentId === agentId &&
+    hit.agentRunning === agentRunning
+  ) {
+    return hit.html;
+  }
+  const html = renderMessage(msg, idx, expanded, opts);
+  renderCache.set(orig, { idx, dep, isExpanded, widthCols, raw, agentId, agentRunning, html });
+  return html;
 }
 
 /** Stable key for the compaction-status block. Mirrors STREAMING_*_KEY —

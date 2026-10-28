@@ -391,8 +391,12 @@ export interface ChatMessage {
 
 /** A single image attachment formatted for the frontend. */
 export interface ChatImage {
-  /** `data:<mime>;base64,<bytes>` ready to drop into an <img src=...>. */
-  dataUrl: string;
+  /** `data:<mime>;base64,<bytes>` ready to drop into an <img src=...>.
+   *  Set on live events; history uses `url` instead. */
+  dataUrl?: string;
+  /** Same-origin URL the image is served from (`/api/agents/<id>/images/<key>`),
+   *  used by history so images aren't inlined in every refetch. */
+  url?: string;
   /** Same as the mime portion of dataUrl, broken out for the renderer
    *  (which uses it to label tool-result images and pick a placeholder
    *  icon for unsupported types). */

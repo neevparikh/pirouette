@@ -2,35 +2,62 @@
 /** pru — Pirouette CLI for managing cloud pi agents. */
 
 import { readFileSync } from "node:fs";
+import nodeModule from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Command } from "commander";
-import { launch } from "./commands/launch.js";
-import { list } from "./commands/list.js";
-import { status } from "./commands/status.js";
-import { open } from "./commands/open.js";
-import { ssh } from "./commands/ssh.js";
-import { send } from "./commands/send.js";
-import { stop } from "./commands/stop.js";
-import { interrupt } from "./commands/interrupt.js";
-import { notify } from "./commands/notify.js";
-import { watchCmd, watchList, watchPr, watchRm, watchTimer, watchUntil } from "./commands/watch.js";
-import { handoff } from "./commands/handoff.js";
-import { compact } from "./commands/compact.js";
-import { archive, unarchive } from "./commands/archive.js";
-import { rename } from "./commands/rename.js";
-import { rm } from "./commands/rm.js";
-import { server } from "./commands/server.js";
-import { configShow, configPath, configEdit } from "./commands/config.js";
-import { projectAdd, projectList, projectRm } from "./commands/project.js";
-import { setup } from "./commands/setup.js";
-import { teardown } from "./commands/teardown.js";
-import { destroy } from "./commands/destroy.js";
-import { logs } from "./commands/logs.js";
-import { sync } from "./commands/sync.js";
-import { selfUpdate } from "./commands/self-update.js";
-import { tunnel } from "./commands/tunnel.js";
+
+// Reuse compiled bytecode across runs (Node >= 22.1; a no-op elsewhere).
+// Covers everything loaded below via dynamic import — notably the server's
+// large dependency tree, which shortens restarts.
+(nodeModule as { enableCompileCache?: () => unknown }).enableCompileCache?.();
+/* Command modules are loaded lazily: only the one being run gets imported.
+ * Importing them all up front pulled in the whole server (pi-coding-agent and
+ * its dependency tree) for every invocation, which made even `pru list` take
+ * ~0.7s of module loading before it sent a single request. */
+type Action = (...args: unknown[]) => Promise<void>;
+function lazy<M extends Record<string, unknown>>(load: () => Promise<M>, name: keyof M & string): Action {
+  return async (...args: unknown[]) => {
+    await (((await load())[name]) as (...a: unknown[]) => unknown)(...args);
+  };
+}
+
+const launch = lazy(() => import("./commands/launch.js"), "launch");
+const list = lazy(() => import("./commands/list.js"), "list");
+const status = lazy(() => import("./commands/status.js"), "status");
+const open = lazy(() => import("./commands/open.js"), "open");
+const ssh = lazy(() => import("./commands/ssh.js"), "ssh");
+const send = lazy(() => import("./commands/send.js"), "send");
+const stop = lazy(() => import("./commands/stop.js"), "stop");
+const interrupt = lazy(() => import("./commands/interrupt.js"), "interrupt");
+const notify = lazy(() => import("./commands/notify.js"), "notify");
+const watchCmd = lazy(() => import("./commands/watch.js"), "watchCmd");
+const watchList = lazy(() => import("./commands/watch.js"), "watchList");
+const watchPr = lazy(() => import("./commands/watch.js"), "watchPr");
+const watchRm = lazy(() => import("./commands/watch.js"), "watchRm");
+const watchTimer = lazy(() => import("./commands/watch.js"), "watchTimer");
+const watchUntil = lazy(() => import("./commands/watch.js"), "watchUntil");
+const handoff = lazy(() => import("./commands/handoff.js"), "handoff");
+const compact = lazy(() => import("./commands/compact.js"), "compact");
+const archive = lazy(() => import("./commands/archive.js"), "archive");
+const unarchive = lazy(() => import("./commands/archive.js"), "unarchive");
+const rename = lazy(() => import("./commands/rename.js"), "rename");
+const rm = lazy(() => import("./commands/rm.js"), "rm");
+const server = lazy(() => import("./commands/server.js"), "server");
+const configShow = lazy(() => import("./commands/config.js"), "configShow");
+const configPath = lazy(() => import("./commands/config.js"), "configPath");
+const configEdit = lazy(() => import("./commands/config.js"), "configEdit");
+const projectAdd = lazy(() => import("./commands/project.js"), "projectAdd");
+const projectList = lazy(() => import("./commands/project.js"), "projectList");
+const projectRm = lazy(() => import("./commands/project.js"), "projectRm");
+const setup = lazy(() => import("./commands/setup.js"), "setup");
+const teardown = lazy(() => import("./commands/teardown.js"), "teardown");
+const destroy = lazy(() => import("./commands/destroy.js"), "destroy");
+const logs = lazy(() => import("./commands/logs.js"), "logs");
+const sync = lazy(() => import("./commands/sync.js"), "sync");
+const selfUpdate = lazy(() => import("./commands/self-update.js"), "selfUpdate");
+const tunnel = lazy(() => import("./commands/tunnel.js"), "tunnel");
 
 /** Read pirouette's version straight from package.json so the CLI's
  *  `--version` output never drifts from the published package version.
@@ -388,4 +415,4 @@ program
   )
   .action(sync);
 
-program.parse();
+await program.parseAsync();

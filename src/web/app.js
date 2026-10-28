@@ -24,6 +24,7 @@ import {
   reduceEvent,
   renderThinkingBody,
   renderTranscriptBlocks,
+  OLDER_KEY,
   STREAMING_THINKING_KEY,
 } from "./transcript.js";
 import { renderMessageMarkdown } from "./message-markdown.js";
@@ -67,6 +68,13 @@ let showArchived = localStorage.getItem("pirouette-show-archived") === "1";
 const transcriptByAgent = {};
 /** @type {Record<string, boolean>} */
 const historyLoaded = {};
+/** Index of the first message rendered for each agent. Long chats open on
+ *  their last TRANSCRIPT_WINDOW messages; scrolling near the top (or the
+ *  "earlier messages" button) renders more. Rendering, laying out and
+ *  measuring thousands of rows made opening a big chat take most of a
+ *  second, and every later re-render paid for them again. */
+const windowStartByAgent = {};
+const TRANSCRIPT_WINDOW = 150;
 /** Cached live stats per agent (pi footer data). @type {Record<string, object>} */
 const statsByAgent = {};
 
@@ -1362,11 +1370,12 @@ async function fetchHistory(agentId) {
     if (!res.ok) return;
     const data = await res.json();
     if (Array.isArray(data.messages)) {
+      const prevMessages = stateFor(agentId).messages;
       transcriptByAgent[agentId] = {
         // History replaces messages, not live queue/compaction status. In
         // particular, don't erase a failure as soon as history is fetched.
         ...stateFor(agentId),
-        messages: data.messages,
+        messages: reuseUnchangedMessages(prevMessages, data.messages),
         streamingText: "",
         streamingThinking: "",
       };
@@ -1376,6 +1385,24 @@ async function fetchHistory(agentId) {
   } catch (err) {
     console.error("failed to fetch history:", err);
   }
+}
+
+/** Keep the previous message object wherever the refetched one is the same,
+ *  so the transcript's per-message render cache (keyed by object) still
+ *  hits: history is refetched at the end of every turn, and without this
+ *  each refetch re-rendered every row's markdown. */
+function reuseUnchangedMessages(prev, next) {
+  if (!prev || prev.length === 0) return next;
+  const out = next.slice();
+  const n = Math.min(prev.length, next.length);
+  for (let i = 0; i < n; i++) {
+    const a = prev[i];
+    const b = next[i];
+    if (a === b) continue;
+    if (a.role !== b.role || a.ts !== b.ts || a.content !== b.content) continue;
+    if (JSON.stringify(a) === JSON.stringify(b)) out[i] = a;
+  }
+  return out;
 }
 
 /** Fetch the pi-style footer stats (tokens, context, cost, thinking) for
@@ -1641,24 +1668,53 @@ function handleAgentEvent(agentId, event) {
   // Element IDs must match what transcript.js emits for streaming=true
   // messages: `streaming-body` (assistant) and `streaming-thinking-body` (thinking).
   if (event.type === "message_update" && event.updateType === "text_delta") {
-    if (agentId === selectedAgentId) {
-      updateStreamingElement(
-        "streaming-body",
-        transcriptByAgent[agentId].streamingText,
-        "text",
-      );
-    }
+    if (agentId === selectedAgentId) scheduleStreamingUpdate("text");
   } else if (event.type === "message_update" && event.updateType === "thinking_delta") {
-    if (agentId === selectedAgentId) {
-      updateStreamingElement(
-        "streaming-thinking-body",
-        transcriptByAgent[agentId].streamingThinking,
-        "thinking",
-      );
+    if (agentId === selectedAgentId) scheduleStreamingUpdate("thinking");
+  } else if (agentId === selectedAgentId) {
+    // Many events change nothing the transcript shows (tool-call argument
+    // deltas, tool progress updates, turn boundaries); a tool call writing
+    // a big file streams hundreds of them. Only re-render on a change.
+    const next = transcriptByAgent[agentId];
+    if (
+      next.messages !== prev.messages ||
+      next.streamingText !== prev.streamingText ||
+      next.streamingThinking !== prev.streamingThinking ||
+      next.queue !== prev.queue ||
+      next.compaction !== prev.compaction
+    ) {
+      renderMessages();
     }
-  } else {
-    if (agentId === selectedAgentId) renderMessages();
   }
+}
+
+/** Streaming deltas arrive faster than frames; re-rendering the bubble
+ *  (markdown over the whole accumulated text, then a layout to follow the
+ *  bottom) once per frame instead of once per delta keeps up with any rate.
+ *  It also means a hidden tab, where frames don't run, does no work until
+ *  it's shown again. The frame reads the state as of then, so nothing is
+ *  lost; a full render in between (message end, tool call) just makes the
+ *  frame's update a no-op. */
+const pendingStreamKinds = new Set();
+let streamFrame = null;
+const requestFrame = window.requestAnimationFrame?.bind(window) ?? ((cb) => setTimeout(cb, 16));
+function scheduleStreamingUpdate(kind) {
+  pendingStreamKinds.add(kind);
+  if (streamFrame !== null) return;
+  streamFrame = requestFrame(() => {
+    streamFrame = null;
+    const kinds = [...pendingStreamKinds];
+    pendingStreamKinds.clear();
+    const state = selectedAgentId ? transcriptByAgent[selectedAgentId] : null;
+    if (!state) return;
+    for (const k of kinds) {
+      const text = k === "text" ? state.streamingText : state.streamingThinking;
+      // The turn ended (or moved on) before this frame: the full render
+      // that cleared it already drew the final message.
+      if (!text) continue;
+      updateStreamingElement(k === "text" ? "streaming-body" : "streaming-thinking-body", text, k);
+    }
+  });
 }
 
 /** Update the contents of a live streaming bubble in place.
@@ -1919,6 +1975,7 @@ function renderAgentList() {
   if (projects.length === 0) {
     $agentList.innerHTML =
       '<div class="text-base16-500 text-sm italic px-1 py-1.5">no projects yet</div>';
+    $agentList.__pirHtml = null;
     return;
   }
 
@@ -2002,6 +2059,11 @@ function renderAgentList() {
     })
     .join("");
 
+  // The list is re-rendered on every tool call and by the once-a-second
+  // activity ticker; most of those don't change it. Skip rebuilding (and
+  // re-binding) the DOM then, which also keeps hover/focus intact.
+  if ($agentList.__pirHtml === sections) return;
+  $agentList.__pirHtml = sections;
   $agentList.innerHTML = sections;
 
   $agentList.querySelectorAll("[data-agent-id]").forEach((btn) => {
@@ -2483,7 +2545,16 @@ function renderMessages() {
       // Width is re-measured on resize via the ResizeObserver below.
       const cols = measureBubbleWidthCols();
       _lastRenderWidthCols = cols;
+      const total = state.messages.length;
+      let start = windowStartByAgent[selectedAgentId];
+      if (start === undefined || start > total) {
+        start = Math.max(0, total - TRANSCRIPT_WINDOW);
+        // Don't strand a handful of messages behind the button.
+        if (start < 20) start = 0;
+        windowStartByAgent[selectedAgentId] = start;
+      }
       blocks = renderTranscriptBlocks(state, expandedItemsFor(), {
+        startIndex: start,
         rawAssistant: rawView,
         agentId: selectedAgentId,
         widthCols: cols,
@@ -2686,6 +2757,8 @@ function scrollToBottom() {
 
 async function selectAgent(id) {
   selectedAgentId = id;
+  // Reopen on the tail of the chat, however far back it was scrolled.
+  delete windowStartByAgent[id];
   // Open at the bottom: `#messages` is shared across chats, so its
   // scrollTop is still pointing wherever the previous chat was parked.
   pinBottomAgentId = id;
@@ -4168,11 +4241,43 @@ document.addEventListener("keydown", (e) => {
   if (t && t !== document.body && !$messages.contains(t)) return;
   stopFollowingBottom();
 });
-$messages.addEventListener("scroll", () => { isFollowingBottom(); }, { passive: true });
+$messages.addEventListener("scroll", () => {
+  isFollowingBottom();
+  // Nearly at the top of a windowed chat: render the next page above,
+  // keeping the rows in view where they are.
+  if ($messages.scrollTop < 600 && (windowStartByAgent[selectedAgentId] ?? 0) > 0) {
+    showOlderMessages(TRANSCRIPT_WINDOW);
+  }
+}, { passive: true });
+
+/** Render up to `count` more messages above the current window (all of
+ *  them for Infinity) without moving what's on screen. */
+function showOlderMessages(count) {
+  const start = windowStartByAgent[selectedAgentId] ?? 0;
+  if (!selectedAgentId || start <= 0) return;
+  const anchor = $messages.querySelector(`[data-msg-key="${OLDER_KEY}"]`)?.nextElementSibling;
+  const before = anchor?.getBoundingClientRect().top;
+  let next = Number.isFinite(count) ? Math.max(0, start - count) : 0;
+  if (next < 20) next = 0;
+  windowStartByAgent[selectedAgentId] = next;
+  renderMessages();
+  if (anchor && before !== undefined && anchor.isConnected) {
+    const delta = anchor.getBoundingClientRect().top - before;
+    if (delta) {
+      $messages.scrollTop += delta;
+      lastScrollTop = $messages.scrollTop;
+      lastScrollHeight = $messages.scrollHeight;
+    }
+  }
+}
 
 $messages.addEventListener("click", (e) => {
   // "from agent <name>" on a message another agent sent: open that chat.
   // Skipped if the sender has since been removed.
+  if (e.target.closest("[data-load-older]")) {
+    showOlderMessages(Infinity);
+    return;
+  }
   const sender = e.target.closest("[data-open-agent]");
   if (sender && $messages.contains(sender)) {
     const id = sender.getAttribute("data-open-agent");
