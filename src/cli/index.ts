@@ -111,6 +111,12 @@ program
   .option("-f, --message-file <path>", "Read the message from a file")
   .option("--follow-up", "If the agent is mid-turn, queue until the turn ends instead of steering")
   .option("--as-user", "Send as the user even from inside an agent")
+  .option(
+    "--attach <path>",
+    "Upload a file to the server host and reference it in the message (repeatable)",
+    (value: string, prev: string[]) => [...prev, value],
+    [] as string[],
+  )
   .action(send);
 
 program
