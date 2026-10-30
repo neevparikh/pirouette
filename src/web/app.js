@@ -55,6 +55,30 @@ let projects = [];
 let selectedAgentId = null;
 let selectedProjectName = "scratchpad"; // updated once the projects_list arrives
 
+// The selected chat lives in the URL hash (`#agent=<id>`) so a reload, or a
+// copied link, reopens it. The hash is read before the agent list arrives,
+// so the id waits in `pendingHashAgentId` until the first `agents_list`.
+function agentIdFromHash() {
+  return new URLSearchParams(location.hash.slice(1)).get("agent") || null;
+}
+
+function writeAgentHash(id) {
+  const params = new URLSearchParams(location.hash.slice(1));
+  if (id) params.set("agent", id);
+  else params.delete("agent");
+  const hash = params.toString();
+  if (hash === location.hash.slice(1)) return;
+  // replaceState, not location.hash: switching chats shouldn't pile up
+  // back-button entries, and it doesn't fire `hashchange`.
+  history.replaceState(
+    history.state,
+    "",
+    `${location.pathname}${location.search}${hash ? `#${hash}` : ""}`,
+  );
+}
+
+let pendingHashAgentId = agentIdFromHash();
+
 /** Collapsed project sections in the sidebar, persisted via localStorage. */
 const collapsedProjects = new Set(
   JSON.parse(localStorage.getItem("pirouette-collapsed-projects") || "[]"),
@@ -1457,6 +1481,15 @@ function handleWsMessage(envelope) {
     case "agents_list":
       agents = envelope.agents;
       renderAgentList();
+      if (pendingHashAgentId) {
+        const id = pendingHashAgentId;
+        pendingHashAgentId = null;
+        if (agents.some((a) => a.id === id)) {
+          if (!selectedAgentId) void selectAgent(id);
+        } else if (!selectedAgentId) {
+          writeAgentHash(null);
+        }
+      }
       break;
 
     case "projects_list":
@@ -1499,6 +1532,7 @@ function handleWsMessage(envelope) {
       extensionUI.forgetAgent(envelope.agentId);
       if (selectedAgentId === envelope.agentId) {
         selectedAgentId = null;
+        writeAgentHash(null);
         renderAgentHeader();
         renderMessages();
       }
@@ -2757,6 +2791,7 @@ function scrollToBottom() {
 
 async function selectAgent(id) {
   selectedAgentId = id;
+  writeAgentHash(id);
   // Reopen on the tail of the chat, however far back it was scrolled.
   delete windowStartByAgent[id];
   // Open at the bottom: `#messages` is shared across chats, so its
@@ -4315,6 +4350,14 @@ void loadSkillsManifest();
 // running at this moment -- the agent_state_change handler re-fetches
 // when one comes up, so the popup self-heals.
 void loadCommandsManifest();
+
+// A hash edited by hand, or a pasted `#agent=<id>` link, switches chats.
+window.addEventListener("hashchange", () => {
+  const id = agentIdFromHash();
+  if (!id || id === selectedAgentId) return;
+  if (agents.some((a) => a.id === id)) void selectAgent(id);
+  else pendingHashAgentId = id;
+});
 
 // --- init ---
 

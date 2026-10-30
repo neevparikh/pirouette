@@ -15,6 +15,9 @@ follow [SemVer](https://semver.org).
   under `<data_dir>/uploads/`, and their paths are added to the message so
   the agent can open them. `pru send --attach <file>` (repeatable) does the
   same from a shell.
+- **A reload keeps the chat you had open.** The selected chat is kept in
+  the URL hash (`#agent=<id>`), so reloading the dashboard, or opening a
+  copied link, reopens that chat instead of the empty view.
 
 ### Changed
 
