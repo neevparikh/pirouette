@@ -142,6 +142,21 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
     },
   });
 
+  // A bash command moved into the background (bash-background.ts) becomes
+  // a cmd watch, so the agent hears when it exits.
+  agentManager.setBashJobAdopter((agentId, job) => {
+    const w = watchManager.adopt(agentId, {
+      command: job.command,
+      cwd: job.cwd,
+      pid: job.pid,
+      startedAt: job.startedAt,
+      logPath: job.logPath,
+      exitPath: job.exitPath,
+      child: job.child,
+    });
+    return { watchId: w.id };
+  });
+
   // Wire agent events → WebSocket broadcast
   agentManager.onEvent((agentId, event) => {
     const envelope: WsEnvelope = { kind: "agent_event", agentId, event };
@@ -945,6 +960,25 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
         } catch (err) {
           error(res, 500, err instanceof Error ? err.message : String(err));
         }
+        return;
+      }
+
+      // Bash commands running in a tool call right now (GET), or move them
+      // into the background so the tool call returns and the agent can
+      // take the next message (POST; `pru bg`, the dashboard). Each one
+      // becomes a watch that messages the agent when it exits.
+      if (sub === "/bash" && (method === "GET" || method === "POST")) {
+        if (!agentManager.isRunning(agentId)) {
+          error(res, 409, "Agent is not running");
+          return;
+        }
+        if (method === "GET") {
+          json(res, 200, { running: agentManager.runningBashCommands(agentId) });
+          return;
+        }
+        const running = agentManager.runningBashCommands(agentId);
+        const result = agentManager.backgroundBashCommands(agentId);
+        json(res, 200, { ...result, commands: running });
         return;
       }
 

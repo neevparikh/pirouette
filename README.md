@@ -261,6 +261,8 @@ your override file in `$EDITOR`.
 | `defaults.compaction.keep_recent_tokens` | defaults | Tokens kept verbatim after a compaction (0 = a quarter of the threshold) |
 | `defaults.bash_timeout.default_seconds` | defaults | Deadline on an agent `bash` call that doesn't ask for one (default 30, 0 = unbounded) |
 | `defaults.bash_timeout.max_seconds` | defaults | Cap on an explicit `timeout` (default 600, 0 = uncapped) |
+| `defaults.bash_background.auto_on_message` | defaults | Move an agent's running `bash` commands to the background when you message it (default true) |
+| `defaults.bash_background.grace_seconds` | defaults | Only for commands that have run at least this long (default 5) |
 | `hosts.<name>.ssh_alias` | host | `~/.ssh/config` alias (required) |
 | `hosts.<name>.user` | host | SSH login user (required) |
 | `hosts.<name>.persistent_root` | host | Mount-point of the persistent volume (required) |
@@ -288,6 +290,7 @@ overridden per host under `[hosts.<name>.dotfiles]`.
 | `pru notify <msg>` | Raise a desktop notification in open dashboards (`--title`, `--url` opens on click, `--agent`; defaults to self) |
 | `pru watch pr\|cmd\|until\|timer …` | Wake an agent with a message when a PR's checks/reviews land, a background command exits, a condition comes true, or a timer runs out (`--note`, `--agent`, `--timeout`; `pru watch ls`, `pru watch rm <id>`) |
 | `pru interrupt <agent>` | Cancel the agent's current turn; the session stays alive |
+| `pru bg <agent>` | Move the agent's running `bash` commands to the background; they keep running and the agent is told when they exit |
 | `pru compact [agent]` | Compact an agent's context in place, after its current turn (`--instructions`, `--message`, `--no-continue`, `--now`; defaults to self) |
 | `pru handoff [agent]` | Replace an agent with a fresh one in the same worktree (defaults to self) |
 | `pru rename <agent> <name>` | Rename a chat (display name only; one argument renames self) |
@@ -595,6 +598,40 @@ tail -n 40 /tmp/build.log   # in a later tool call
 interrupted tool call. `!`-prefixed commands you run yourself from the
 dashboard are never timed out.
 
+### Messaging an agent that's running a command
+
+Pi delivers a message sent mid-turn only once the agent's current tool
+calls finish. If the agent is ten minutes into a test run, your message
+waits ten minutes, unless you interrupt, which kills the tests.
+
+So when you send a message (steer, the default) to an agent whose `bash`
+command has been running for more than 5 seconds, pirouette moves the
+command to the background instead. The tool call returns at once with the
+output so far and a note saying the command is still running and where
+the rest of its output goes. The agent reads your message, and the
+command carries on. It becomes a `cmd` watch, so when it exits the agent
+gets a message with the exit code and the last lines of output, just as
+if it had used `pru watch cmd`. Messages from other agents (`pru send`)
+do the same; follow-up messages and fired watches don't.
+
+You can also do it without sending anything: the **background** pill in
+the chat header (shown while a bash command runs), `/bg`, or
+`pru bg <agent>`.
+
+```toml
+[defaults.bash_background]
+auto_on_message = true  # false: messages wait for the command, as in pi
+grace_seconds   = 5     # leave commands younger than this alone
+```
+
+Or `PIROUETTE_BASH_AUTO_BACKGROUND` / `PIROUETTE_BASH_BACKGROUND_GRACE_SECONDS`
+in the server's environment. To make this work, pirouette runs pi's own
+`bash` tool with the command's output going to a log file under
+`state/bash-jobs/` rather than a pipe, so the command can outlive the
+tool call. Nothing else about the tool changes. If an extension provides
+its own `bash` tool, pirouette leaves it in place and this feature is off
+for that agent.
+
 ### Host
 
 All host commands accept the global `--host <name>` selector.
@@ -743,6 +780,8 @@ The details that make this hold up in practice:
 | `PIROUETTE_AUTO_COMPACT_KEEP_RECENT_TOKENS` | — | Tokens kept verbatim after a compaction |
 | `PIROUETTE_BASH_TIMEOUT_SECONDS` | `30` | Deadline on an agent `bash` call with no explicit `timeout` (`0` = unbounded) |
 | `PIROUETTE_BASH_MAX_TIMEOUT_SECONDS` | `600` | Cap on an explicit `timeout` (`0` = uncapped) |
+| `PIROUETTE_BASH_AUTO_BACKGROUND` | `1` | `0`: a message no longer moves the agent's running `bash` commands to the background |
+| `PIROUETTE_BASH_BACKGROUND_GRACE_SECONDS` | `5` | Only commands that have run this long are moved |
 | `PIROUETTE_RESUME_AUTOCONTINUE` | `1` | `0` leaves restart-interrupted agents parked at `waiting_input` |
 | `PIROUETTE_RESUME_CONTINUE_MESSAGE` | see above | Nudge sent to an agent whose turn a restart cut short |
 | `PIROUETTE_SELF_UPDATE_RESUME_MESSAGE` | see above | Nudge sent to the agent that ran `pru self-update` |

@@ -997,6 +997,7 @@
                session (pi's Escape). Only visible while the agent is
                actually doing something; `stop` next to it is the heavier
                hammer that tears the session down. -->
+          <button id="agent-background-btn" class="hidden text-xs px-2 py-1 rounded bg-base16-blue/20 text-base16-blue hover:bg-base16-blue/30 cursor-pointer" title="Move the running bash command into the background: it keeps running, the agent carries on (and reads your message), and it's told when the command exits. Sending a message does this automatically after a few seconds.">background</button>
           <button id="agent-interrupt-btn" class="hidden text-xs px-2 py-1 rounded bg-base16-orange/20 text-base16-orange hover:bg-base16-orange/30 cursor-pointer" title="Interrupt the current turn (Esc, or ⌘. / Ctrl+. if a browser extension eats Escape). The session stays alive — use stop to shut the agent down.">interrupt <span class="opacity-60">esc</span></button>
           <button id="agent-stop-btn" class="hidden text-xs px-2 py-1 rounded bg-base16-yellow/20 text-base16-yellow hover:bg-base16-yellow/30 cursor-pointer" title="Stop this agent: dispose its pi session. Resume brings it back.">stop</button>
           <button id="agent-resume-btn" class="hidden text-xs px-2 py-1 rounded bg-base16-green/20 text-base16-green hover:bg-base16-green/30 cursor-pointer">resume</button>

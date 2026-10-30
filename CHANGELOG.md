@@ -9,6 +9,18 @@ follow [SemVer](https://semver.org).
 
 ### Added
 
+- **Messaging an agent no longer waits for its bash command to finish.**
+  Pi only delivers a mid-turn message once the agent's tool calls are
+  done, so a message to an agent in the middle of a long build used to
+  wait for the build, unless you interrupted it and killed the build.
+  Now, if the command has been running for more than 5 seconds, sending a
+  message moves it to the background. The tool call returns with the
+  output so far, the agent reads your message, and the command keeps
+  running as a `cmd` watch, so the agent is told when it exits. Follow-up
+  messages and fired watches don't do this. You can also do it on demand
+  with the **background** pill in the chat header, `/bg`, or
+  `pru bg <agent>`. Turn it off with
+  `[defaults.bash_background].auto_on_message = false`.
 - **You can attach files to a message.** The composer has an **attach**
   button, and you can also drop files on the input bar or paste them. Small
   images still go to the model inline. Other files are uploaded to the host

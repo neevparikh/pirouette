@@ -132,6 +132,15 @@ function expandedItemsFor(agentId = selectedAgentId) {
 }
 /** @type {Record<string, {tool: string, subtitle?: string, since: number}>} */
 const currentActivity = {};
+/** Bash tool calls in flight per agent (tool call ids), for the header's
+ *  "background" pill. Seeded from the server when a chat is opened, since
+ *  a command that started before the page loaded sent its start event to
+ *  nobody. */
+/** @type {Record<string, Set<string>>} */
+const runningBashByAgent = {};
+function runningBashCount(agentId) {
+  return runningBashByAgent[agentId]?.size ?? 0;
+}
 let activityTimer = null;
 
 let ws = null;
@@ -174,6 +183,7 @@ const $themeSearch = document.getElementById("theme-search");
 const $themeReset = document.getElementById("theme-reset");
 const $themeList = document.getElementById("theme-list");
 const $interruptBtn = document.getElementById("agent-interrupt-btn");
+const $backgroundBtn = document.getElementById("agent-background-btn");
 const $stopBtn = document.getElementById("agent-stop-btn");
 const $resumeBtn = document.getElementById("agent-resume-btn");
 const $deleteBtn = document.getElementById("agent-delete-btn");
@@ -1566,6 +1576,8 @@ function handleWsMessage(envelope) {
     case "agent_state_change": {
       const agent = agents.find((a) => a.id === envelope.agentId);
       const prevState = agent?.state;
+      // A turn that ended (or was aborted) has no tool calls in flight.
+      if (envelope.state !== "running") delete runningBashByAgent[envelope.agentId];
       if (agent) {
         agent.state = envelope.state;
         renderAgentList();
@@ -1645,6 +1657,12 @@ function handleAgentEvent(agentId, event) {
     if (expanded.delete(STREAMING_THINKING_KEY)) {
       expanded.add(`msg:${prev.messages.length}`);
     }
+  }
+
+  if (event.type === "tool_execution_start" && event.toolName === "bash" && event.toolCallId) {
+    (runningBashByAgent[agentId] ??= new Set()).add(event.toolCallId);
+  } else if (event.type === "tool_execution_end" && event.toolCallId) {
+    runningBashByAgent[agentId]?.delete(event.toolCallId);
   }
 
   if (event.type === "tool_execution_start") {
@@ -2330,6 +2348,7 @@ function renderAgentHeader() {
     $agentStats.textContent = "";
     // Hide every action pill when no agent is selected.
     if ($interruptBtn) $interruptBtn.classList.add("hidden");
+    if ($backgroundBtn) $backgroundBtn.classList.add("hidden");
     $stopBtn.classList.add("hidden");
     $resumeBtn.classList.add("hidden");
     $deleteBtn.classList.add("hidden");
@@ -2387,6 +2406,15 @@ function renderAgentHeader() {
   // Interrupt only makes sense mid-turn; hiding it otherwise keeps the
   // header honest about what Escape will do right now.
   if ($interruptBtn) $interruptBtn.classList.toggle("hidden", agent.state !== "running");
+  // "background" only while a bash command is running: it moves the
+  // command out of the tool call (it keeps running) so the agent can
+  // carry on, where interrupt would kill it.
+  if ($backgroundBtn) {
+    $backgroundBtn.classList.toggle(
+      "hidden",
+      agent.state !== "running" || runningBashCount(agent.id) === 0,
+    );
+  }
   $resumeBtn.classList.toggle(
     "hidden",
     agent.state !== "stopped" && agent.state !== "shutdown" && agent.state !== "error",
@@ -2807,6 +2835,7 @@ async function selectAgent(id) {
   // @<newname> creates land where the user expects.
   const agent = agents.find((a) => a.id === id);
   if (agent) selectedProjectName = agent.projectName;
+  if (agent?.state === "running") void refreshRunningBash(id);
   renderAgentList();
   renderAgentHeader();
   updateInputPlaceholder();
@@ -3078,6 +3107,41 @@ async function interruptAgent() {
   } catch (err) {
     console.error("interrupt error:", err);
     return false;
+  }
+}
+
+/** Move the selected agent's running bash commands into the background
+ *  (POST /api/agents/:id/bash). They keep running; the tool calls return
+ *  with the output so far and the agent is messaged when they exit. */
+async function backgroundAgentBash() {
+  if (!selectedAgentId) return false;
+  const agentId = selectedAgentId;
+  try {
+    const res = await fetch(`/api/agents/${agentId}/bash`, { method: "POST" });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (res.status !== 409) console.error("background failed:", data.error || res.statusText);
+      return false;
+    }
+    const result = await res.json();
+    return (result.detached ?? 0) > 0;
+  } catch (err) {
+    console.error("background error:", err);
+    return false;
+  }
+}
+
+/** Ask the server which bash commands an agent is running, for a chat
+ *  opened mid-command. */
+async function refreshRunningBash(agentId) {
+  try {
+    const res = await fetch(`/api/agents/${agentId}/bash`);
+    if (!res.ok) return;
+    const data = await res.json();
+    runningBashByAgent[agentId] = new Set((data.running ?? []).map((c) => c.toolCallId));
+    if (agentId === selectedAgentId) renderAgentHeader();
+  } catch {
+    // Best-effort: the pill just stays hidden until the next start event.
   }
 }
 
@@ -3406,6 +3470,7 @@ const SLASH_COMMANDS = [
   { name: "handoff", description: "Hand this agent's work to a fresh agent in the same worktree", argLabel: "[briefing]", kind: "client", takesArgs: true },
   { name: "rename", description: "Rename this chat (display name only)", argLabel: "[new name]", kind: "client", takesArgs: true },
   { name: "interrupt", description: "Interrupt the current turn, keep the session alive (Esc)", kind: "client", takesArgs: false },
+  { name: "bg", description: "Move running bash commands into the background (they keep running)", kind: "client", takesArgs: false },
   { name: "stop", description: "Stop the running agent (disposes its session)", kind: "client", takesArgs: false },
   { name: "resume", description: "Resume a stopped agent", kind: "client", takesArgs: false },
   { name: "copy", description: "Copy last assistant message to clipboard", kind: "client", takesArgs: false },
@@ -3712,6 +3777,9 @@ async function executeSlashCommand(name, args) {
         break;
       case "interrupt":
         await interruptAgent();
+        break;
+      case "bg":
+        await backgroundAgentBash();
         break;
       case "stop":
         await stopAgent();
@@ -4199,6 +4267,7 @@ $themeReset.addEventListener("click", () => {
   closeThemePicker();
 });
 if ($interruptBtn) $interruptBtn.addEventListener("click", () => void interruptAgent());
+if ($backgroundBtn) $backgroundBtn.addEventListener("click", () => void backgroundAgentBash());
 $stopBtn.addEventListener("click", stopAgent);
 $resumeBtn.addEventListener("click", resumeAgent);
 $deleteBtn.addEventListener("click", deleteAgent);

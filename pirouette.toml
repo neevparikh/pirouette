@@ -101,6 +101,19 @@ default_seconds = 30
 # is what the cap pushes agents towards. 0 = uncapped.
 max_seconds = 600
 
+[defaults.bash_background]
+# A message sent to an agent mid-turn is only delivered once its tool calls
+# finish, so a message to an agent sitting in a long build used to wait for
+# the build (or you interrupted and killed it). With this on, a message moves
+# the agent's running bash commands into the background instead: the tool
+# call returns with the output so far, the command keeps running, and the
+# agent is messaged when it exits. Follow-up messages ("send after the turn")
+# don't do this. `pru bg <agent>` and the dashboard do it on request.
+auto_on_message = true
+# Don't detach a command that has been running for less than this many
+# seconds; wait until it has (most commands are done by then).
+grace_seconds = 5
+
 [defaults.dotfiles]
 # Optional. If set, `pru setup` runs `yadm clone <url>` on the host on first
 # setup. SSH-form URLs work if your ssh-agent is forwarded to the host. Leave

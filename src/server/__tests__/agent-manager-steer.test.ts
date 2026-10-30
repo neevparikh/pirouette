@@ -262,3 +262,61 @@ describe("AgentManager.sendMessage steer-during-prompt race", () => {
     await send; // now resolves
   });
 });
+
+describe("AgentManager.sendMessage moves running bash commands to the background", () => {
+  function spyDetach(manager: AgentManager) {
+    const calls: Array<{ agentId: string; reason: string; graceMs?: number }> = [];
+    const jobs = (manager as unknown as {
+      bashJobs: { detach: (id: string, o: { reason: string; graceMs?: number }) => unknown };
+    }).bashJobs;
+    jobs.detach = (agentId, o) => {
+      calls.push({ agentId, ...o });
+      return { detached: 1, scheduled: 0 };
+    };
+    return calls;
+  }
+
+  it("on a mid-turn steer, after the grace period; not on follow-ups or idle sends", async () => {
+    process.env.PIROUETTE_BASH_AUTO_BACKGROUND = "1";
+    process.env.PIROUETTE_BASH_BACKGROUND_GRACE_SECONDS = "7";
+    try {
+      const { manager, session } = await makeManagerWithFakeAgent("agent-bg");
+      const calls = spyDetach(manager);
+
+      const first = manager.sendMessage("agent-bg", "start", { mode: "steer" });
+      await new Promise((r) => setImmediate(r));
+      expect(calls).toHaveLength(0); // idle: nothing running to detach
+
+      await manager.sendMessage("agent-bg", "later", { mode: "followUp" });
+      expect(calls).toHaveLength(0);
+
+      await manager.sendMessage("agent-bg", "look at this", { mode: "steer" });
+      expect(calls).toEqual([
+        { agentId: "agent-bg", reason: "the user sent you a message", graceMs: 7000 },
+      ]);
+      expect(session.steerCalls.map((c) => c.text)).toEqual(["look at this"]);
+
+      session.finishPrompt();
+      await first;
+    } finally {
+      delete process.env.PIROUETTE_BASH_AUTO_BACKGROUND;
+      delete process.env.PIROUETTE_BASH_BACKGROUND_GRACE_SECONDS;
+    }
+  });
+
+  it("not when turned off", async () => {
+    process.env.PIROUETTE_BASH_AUTO_BACKGROUND = "0";
+    try {
+      const { manager, session } = await makeManagerWithFakeAgent("agent-bg2");
+      const calls = spyDetach(manager);
+      const first = manager.sendMessage("agent-bg2", "start", { mode: "steer" });
+      await new Promise((r) => setImmediate(r));
+      await manager.sendMessage("agent-bg2", "look at this", { mode: "steer" });
+      expect(calls).toHaveLength(0);
+      session.finishPrompt();
+      await first;
+    } finally {
+      delete process.env.PIROUETTE_BASH_AUTO_BACKGROUND;
+    }
+  });
+});

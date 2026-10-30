@@ -91,6 +91,27 @@ export interface Watch {
   /** One-line summary of why it fired, for the dashboard label. */
   firedSummary: string | null;
   deliveryAttempts: number;
+  /** Set on a `cmd` watch that adopted a bash tool call pirouette moved to
+   *  the background (bash-background.ts), rather than one `pru watch cmd`
+   *  started. Missing on watches saved before this existed. */
+  fromBashCall?: boolean;
+  /** Output log and exit-code file of an adopted command, which live where
+   *  the bash tool put them. Null / missing: the default under watch-logs. */
+  logFile?: string | null;
+  exitFile?: string | null;
+}
+
+/** A running bash tool call for `WatchManager.adopt`. */
+export interface AdoptRequest {
+  command: string;
+  cwd: string;
+  pid: number;
+  startedAt: number;
+  logPath: string;
+  exitPath: string;
+  /** The process, if this server spawned it: its exit event reports the
+   *  end. Without it the pid is polled. */
+  child?: { once(event: "exit", fn: (code: number | null, signal: NodeJS.Signals | null) => void): unknown };
 }
 
 /** What `pru watch` sends to create one. Validated by `parseWatchRequest`. */
@@ -351,7 +372,7 @@ export function tailOutput(output: string): string {
 /** The message a fired watch sends. `summary` is one line ("PR #12: 2
  *  checks failed"); `details` is the rest (check list, output tail). */
 export function buildWatchMessage(
-  w: Pick<Watch, "id" | "kind" | "agentId" | "createdBy" | "note" | "createdAt" | "command" | "pr" | "repo" | "prEvents" | "deadline" | "mode">,
+  w: Pick<Watch, "id" | "kind" | "agentId" | "createdBy" | "note" | "createdAt" | "command" | "pr" | "repo" | "prEvents" | "deadline" | "mode" | "fromBashCall">,
   summary: string,
   details: string,
   now: number = Date.now(),
@@ -363,8 +384,10 @@ export function buildWatchMessage(
         ? "you set"
         : `agent ${w.createdBy} set for you`;
   const age = formatDuration(now - Date.parse(w.createdAt));
-  const header =
-    `[Watch ${w.id} fired via pirouette, not typed by the user: a watch ${setBy} ${age} ago ` +
+  const header = w.fromBashCall
+    ? `[Watch ${w.id} fired via pirouette, not typed by the user: a bash command you started ${age} ago, ` +
+      `which pirouette moved to the background, has finished.]`
+    : `[Watch ${w.id} fired via pirouette, not typed by the user: a watch ${setBy} ${age} ago ` +
     `on ${describeWatch(w)}. It has now finished; set a new one (pru watch ...) if you need to keep waiting.]`;
   const parts = [summary];
   if (w.note) parts.push(`Note left with the watch: ${w.note}`);
@@ -673,10 +696,14 @@ export class WatchManager {
   }
 
   logPath(id: string): string {
+    const custom = this.watches.get(id)?.logFile;
+    if (custom) return custom;
     return path.join(this.deps.stateDir, "watch-logs", `${id}.log`);
   }
 
   private exitPath(id: string): string {
+    const custom = this.watches.get(id)?.exitFile;
+    if (custom) return custom;
     return path.join(this.deps.stateDir, "watch-logs", `${id}.exit`);
   }
 
@@ -786,6 +813,55 @@ export class WatchManager {
     this.save();
     if (w.kind !== "cmd") this.schedule(w, w.kind === "timer" ? deadlineMs! - now : w.everyMs!);
     else if (w.deadline) this.schedule(w, Date.parse(w.deadline) - now);
+    return { ...w };
+  }
+
+  /** Take over a command that is already running: a bash tool call that
+   *  pirouette moved to the background. Becomes a `cmd` watch with no
+   *  deadline, so the agent is messaged when the command exits, exactly as
+   *  if it had been started with `pru watch cmd`. Synchronous, so the tool
+   *  result can name the watch. */
+  adopt(agentId: string, req: AdoptRequest): Watch {
+    const w: Watch = {
+      id: `w${this.nextId++}`,
+      agentId,
+      createdBy: agentId,
+      kind: "cmd",
+      note: null,
+      mode: "followUp",
+      createdAt: new Date(req.startedAt).toISOString(),
+      deadline: null,
+      cwd: req.cwd,
+      command: req.command,
+      everyMs: null,
+      pr: null,
+      repo: null,
+      prEvents: null,
+      prBaseline: null,
+      pid: req.pid,
+      pollFailures: 0,
+      firedText: null,
+      firedBody: null,
+      firedSummary: null,
+      deliveryAttempts: 0,
+      fromBashCall: true,
+      logFile: req.logPath,
+      exitFile: req.exitPath,
+    };
+    this.watches.set(w.id, w);
+    if (req.child) {
+      this.children.add(w.id);
+      req.child.once("exit", (code, signal) => {
+        this.children.delete(w.id);
+        const cur = this.watches.get(w.id);
+        if (!cur || cur.firedText !== null) return;
+        this.finishCommand(cur, code, signal);
+      });
+    } else {
+      this.schedule(w, 15_000);
+    }
+    this.save();
+    console.log(`[watches] ${w.id} adopted backgrounded bash command (pid ${w.pid}) for ${agentId}`);
     return { ...w };
   }
 

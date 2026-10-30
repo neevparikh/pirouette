@@ -392,6 +392,58 @@ describe("WatchManager", () => {
     await wm.stop();
   });
 
+  it("adopts a running command and reports its exit like a cmd watch", async () => {
+    const { delivered, make, stateDir } = await setup();
+    const wm = make();
+    const logPath = path.join(stateDir, "job.log");
+    const exitPath = path.join(stateDir, "job.exit");
+    await writeFile(logPath, "");
+    const { spawn } = await import("node:child_process");
+    const { openSync, closeSync } = await import("node:fs");
+    const fd = openSync(logPath, "a");
+    const child = spawn("sh", ["-c", "echo working; sleep 0.2; echo done; exit 4"], {
+      stdio: ["ignore", fd, fd],
+      detached: true,
+    });
+    closeSync(fd);
+    const w = wm.adopt("aaaa0001", {
+      command: "make test",
+      cwd: stateDir,
+      pid: child.pid!,
+      startedAt: Date.now() - 90_000,
+      logPath,
+      exitPath,
+      child,
+    });
+    expect(w).toMatchObject({ kind: "cmd", agentId: "aaaa0001", fromBashCall: true, logFile: logPath });
+    expect(wm.list()).toHaveLength(1);
+    await until(() => delivered.length === 1);
+    const msg = delivered[0].msg;
+    expect(msg.text).toMatch(/a bash command you started 1m 30s ago, which pirouette moved to the background/);
+    expect(msg.body).toContain("Command exited with code 4: `make test`");
+    expect(msg.body).toContain("done");
+    expect(msg.body).toContain(`Full output: ${logPath}`);
+    await wm.stop();
+  });
+
+  it("finds an adopted command's exit code on disk after a restart", async () => {
+    const { delivered, make, stateDir } = await setup();
+    const logPath = path.join(stateDir, "job.log");
+    const exitPath = path.join(stateDir, "job.exit");
+    await writeFile(logPath, "built\n");
+    const first = make();
+    first.adopt("aaaa0001", { command: "make", cwd: stateDir, pid: 2 ** 22 + 12345, startedAt: Date.now(), logPath, exitPath });
+    await first.stop();
+    await first.flush();
+    await writeFile(exitPath, "0\n");
+    const second = make();
+    await second.start();
+    await until(() => delivered.length === 1);
+    expect(delivered[0].msg.body).toContain("Command exited with code 0");
+    expect(delivered[0].msg.body).toContain("built");
+    await second.stop();
+  });
+
   it("retries delivery until the agent takes the message", async () => {
     const { delivered, make, stateDir } = await setup({ deliverFails: 2 });
     const wm = make();
