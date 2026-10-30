@@ -31,6 +31,7 @@ const ssh = lazy(() => import("./commands/ssh.js"), "ssh");
 const send = lazy(() => import("./commands/send.js"), "send");
 const stop = lazy(() => import("./commands/stop.js"), "stop");
 const interrupt = lazy(() => import("./commands/interrupt.js"), "interrupt");
+const bg = lazy(() => import("./commands/bg.js"), "bg");
 const notify = lazy(() => import("./commands/notify.js"), "notify");
 const watchCmd = lazy(() => import("./commands/watch.js"), "watchCmd");
 const watchList = lazy(() => import("./commands/watch.js"), "watchList");
@@ -233,6 +234,14 @@ program
   .alias("esc")
   .description("Cancel an agent's current turn (session stays alive) — same as Escape in the dashboard")
   .action(interrupt);
+
+program
+  .command("bg <agent>")
+  .description(
+    "Move an agent's running bash commands into the background, so it can read your next message " +
+      "without waiting for them (it's messaged when they exit)",
+  )
+  .action(bg);
 
 program
   .command("handoff [agent]")

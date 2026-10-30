@@ -20,10 +20,21 @@ import {
   type AgentSessionEvent,
   type EventBusController,
   type ResourceLoader,
+  type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 
 
 import { getConfig } from "../config.js";
+import {
+  BashJobRegistry,
+  bashBackgroundGuidance,
+  resolveBashBackgroundPolicy,
+  type AdoptedJob,
+  type BashBackgroundPolicy,
+  type BashJob,
+  type BashJobInfo,
+  type DetachResult,
+} from "./bash-background.js";
 import {
   bashTimeoutGuidance,
   createBashTimeoutExtension,
@@ -341,6 +352,14 @@ export class AgentManager {
    *  there. */
   private bashTimeoutPolicy: BashTimeoutPolicy | null = null;
 
+  /** `[defaults.bash_background]` + env, resolved once. */
+  private bashBackgroundPolicy: BashBackgroundPolicy | null = null;
+
+  private bashJobAdopter: ((agentId: string, job: BashJob) => AdoptedJob) | null = null;
+
+  /** Every agent's in-flight bash tool calls, so they can be detached. */
+  private readonly bashJobs: BashJobRegistry;
+
   /** Set for the whole of `shutdown()`. While it is true, nothing is
    *  allowed to clear an agent's `interruptedTurn` flag: tearing the
    *  sessions down makes in-flight `prompt()` calls settle, and those
@@ -352,7 +371,16 @@ export class AgentManager {
     private readonly stateManager: StateManager,
     private readonly projectManager: ProjectManager,
     private readonly dataDir: string,
-  ) {}
+  ) {
+    this.bashJobs = new BashJobRegistry({
+      jobDir: path.join(dataDir, "state", "bash-jobs"),
+      adopt: (job) => {
+        if (!this.bashJobAdopter) throw new Error("no watch manager to report its exit");
+        return this.bashJobAdopter(job.agentId, job);
+      },
+      log: (msg) => console.log(msg),
+    });
+  }
 
   /** Serialize operations on a single agent. If a prior op is in flight, the
    *  new one waits for it. Prevents races like "send while starting" or
@@ -2055,6 +2083,24 @@ export class AgentManager {
       }
       this.setAgentState(id, "running");
 
+      // A message for the agent to read now: don't make it wait for a long
+      // bash command to finish. Not for follow-ups (the sender chose to
+      // wait), watches (automated, and they'd detach each other's work),
+      // or extension commands (they run immediately anyway).
+      if (
+        handle.session.isStreaming &&
+        mode === "steer" &&
+        !opts.watch &&
+        !this.isExtensionCommand(handle, message)
+      ) {
+        this.autoBackgroundForMessage(
+          id,
+          opts.from
+            ? `agent ${opts.from.name} (${opts.from.id}) sent you a message`
+            : "the user sent you a message",
+        );
+      }
+
       if (opts.watch) {
         // A fired watch. Built by the server, not typed by anyone, so no
         // input screening; same custom-message delivery as a peer's.
@@ -2177,6 +2223,18 @@ export class AgentManager {
       }
     } else {
       console.log(`[agent-manager] ${mode} enqueued for ${id}`);
+    }
+  }
+
+  private autoBackgroundForMessage(id: string, reason: string): void {
+    const policy = this.getBashBackgroundPolicy();
+    if (!policy.autoOnMessage) return;
+    const r = this.bashJobs.detach(id, { reason, graceMs: policy.graceSeconds * 1000 });
+    if (r.detached || r.scheduled) {
+      console.log(
+        `[agent-manager] message for ${id}: moved ${r.detached} bash command(s) to the background` +
+          (r.scheduled ? `, ${r.scheduled} more once they've run ${policy.graceSeconds}s` : ""),
+      );
     }
   }
 
@@ -2800,6 +2858,16 @@ export class AgentManager {
     // per-agent DefaultResourceLoader — just be mindful that re-scanning
     // extensions on every agent boot would redo provider registration.)
     const agentDir = getAgentDir();
+    // Pi's bash tool, run so that a command can be moved into the
+    // background mid-call (bash-background.ts). Null where that isn't
+    // possible, or where an extension brings its own `bash`, which we
+    // must not shadow.
+    const bashTool = this.extensionOverridesBash(resourceLoader)
+      ? null
+      : this.bashJobs.createTool(config.id, config.worktreePath, {
+          shellPath: settingsManager.getShellPath(),
+          commandPrefix: settingsManager.getShellCommandPrefix(),
+        });
     const agentResourceLoader: ResourceLoader = {
       // Re-guard on every read: a `/reload` from any agent swaps in a fresh
       // runtime object that hasn't been protected yet.
@@ -2819,7 +2887,10 @@ export class AgentManager {
       getAppendSystemPrompt: () => {
         const base = resourceLoader.getAppendSystemPrompt();
         const guidance = bashTimeoutGuidance(this.getBashTimeoutPolicy());
-        return guidance ? [...base, guidance] : base;
+        const background = bashTool
+          ? bashBackgroundGuidance(this.getBashBackgroundPolicy())
+          : null;
+        return [...base, ...(guidance ? [guidance] : []), ...(background ? [background] : [])];
       },
       // Sources are the on-disk provenance of the append-prompts above; our
       // synthetic bash-timeout guidance has no file, so it contributes none.
@@ -2841,6 +2912,9 @@ export class AgentManager {
       resourceLoader: agentResourceLoader,
       model,
       thinkingLevel,
+      // Pi's ToolDefinition is generic over the schema; the SDK's list
+      // is the erased form, which its own built-ins are cast to as well.
+      ...(bashTool ? { customTools: [bashTool as unknown as ToolDefinition] } : {}),
     });
 
     // Plug in pirouette's ExtensionUIContext so extensions that call
@@ -2879,6 +2953,53 @@ export class AgentManager {
   }
 
   /** Effective bash-timeout policy, resolved once per server process. */
+  private getBashBackgroundPolicy(): BashBackgroundPolicy {
+    if (!this.bashBackgroundPolicy) {
+      let configured;
+      try {
+        configured = getConfig().defaults?.bash_background;
+      } catch (err) {
+        console.error(`[agent-manager] could not read bash_background config: ${err}`);
+      }
+      const { policy, warnings } = resolveBashBackgroundPolicy(configured);
+      for (const w of warnings) console.warn(`[agent-manager] bash background config: ${w}`);
+      console.log(
+        policy.autoOnMessage
+          ? `[agent-manager] bash commands move to the background on a new message after ${policy.graceSeconds}s`
+          : `[agent-manager] bash commands are not moved to the background on a new message`,
+      );
+      this.bashBackgroundPolicy = policy;
+    }
+    return this.bashBackgroundPolicy;
+  }
+
+  /** Does a loaded extension register its own `bash` tool? Then it wins,
+   *  as it would without pirouette, and commands can't be detached. */
+  private extensionOverridesBash(loader: ResourceLoader): boolean {
+    try {
+      return loader.getExtensions().extensions.some((e) => e.tools.has("bash"));
+    } catch {
+      return false;
+    }
+  }
+
+  /** Who takes over a detached bash command and reports its exit. Set by
+   *  the server to the watch manager. */
+  setBashJobAdopter(adopt: (agentId: string, job: BashJob) => AdoptedJob): void {
+    this.bashJobAdopter = adopt;
+  }
+
+  /** An agent's bash commands that are running in a tool call right now. */
+  runningBashCommands(id: string): BashJobInfo[] {
+    return this.bashJobs.running(id);
+  }
+
+  /** Move an agent's running bash commands into the background now
+   *  (`pru bg`, the dashboard). */
+  backgroundBashCommands(id: string, reason = "the user asked for it"): DetachResult {
+    return this.bashJobs.detach(id, { reason });
+  }
+
   private getBashTimeoutPolicy(): BashTimeoutPolicy {
     if (!this.bashTimeoutPolicy) {
       let configured;
