@@ -145,6 +145,11 @@ let activityTimer = null;
 
 let ws = null;
 let reconnectTimer = null;
+// Set once the first socket opens. Any later open is a reconnect, and the
+// events broadcast while we were disconnected (laptop asleep, network
+// blip) are gone, so the next agents_list triggers a resync.
+let wsEverConnected = false;
+let resyncOnAgentsList = false;
 // Theme state is owned by localStorage (`pirouette-theme-{light,dark,mode}`)
 // and applied as a class on <html>. The synchronous bootstrap.js script
 // sets the initial class before this module loads; we only need
@@ -1471,19 +1476,59 @@ function rememberCreatedAgent(agent) {
 
 function connectWs() {
   const protocol = location.protocol === "https:" ? "wss" : "ws";
-  ws = new WebSocket(`${protocol}://${location.host}/ws`);
+  const socket = new WebSocket(`${protocol}://${location.host}/ws`);
+  ws = socket;
 
-  ws.onopen = () => {
+  socket.onopen = () => {
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
+    if (wsEverConnected) resyncOnAgentsList = true;
+    wsEverConnected = true;
   };
-  ws.onmessage = (evt) => handleWsMessage(JSON.parse(evt.data));
-  ws.onclose = () => {
+  socket.onmessage = (evt) => handleWsMessage(JSON.parse(evt.data));
+  socket.onclose = () => {
+    // A socket replaced by reconnectNow() must not schedule another one.
+    if (ws !== socket) return;
     reconnectTimer = setTimeout(connectWs, 2000);
   };
-  ws.onerror = () => ws.close();
+  socket.onerror = () => socket.close();
+}
+
+/** Reconnect straight away if the socket is down, rather than waiting on
+ *  the retry timer: browsers throttle timers in background tabs and across
+ *  sleep, so the 2s retry can fire long after the user is back. */
+function reconnectNow() {
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  connectWs();
+}
+
+/** After a reconnect, local transcripts are missing whatever was broadcast
+ *  while the socket was down. Mark every cached history stale so selecting
+ *  a chat refetches it, drop live activity for agents that are no longer
+ *  running, and refetch the open chat now. */
+function resyncAfterReconnect() {
+  for (const id of Object.keys(historyLoaded)) historyLoaded[id] = false;
+  for (const a of agents) {
+    if (a.state !== "running") {
+      delete currentActivity[a.id];
+      delete runningBashByAgent[a.id];
+    }
+  }
+  renderAgentList();
+  const id = selectedAgentId;
+  if (!id) return;
+  const agent = agents.find((a) => a.id === id);
+  if (!agent) return;
+  renderAgentHeader();
+  void fetchHistory(id);
+  void fetchStats(id);
+  if (agent.state === "running") void refreshRunningBash(id);
 }
 
 function handleWsMessage(envelope) {
@@ -1491,6 +1536,10 @@ function handleWsMessage(envelope) {
     case "agents_list":
       agents = envelope.agents;
       renderAgentList();
+      if (resyncOnAgentsList) {
+        resyncOnAgentsList = false;
+        resyncAfterReconnect();
+      }
       if (pendingHashAgentId) {
         const id = pendingHashAgentId;
         pendingHashAgentId = null;
@@ -4432,3 +4481,7 @@ window.addEventListener("hashchange", () => {
 
 updateInputPlaceholder();
 connectWs();
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") reconnectNow();
+});
+window.addEventListener("online", reconnectNow);
