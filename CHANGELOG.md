@@ -55,6 +55,14 @@ follow [SemVer](https://semver.org).
 
 ### Fixed
 
+- **An open chat catches up after the dashboard reconnects.** If the
+  dashboard's connection dropped (say the laptop slept), whatever the
+  agents did meanwhile never showed up: the open chat stayed stale until
+  the agent's next turn ended. On reconnect the dashboard now refetches the
+  open chat and marks every other cached chat to be refetched when opened.
+  It also reconnects as soon as the tab is visible again or the network
+  comes back, instead of waiting on a retry timer the browser may have
+  throttled.
 - **You can scroll up while a reply is streaming.** Scrolling up a little
   used to get yanked back to the bottom by the next token, so the view
   jittered in place instead of letting go. Any scroll up (wheel, touch,
