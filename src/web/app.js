@@ -1734,7 +1734,9 @@ function handleAgentEvent(agentId, event) {
     const reason = typeof event.reason === "string" ? event.reason : null;
     currentActivity[agentId] = {
       tool: "compact",
-      subtitle: reason ? `(${reason})` : "",
+      // Same wording as the transcript row: pi's "manual" is anything that
+      // asked for a compaction, not necessarily the user.
+      subtitle: reason ? `(${reason === "manual" ? "requested" : reason})` : "",
       since: Date.now(),
     };
     maybeStartActivityTicker();

@@ -85,7 +85,7 @@ describe("compaction feedback in the dashboard", () => {
     }));
     await vi.waitFor(() => expect(historyCalls()).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(row().textContent).toContain("context compacted (manual)");
+    expect(row().textContent).toContain("context compacted (requested)");
     expect(row().textContent).toContain("120,000 → ~23,000 tokens");
   });
 

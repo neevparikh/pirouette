@@ -55,6 +55,15 @@ follow [SemVer](https://semver.org).
 
 ### Fixed
 
+- **A compaction with nothing to do no longer looks like a failure.** When
+  an agent ran `pru compact` on a short session, or an extension asked for
+  a compaction pi had nothing to summarise for, the chat ended on a red
+  "compaction failed (manual)" alert telling you the agent might need a
+  `/compact` or `/handoff`. Nothing had gone wrong. That case is now a grey
+  "compaction skipped" note. Compactions that weren't pi's own are labelled
+  "requested" instead of "manual", since most of them aren't you, and the
+  `/compact` or `/handoff` advice only appears when an automatic compaction
+  fails.
 - **An open chat catches up after the dashboard reconnects.** If the
   dashboard's connection dropped (say the laptop slept), whatever the
   agents did meanwhile never showed up: the open chat stayed stale until

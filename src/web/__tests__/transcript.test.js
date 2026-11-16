@@ -361,6 +361,30 @@ describe("compaction outcomes", () => {
     expect(html).not.toContain("<strong>");
   });
 
+  it.each(["threshold", "overflow"])("suggests /compact or /handoff after an automatic (%s) failure", (reason) => {
+    const html = renderTranscript(finish({ reason, errorMessage: "Summarization failed" }), new Set());
+    expect(html).toContain("may need a manual /compact or /handoff");
+  });
+
+  it("doesn't suggest /compact after a requested compaction failed", () => {
+    const html = renderTranscript(finish({ reason: "manual", errorMessage: "Summarization failed" }), new Set());
+    expect(html).toContain("compaction failed (requested)");
+    expect(html).not.toContain("/handoff");
+  });
+
+  it.each([
+    ["Compaction failed: Nothing to compact (session too small)", "nothing to compact yet"],
+    ["Compaction failed: Already compacted", "already compacted"],
+  ])("shows %j as a skipped compaction, not a failure", (errorMessage, note) => {
+    const html = renderTranscript(finish({ reason: "manual", errorMessage }), new Set());
+    expect(html).toContain(`compaction skipped (requested): ${note}`);
+    expect(html).not.toContain('role="alert"');
+    expect(html).not.toContain("compaction failed");
+    expect(html).not.toContain("text-base16-red");
+    expect(html).not.toContain("/handoff");
+    expect(html).not.toContain("context compacted");
+  });
+
   it("requires a result before claiming success", () => {
     const html = renderTranscript(finish({}), new Set());
     expect(html).toContain("compaction ended without a result");
@@ -386,7 +410,7 @@ describe("compaction outcomes", () => {
 
   it("shows cancellation separately from failure or success", () => {
     const html = renderTranscript(finish({ aborted: true, reason: "manual" }), new Set());
-    expect(html).toContain("compaction aborted (manual)");
+    expect(html).toContain("compaction aborted (requested)");
     expect(html).not.toContain("context compacted");
     expect(html).not.toContain("compaction failed");
   });
