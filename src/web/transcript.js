@@ -712,15 +712,22 @@ function renderMessageMemo(orig, msg, idx, key, dep, expanded, opts) {
  *  the same DOM node, so reconciliation is a single innerHTML swap. */
 export const COMPACTION_KEY = "compaction";
 
+/** Pi's "manual" covers every compaction something asked for: `/compact`,
+ *  `pru compact` run by the agent itself, and extensions that compact on
+ *  their own schedule. "manual" read as "you did this", so say "requested". */
 function compactionReasonLabel(reason) {
   const label = {
-    manual: "manual",
+    manual: "requested",
     auto: "automatic",
     threshold: "automatic threshold",
     overflow: "context recovery",
   }[reason];
   return label ? ` (${label})` : "";
 }
+
+/** Errors pi raises when a compaction had nothing to do (short session, or
+ *  the last entry is already a compaction summary). */
+const COMPACTION_NOOP_RE = /nothing to compact|already compacted/i;
 
 function renderCompactionRow(c) {
   if (c.active) {
@@ -745,13 +752,31 @@ function renderCompactionRow(c) {
         </div>
       </div>`;
   }
+  if (r.errorMessage && COMPACTION_NOOP_RE.test(r.errorMessage)) {
+    // Pi reports "there was nothing to summarise" as an error. Nothing went
+    // wrong and nothing needs doing, so don't dress it up as a failure.
+    return `
+      <div class="message-enter px-2 py-1" data-msg-key="${COMPACTION_KEY}">
+        <div class="flex items-baseline gap-2 text-xs font-mono text-base16-500 border border-base16-700 rounded px-2 py-1">
+          <span>–</span>
+          <span>compaction skipped${escHtml(reasonLabel)}: ${
+            /already compacted/i.test(r.errorMessage) ? "already compacted" : "nothing to compact yet"
+          }</span>
+        </div>
+      </div>`;
+  }
   if (r.errorMessage) {
+    // A compaction someone asked for can simply be asked for again; only pi's
+    // own (threshold / overflow) failing leaves the agent short of context.
+    const hint = r.reason === "manual"
+      ? ""
+      : `
+          <div class="mt-1">The agent may need a manual /compact or /handoff to continue.</div>`;
     return `
       <div class="message-enter px-2 py-1" data-msg-key="${COMPACTION_KEY}">
         <div role="alert" class="text-xs font-mono text-base16-red bg-base16-red/10 border border-base16-red/20 rounded px-2 py-1">
           <div>× compaction failed${escHtml(reasonLabel)}</div>
-          <div class="whitespace-pre-wrap break-words mt-1">${escHtml(r.errorMessage)}</div>
-          <div class="mt-1">The agent may need a manual /compact or /handoff to continue.</div>
+          <div class="whitespace-pre-wrap break-words mt-1">${escHtml(r.errorMessage)}</div>${hint}
         </div>
       </div>`;
   }
