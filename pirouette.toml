@@ -114,6 +114,17 @@ auto_on_message = true
 # seconds; wait until it has (most commands are done by then).
 grace_seconds = 5
 
+# Shell commands the dashboard's "host" button can run on the host, outside
+# any agent: for a login the agents themselves depend on, which they can't
+# renew once it has lapsed. Read by the server, so set this in the host's
+# ~/.pirouette/config.toml.
+#
+# [[defaults.host_commands]]
+# name = "provider login"
+# command = "my-cli login"
+# description = "Renew the login agents use for model calls"
+# timeout_seconds = 300
+
 [defaults.dotfiles]
 # Optional. If set, `pru setup` runs `yadm clone <url>` on the host on first
 # setup. SSH-form URLs work if your ssh-agent is forwarded to the host. Leave

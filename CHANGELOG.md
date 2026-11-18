@@ -9,6 +9,15 @@ follow [SemVer](https://semver.org).
 
 ### Added
 
+- **The dashboard can run a login when no agent can.** If the login that
+  lapsed is the one your agents' model provider needs, the agents can't
+  renew it for you. List commands under `[[defaults.host_commands]]` in the
+  host's config (`name`, `command`, optional `description` and
+  `timeout_seconds`) and the sidebar gets a **host** button that runs them
+  on the host, outside any agent, and shows the output with URLs as links.
+  `BROWSER` defaults to `echo` for these commands, so a tool that would
+  open a browser prints its URL instead. See "Running a login from the
+  dashboard" in the README.
 - **Messaging an agent no longer waits for its bash command to finish.**
   Pi only delivers a mid-turn message once the agent's tool calls are
   done, so a message to an agent in the middle of a long build used to
