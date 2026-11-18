@@ -27,7 +27,8 @@ share/python-wheels/
 MANIFEST
 
 # Node / TypeScript
-node_modules/
+# No trailing slash: a symlink to a node_modules elsewhere is ignored too.
+node_modules
 .npm/
 *.tsbuildinfo
 
