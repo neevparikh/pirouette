@@ -9,6 +9,12 @@ follow [SemVer](https://semver.org).
 
 ### Added
 
+- **Agents can use MCP servers.** Servers listed in `~/.pi/agent/mcp.json`
+  on the host are available to every agent, as they are in the pi CLI:
+  through `codemode` scripts by default, or `tool_search` and direct tool
+  calls according to each server's `exposure`. Every agent gets its own
+  connections, and its stdio servers stop when it does. A `.pi/mcp.json`
+  in an agent's worktree is ignored. See "MCP servers" in the README.
 - **The dashboard can run a login when no agent can.** If the login that
   lapsed is the one your agents' model provider needs, the agents can't
   renew it for you. List commands under `[[defaults.host_commands]]` in the
@@ -42,6 +48,11 @@ follow [SemVer](https://semver.org).
 
 ### Changed
 
+- **pi 1.5.2.** `@earendil-works/pi-coding-agent` (and the `pi-ai` dev
+  dependency) moved from `^0.85.1` to `^1.5.2`, the first line with MCP
+  built in. Pi's bash tool now returns a failed command as an error result
+  instead of throwing; pirouette's background-capable bash tool passes
+  that through unchanged.
 - **Everything is faster.**
   - `pru` commands start in under 0.1s, down from about 0.7s. Every command
     used to load the whole server first; now each loads only its own code.

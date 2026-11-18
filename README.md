@@ -395,6 +395,27 @@ Long user messages and thinking traces also default to an eight-line preview,
 measured after wrapping so a pasted paragraph stays compact on mobile.
 Thinking renders Markdown both during streaming and after completion.
 
+### MCP servers
+
+Agents use the [MCP](https://modelcontextprotocol.io) servers configured in
+`~/.pi/agent/mcp.json` on the host, in the same format the pi CLI reads.
+Add and sign in to servers there with `pi mcp add` and `pi mcp login`; an
+agent picks up the file when its session starts.
+
+By default an agent reaches a server's tools from `codemode` scripts. A
+server's `exposure` (and `toolExposure`) can instead declare its tools to
+the model directly (`direct`) or load them on demand through `tool_search`
+(`deferred`).
+
+Each agent has its own connections. A stdio server is started once per
+agent and stopped when that agent stops, so one agent stopping or
+restarting does not disturb another's tools.
+
+Only the host's `mcp.json` is read. A `.pi/mcp.json` in an agent's worktree
+is ignored: a stdio server is a command that runs without the agent asking
+for it, and a repository an agent has checked out should not get to choose
+one. Codemode scripts do not get pi's model catalog.
+
 ### Attaching files
 
 Click **attach** next to **send**, drop files on the input bar, or paste
