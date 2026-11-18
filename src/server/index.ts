@@ -20,6 +20,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import { getConfig } from "../config.js";
 import { AgentManager } from "./agent-manager.js";
 import { parseNotifyRequest } from "./agent-notify.js";
+import { HostCommandRunner, resolveHostCommands } from "./host-commands.js";
 import { ProjectManager } from "./project-manager.js";
 import { parseWatchRequest, WatchManager, type WatchMessage } from "./watches.js";
 import { StateManager } from "./state.js";
@@ -111,6 +112,12 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
   const projectManager = new ProjectManager(stateManager, dataDir);
   const agentManager = new AgentManager(stateManager, projectManager, dataDir);
   const wsClients = new Set<WebSocket>();
+
+  // Host commands: shell commands from the config that the dashboard can
+  // run on the host without going through an agent. See host-commands.ts.
+  const resolvedHostCommands = resolveHostCommands(cfg.defaults.host_commands);
+  for (const w of resolvedHostCommands.warnings) console.error(`[pirouette] ${w}`);
+  const hostCommands = new HostCommandRunner(resolvedHostCommands.commands);
 
   // Watches (`pru watch`): the server waits on a timer / command / PR and
   // messages the agent when it fires. Delivery resumes a stopped agent,
@@ -524,6 +531,48 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
         } catch (err) {
           error(res, 400, err instanceof Error ? err.message : String(err));
         }
+        return;
+      }
+    }
+
+    // ---- host commands ----
+    if (method === "GET" && pathname === "/api/host-commands") {
+      json(res, 200, { commands: hostCommands.list() });
+      return;
+    }
+    const hostCommandMatch = pathname.match(/^\/api\/host-commands\/([a-z0-9-]+)(\/run|\/stop)?$/);
+    if (hostCommandMatch) {
+      const [, id, action] = hostCommandMatch;
+      if (method === "GET" && !action) {
+        const status = hostCommands.get(id);
+        if (!status) error(res, 404, `No host command ${id}`);
+        else json(res, 200, { command: status });
+        return;
+      }
+      if (method === "POST" && action) {
+        // Like /api/uploads: a JSON content type isn't CORS-safelisted, so
+        // a cross-origin page can't send this without a preflight, which
+        // we refuse. A plain cross-origin form POST can't start a command.
+        const contentType = (req.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
+        if (contentType !== "application/json") {
+          error(res, 415, "content-type must be application/json");
+          return;
+        }
+        if (action === "/run") {
+          const started = hostCommands.start(id);
+          if (started === "unknown") error(res, 404, `No host command ${id}`);
+          else if (started === "running") error(res, 409, `${id} is already running`);
+          else {
+            console.log(`[pirouette] host command started: ${id}`);
+            json(res, 202, { command: started });
+          }
+          return;
+        }
+        if (!hostCommands.get(id)) {
+          error(res, 404, `No host command ${id}`);
+          return;
+        }
+        json(res, 200, { stopped: hostCommands.stop(id), command: hostCommands.get(id) });
         return;
       }
     }
@@ -1547,6 +1596,7 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
   const shutdown = async () => {
     console.log("\n[pirouette] shutting down...");
     await watchManager.stop();
+    hostCommands.stopAll();
     await agentManager.shutdown();
     for (const ws of wsClients) ws.close();
     wss.close();

@@ -263,6 +263,7 @@ your override file in `$EDITOR`.
 | `defaults.bash_timeout.max_seconds` | defaults | Cap on an explicit `timeout` (default 600, 0 = uncapped) |
 | `defaults.bash_background.auto_on_message` | defaults | Move an agent's running `bash` commands to the background when you message it (default true) |
 | `defaults.bash_background.grace_seconds` | defaults | Only for commands that have run at least this long (default 5) |
+| `defaults.host_commands` | defaults | Array of tables (`name`, `command`, optional `description`, `timeout_seconds`): shell commands the dashboard's **host** button can run on the host. See [Running a login from the dashboard](#running-a-login-from-the-dashboard) |
 | `hosts.<name>.ssh_alias` | host | `~/.ssh/config` alias (required) |
 | `hosts.<name>.user` | host | SSH login user (required) |
 | `hosts.<name>.persistent_root` | host | Mount-point of the persistent volume (required) |
@@ -822,6 +823,43 @@ pru tunnel 42103
 Use `LOCAL:REMOTE` (e.g. `pru tunnel 8080:42103`) for asymmetric ports, or
 `--background` to add the forward and return (close with `pru tunnel --close
 42103`).
+
+### Running a login from the dashboard
+
+When the login that lapsed is the one your agents' model provider needs,
+no agent can renew it for you, and you may not have a terminal to hand.
+List the command in the **host's** `~/.pirouette/config.toml` and the
+dashboard gets a **host** button (top of the sidebar) that runs it:
+
+```toml
+[[defaults.host_commands]]
+name = "provider login"
+command = "my-cli login"                  # run with /bin/sh -c, as the server's user
+description = "Renew the login agents use for model calls"   # optional
+timeout_seconds = 300                     # optional, default 600
+```
+
+Restart the server after editing the list. The button opens a list of the
+configured commands; **run** starts one on the host and shows its output as
+it arrives, with URLs as links, so a device-flow login is two clicks. Close
+the dialog and the command keeps running; reopen it to see how it went.
+**stop** ends it.
+
+Details:
+
+- A command runs in the server's environment and home directory, with stdin
+  closed, and one run of each at a time. Output is kept in memory (the last
+  64 KB), not on disk.
+- `BROWSER` is set to `echo` unless the server's environment already sets
+  it, so a tool that tries to open a browser prints the URL instead.
+  `PIROUETTE_HOST_COMMAND` holds the command's id, for scripts that behave
+  differently when started from the dashboard.
+- A loopback-only OAuth flow still needs its callback port forwarded
+  (`pru tunnel`, above) before you click the link.
+- The dashboard can only start commands from this list; the API takes a
+  command's id, not a command line. That isn't a security boundary against
+  someone who can reach the dashboard, who already has a shell through any
+  agent (see below).
 
 ## Trust model
 

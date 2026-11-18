@@ -25,8 +25,9 @@ import { parse as parseToml } from "smol-toml";
 import type { BashBackgroundConfig } from "./server/bash-background.js";
 import type { BashTimeoutConfig } from "./server/bash-timeout.js";
 import type { CompactionConfig } from "./server/compaction-policy.js";
+import type { HostCommandConfig } from "./server/host-commands.js";
 
-export type { BashBackgroundConfig, BashTimeoutConfig, CompactionConfig };
+export type { BashBackgroundConfig, BashTimeoutConfig, CompactionConfig, HostCommandConfig };
 
 /** Dotfiles bootstrap inputs. Shared `[defaults.dotfiles]` with optional
  *  `[hosts.<name>.dotfiles]` overrides. */
@@ -77,6 +78,9 @@ export interface DefaultsConfig {
   /** Moving running `bash` calls into the background when a message
    *  arrives. Server-side only. */
   bash_background: BashBackgroundConfig;
+  /** Shell commands the dashboard can run on the host
+   *  (`[[defaults.host_commands]]`). Server-side only. */
+  host_commands?: HostCommandConfig[];
 }
 
 /** Per-host config as written in TOML (`[hosts.<name>]`). All fields except

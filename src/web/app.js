@@ -39,6 +39,7 @@ import {
   uploadFile,
   withAttachmentNote,
 } from "./attachments.js";
+import { initHostCommands } from "./host-commands.js";
 
 // Resource errors do not bubble. Capture them for dynamically rendered
 // thumbnails instead of embedding handlers that would require unsafe-inline.
@@ -1104,7 +1105,10 @@ document.addEventListener(
     if (!isEscape && !isChord) return;
     const { action, reason } = escapeAction({
       extUiModalOpen: !$extUiModal.classList.contains("hidden"),
-      projectModalOpen: Boolean($projModal) && !$projModal.classList.contains("hidden"),
+      // Either centred modal: both close on Escape themselves.
+      projectModalOpen:
+        (Boolean($projModal) && !$projModal.classList.contains("hidden")) ||
+        document.getElementById("host-commands-modal")?.classList.contains("hidden") === false,
       mentionPopupOpen: !$mentionPopup.classList.contains("hidden"),
       slashPopupOpen: !$slashPopup.classList.contains("hidden"),
       drawerOpen:
@@ -4274,6 +4278,7 @@ $input.addEventListener("blur", () => {
   }, 150);
 });
 $newProjectBtn.addEventListener("click", openProjectModal);
+initHostCommands();
 
 // "show archived" toggle in the sidebar. Flips visibility of archived
 // chats and persists the preference. The button label reflects state.
