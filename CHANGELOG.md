@@ -43,6 +43,10 @@ follow [SemVer](https://semver.org).
   under `<data_dir>/uploads/`, and their paths are added to the message so
   the agent can open them. `pru send --attach <file>` (repeatable) does the
   same from a shell.
+- **Pasting Markdown from Google Docs no longer fills the message with
+  base64.** Images embedded in pasted text as `data:image/...;base64,...`
+  URLs are taken out and uploaded as files, and the text keeps a short file
+  name such as `pasted-image-1.png` where each one was.
 - **A reload keeps the chat you had open.** The selected chat is kept in
   the URL hash (`#agent=<id>`), so reloading the dashboard, or opening a
   copied link, reopens that chat instead of the empty view.

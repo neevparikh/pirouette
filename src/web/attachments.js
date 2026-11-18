@@ -63,3 +63,62 @@ export async function uploadFile(file, fetchImpl = fetch) {
   if (!res.ok) throw new Error(data.error || `upload failed: ${res.status}`);
   return data;
 }
+
+// --- images embedded in pasted text ---
+//
+// "Copy as Markdown" in Google Docs (and similar exporters) inlines every
+// image as a `data:image/...;base64,...` URL, so pasting a document drops
+// megabytes of base64 into the message. extractEmbeddedImages pulls those
+// URLs out: each becomes a file to upload, and the text keeps a short file
+// name in its place, so `[image1]: <data:image/png;base64,...>` turns into
+// `[image1]: <pasted-image-1.png>`.
+
+const EMBEDDED_IMAGE_RE = /data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/_-]+={0,2})/gi;
+
+const EMBEDDED_IMAGE_EXT = {
+  "image/jpeg": "jpg",
+  "image/svg+xml": "svg",
+  "image/x-icon": "ico",
+  "image/vnd.microsoft.icon": "ico",
+};
+
+function decodeBase64(data) {
+  try {
+    const binary = atob(data.replace(/-/g, "+").replace(/_/g, "/"));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
+/** Replace base64 image data URLs in `text` with file names, returning the
+ *  decoded images as files. The same URL appearing twice maps to one file.
+ *  A URL that doesn't decode is replaced with a note and yields no file.
+ *  @param {string} text
+ *  @param {number} [startIndex] number for the first file name
+ *  @returns {{ text: string, files: File[] }} */
+export function extractEmbeddedImages(text, startIndex = 1) {
+  if (!text.includes(";base64,")) return { text, files: [] };
+  const files = [];
+  /** @type {Map<string, string>} data URL -> replacement */
+  const seen = new Map();
+  const out = text.replace(EMBEDDED_IMAGE_RE, (url, mime, data) => {
+    let replacement = seen.get(url);
+    if (replacement === undefined) {
+      const type = mime.toLowerCase();
+      const bytes = decodeBase64(data);
+      if (bytes) {
+        const ext = EMBEDDED_IMAGE_EXT[type] ?? type.slice("image/".length).replace(/[^a-z0-9]/g, "");
+        replacement = `pasted-image-${startIndex + files.length}.${ext || "img"}`;
+        files.push(new File([bytes], replacement, { type }));
+      } else {
+        replacement = "embedded-image-removed";
+      }
+      seen.set(url, replacement);
+    }
+    return replacement;
+  });
+  return { text: out, files };
+}

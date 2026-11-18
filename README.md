@@ -428,6 +428,12 @@ capped at 100 MB each, and they live outside every worktree, so they never
 show up in `git status`. From a shell, `pru send <agent> "msg" --attach
 report.pdf` does the same.
 
+Text pasted with base64 images in it, such as Markdown copied from Google
+Docs, goes in without the base64. Each `data:image/...;base64,...` URL is
+replaced by a file name like `pasted-image-1.png`, and the image is
+uploaded as a file under that name, so the agent can open it if it needs
+to. Remove an image's pill before sending to leave it out.
+
 ### Math in chat
 
 The dashboard renders LaTeX math with KaTeX: `\(...\)` or `$...$` inline,
