@@ -407,8 +407,9 @@ server's `exposure` (and `toolExposure`) can instead declare its tools to
 the model directly (`direct`) or load them on demand through `tool_search`
 (`deferred`).
 
-Each agent has its own connections. A stdio server is started once per
-agent and stopped when that agent stops, so one agent stopping or
+Each agent has its own connections, opened when it is first prompted after
+the server starts, so idle agents hold none. A stdio server is started once
+per agent and stopped when that agent stops, so one agent stopping or
 restarting does not disturb another's tools.
 
 Only the host's `mcp.json` is read. A `.pi/mcp.json` in an agent's worktree

@@ -17,7 +17,9 @@
  *
  *  So these extensions are loaded once per agent, each set with a runtime of
  *  its own, and handed to the agent's session alongside the shared ones.
- *  {@link mergeExtensions} makes the session's runner bind both runtimes. */
+ *  The merged result makes the session's runner bind both runtimes. The MCP
+ *  extension connects on the agent's first prompt, not when its session is
+ *  created ({@link connectOnFirstPrompt}). */
 
 import { readdirSync } from "node:fs";
 import path from "node:path";
@@ -28,6 +30,7 @@ import {
   createToolSearchExtension,
   DefaultResourceLoader,
   SettingsManager,
+  type Extension,
   type ExtensionContext,
   type LoadedMcpConfig,
   type LoadExtensionsResult,
@@ -115,7 +118,38 @@ async function load(opts: AgentExtensionsOptions): Promise<LoadExtensionsResult>
     ],
   });
   await loader.reload();
-  return loader.getExtensions();
+  const result = loader.getExtensions();
+  for (const extension of result.extensions) {
+    if (extension.commands.has("mcp")) connectOnFirstPrompt(extension);
+  }
+  return result;
+}
+
+/** Hold the MCP extension's `session_start` back until the agent's first
+ *  prompt.
+ *
+ *  Pi's MCP extension connects to every server when the session starts. In
+ *  the CLI that is one session a person is about to use. A pirouette server
+ *  creates a session for each agent it resumes when it boots, most of which
+ *  will sit idle, and each would open its own connections and start its own
+ *  stdio servers. Starting on the first prompt instead means only agents
+ *  that are doing something hold connections.
+ *
+ *  `before_agent_start` runs before the prompt's request is built, and the
+ *  extension's own handler for it comes next, so the first prompt still
+ *  lists the servers and waits for the ones with `direct` tools. */
+function connectOnFirstPrompt(extension: Extension): void {
+  const onStart = extension.handlers.get("session_start") ?? [];
+  if (onStart.length === 0) return;
+  extension.handlers.delete("session_start");
+  let started = false;
+  // Pi's handler type is erased to `(...args: unknown[])`.
+  const start = async (...args: unknown[]) => {
+    if (started) return;
+    started = true;
+    for (const handler of onStart) await handler({ type: "session_start", reason: "startup" }, args[1]);
+  };
+  extension.handlers.set("before_agent_start", [start, ...(extension.handlers.get("before_agent_start") ?? [])]);
 }
 
 /** The runtime a session's runner should bind when its extensions come from

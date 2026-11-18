@@ -80,7 +80,7 @@ async function setup() {
   await shared.reload();
   const sharedExtensions = () => guardExtensionsResult(shared.getExtensions());
 
-  const startAgent = async (cwd: string): Promise<Agent> => {
+  const createAgent = async (cwd: string): Promise<Agent> => {
     const own = await loadAgentExtensions({ cwd, agentDir, shared: sharedExtensions() });
     const resourceLoader: ResourceLoader = {
       getExtensions: () => own.merge(sharedExtensions()),
@@ -106,9 +106,20 @@ async function setup() {
     await session.bindExtensions({});
     return { session, own };
   };
+  /** Starts an agent and takes it to where its first prompt would be sent. */
+  const startAgent = async (cwd: string): Promise<Agent> => {
+    const agent = await createAgent(cwd);
+    await firstPrompt(agent);
+    return agent;
+  };
   const pids = () =>
     existsSync(pidFile) ? readFileSync(pidFile, "utf8").trim().split("\n").filter(Boolean).map(Number) : [];
-  return { agentDir, startAgent, pids };
+  return { agentDir, createAgent, startAgent, pids };
+}
+
+/** What a session does with its extensions just before a prompt's request. */
+async function firstPrompt({ session }: Agent): Promise<void> {
+  await session.extensionRunner.emitBeforeAgentStart({ prompt: "hi" } as never, { cwd: session.sessionManager.getCwd() });
 }
 
 const hasTool = ({ session }: Agent) => session.getActiveToolNames().includes(TOOL);
@@ -127,6 +138,20 @@ describe("per-agent MCP extensions", () => {
     expect(hasTool(a)).toBe(true);
     expect(pids()).toHaveLength(2);
     expect(pids().every(alive)).toBe(true);
+  });
+
+  it("connects on the agent's first prompt, not when its session is created", async () => {
+    const { createAgent, pids } = await setup();
+    const a = await createAgent(await tempDir());
+    await new Promise((r) => setTimeout(r, 300));
+    expect(pids()).toEqual([]);
+    expect(hasTool(a)).toBe(false);
+
+    await firstPrompt(a);
+    await waitFor(() => hasTool(a), "the MCP tool after the first prompt");
+    // A later prompt does not connect again.
+    await firstPrompt(a);
+    expect(pids()).toHaveLength(1);
   });
 
   it("keeps one agent's connection when another agent stops", async () => {
