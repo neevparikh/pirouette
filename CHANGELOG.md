@@ -13,7 +13,8 @@ follow [SemVer](https://semver.org).
   on the host are available to every agent, as they are in the pi CLI:
   through `codemode` scripts by default, or `tool_search` and direct tool
   calls according to each server's `exposure`. Every agent gets its own
-  connections, and its stdio servers stop when it does. A `.pi/mcp.json`
+  connections, opened on its first prompt, and its stdio servers stop when
+  it does. A `.pi/mcp.json`
   in an agent's worktree is ignored. See "MCP servers" in the README.
 - **The dashboard can run a login when no agent can.** If the login that
   lapsed is the one your agents' model provider needs, the agents can't
