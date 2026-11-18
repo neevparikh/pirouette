@@ -233,6 +233,49 @@ await withDashboard(async (page, stub) => {
   expect("textarea untouched", await page.inputValue("#message-input"), "");
 });
 
+console.log("pasting Markdown with base64 images in it (Google Docs):");
+await withDashboard(async (page, stub) => {
+  const b64 = ONE_PX_PNG.toString("base64");
+  await page.keyboard.type("before  after");
+  for (let i = 0; i < 6; i++) await page.keyboard.press("ArrowLeft");
+  const prevented = await page.evaluate((b64) => {
+    const dt = new DataTransfer();
+    dt.setData("text/plain", `# Doc\n\n![][image1]\n\n[image1]: <data:image/png;base64,${b64}>`);
+    const ev = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
+    document.getElementById("message-input").dispatchEvent(ev);
+    return ev.defaultPrevented;
+  }, b64);
+  expect("paste intercepted", prevented, true);
+  expect(
+    "base64 replaced by a file name, at the cursor",
+    await page.inputValue("#message-input"),
+    "before # Doc\n\n![][image1]\n\n[image1]: <pasted-image-1.png> after",
+  );
+  await waitFor(() => stub.uploads.length > 0);
+  expect("image uploaded as a file", stub.uploads.map((u) => [u.name, u.size]), [
+    ["pasted-image-1.png", ONE_PX_PNG.length],
+  ]);
+  expect("not attached inline", (await pills(page)).images, 0);
+  await page.keyboard.press("Enter");
+  await waitFor(() => stub.messages.length > 0);
+  const msg = stub.messages[0];
+  expect("message has no base64", msg?.message.includes("base64"), false);
+  expect("message lists the saved image", msg?.message.includes("abcd1234-pasted-image-1.png"), true);
+  expect("no inline images", msg?.images ?? [], []);
+});
+
+console.log("pasting plain text is left to the browser:");
+await withDashboard(async (page) => {
+  const prevented = await page.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.setData("text/plain", "just text");
+    const ev = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
+    document.getElementById("message-input").dispatchEvent(ev);
+    return ev.defaultPrevented;
+  });
+  expect("paste not intercepted", prevented, false);
+});
+
 console.log("sending while an upload is still in flight waits for it:");
 await withDashboard(async (page, stub) => {
   const chooser = page.waitForEvent("filechooser");

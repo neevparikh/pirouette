@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   attachmentKind,
   attachmentNote,
+  extractEmbeddedImages,
   MAX_INLINE_IMAGE_BYTES,
   MAX_UPLOAD_BYTES,
   uploadFile,
@@ -71,5 +72,46 @@ describe("uploadFile", () => {
       json: async () => ({ error: "file too large (max 100 MB)" }),
     }));
     await expect(uploadFile(new File(["x"], "x"), fetchImpl)).rejects.toThrow("file too large");
+  });
+});
+
+describe("extractEmbeddedImages", () => {
+  const png = btoa("\x89PNG fake bytes");
+  const jpeg = btoa("jpeg bytes");
+
+  it("leaves text without embedded images alone", () => {
+    const text = "see data:text/plain;base64,aGk= and ![a](https://x/y.png)";
+    expect(extractEmbeddedImages(text)).toEqual({ text, files: [] });
+  });
+
+  it("replaces Google Docs reference definitions with file names", async () => {
+    const text = `# Doc\n\n![][image1]\n\ntext\n\n![][image2]\n\n[image1]: <data:image/png;base64,${png}>\n\n[image2]: <data:image/jpeg;base64,${jpeg}>`;
+    const out = extractEmbeddedImages(text);
+    expect(out.text).toBe(
+      "# Doc\n\n![][image1]\n\ntext\n\n![][image2]\n\n[image1]: <pasted-image-1.png>\n\n[image2]: <pasted-image-2.jpg>",
+    );
+    expect(out.files.map((f) => [f.name, f.type])).toEqual([
+      ["pasted-image-1.png", "image/png"],
+      ["pasted-image-2.jpg", "image/jpeg"],
+    ]);
+    expect([...new Uint8Array(await out.files[0].arrayBuffer())].slice(0, 4)).toEqual([0x89, 0x50, 0x4e, 0x47]);
+  });
+
+  it("handles inline images and numbers from startIndex", () => {
+    const out = extractEmbeddedImages(`a ![x](data:image/svg+xml;base64,${png}) b`, 4);
+    expect(out.text).toBe("a ![x](pasted-image-4.svg) b");
+    expect(out.files).toHaveLength(1);
+  });
+
+  it("uploads a repeated image once", () => {
+    const url = `data:image/png;base64,${png}`;
+    const out = extractEmbeddedImages(`${url} ${url}`);
+    expect(out.text).toBe("pasted-image-1.png pasted-image-1.png");
+    expect(out.files).toHaveLength(1);
+  });
+
+  it("still strips data that doesn't decode", () => {
+    const out = extractEmbeddedImages("x data:image/png;base64,abcde y");
+    expect(out).toEqual({ text: "x embedded-image-removed y", files: [] });
   });
 });

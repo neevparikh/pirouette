@@ -34,6 +34,7 @@ import { VimMode } from "./vim.js";
 import { escapeAction } from "./keys.js";
 import {
   attachmentKind,
+  extractEmbeddedImages,
   formatBytes,
   MAX_UPLOAD_BYTES,
   uploadFile,
@@ -4232,12 +4233,37 @@ $input.addEventListener("paste", (e) => {
     const file = item.getAsFile();
     if (file) files.push(file);
   }
-  if (files.length === 0) return;
+  if (files.length === 0) {
+    pasteWithoutEmbeddedImages(e);
+    return;
+  }
   // Block default paste so the file's name/junk text doesn't end up in
   // the textarea alongside the attachment pill.
   e.preventDefault();
   attachFiles(files);
 });
+
+/** Numbers the files made from images embedded in pasted text, so two
+ *  pastes into one message don't both produce `pasted-image-1.png`. */
+let embeddedImageCount = 0;
+
+/** Text pasted with base64 images in it (Markdown copied from Google Docs)
+ *  goes in with a file name in place of each image; the images themselves
+ *  are uploaded as files, so the agent can open one if it needs to. They
+ *  aren't sent inline: a pasted document's images are usually incidental. */
+function pasteWithoutEmbeddedImages(e) {
+  const pasted = e.clipboardData?.getData("text/plain") ?? "";
+  const { text, files } = extractEmbeddedImages(pasted, embeddedImageCount + 1);
+  if (text === pasted) return;
+  e.preventDefault();
+  embeddedImageCount += files.length;
+  // execCommand keeps the paste on the textarea's undo stack.
+  if (!document.execCommand?.("insertText", false, text)) {
+    $input.setRangeText(text, $input.selectionStart, $input.selectionEnd, "end");
+    $input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  for (const file of files) attachUpload(file);
+}
 
 $attachBtn.addEventListener("click", () => $attachInput.click());
 $attachInput.addEventListener("change", () => {
