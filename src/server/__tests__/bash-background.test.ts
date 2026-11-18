@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -116,12 +116,15 @@ describe("BashJobRegistry tool", () => {
 
   it("runs in the agent's cwd", async () => {
     const { run, cwd } = await setup();
-    expect(textOf(await run("pwd")).trim()).toBe(cwd);
+    // The shell reports the resolved path; macOS temp dirs sit behind a symlink.
+    expect(textOf(await run("pwd")).trim()).toBe(realpathSync(cwd));
   });
 
   it("reports a non-zero exit as an error", async () => {
     const { run } = await setup();
-    await expect(run("echo out; exit 3")).rejects.toThrow(/out[\s\S]*Command exited with code 3/);
+    const result = await run("echo out; exit 3");
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toMatch(/out[\s\S]*Command exited with code 3/);
   });
 
   it("kills the command at its timeout, with pi's message", async () => {

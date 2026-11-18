@@ -25,6 +25,7 @@ import {
 
 
 import { getConfig } from "../config.js";
+import { loadAgentExtensions, type AgentExtensions } from "./agent-extensions.js";
 import {
   BashJobRegistry,
   bashBackgroundGuidance,
@@ -255,6 +256,9 @@ export interface AgentHandle {
    *  the auto-compaction threshold, which is derived from the model's
    *  context window (see compaction-policy.ts). */
   settingsManager: SettingsManager;
+  /** Ends the agent's own extensions (its MCP connections). Called before
+   *  the session is disposed; see agent-extensions.ts. */
+  shutdownOwnExtensions?: () => Promise<void>;
 }
 
 export type AgentEventCallback = (agentId: string, event: NormalizedEvent) => void;
@@ -2453,6 +2457,13 @@ export class AgentManager {
       const handle = this.handles.get(id);
       if (handle) {
         handle.unsubscribe();
+        try {
+          await handle.shutdownOwnExtensions?.();
+        } catch (err) {
+          console.error(
+            `[agent-manager] closing MCP connections failed for ${handle.config.name}: ${err instanceof Error ? err.message : err}`,
+          );
+        }
         handle.session.dispose();
         this.handles.delete(id);
       }
@@ -2868,11 +2879,26 @@ export class AgentManager {
           shellPath: settingsManager.getShellPath(),
           commandPrefix: settingsManager.getShellCommandPrefix(),
         });
+    // Re-guard on every read: a `/reload` from any agent swaps in a fresh
+    // runtime object that hasn't been protected yet.
+    const sharedExtensions = () =>
+      guardExtensionsResult(resourceLoader.getExtensions(), (message) => console.log(message));
+    // The agent's own MCP client, codemode and tool_search, next to the
+    // extensions it shares with every other agent (agent-extensions.ts).
+    // Failing to load them costs the agent its MCP tools, not its session.
+    const loadOwnExtensions = async (): Promise<AgentExtensions | null> => {
+      try {
+        return await loadAgentExtensions({ cwd: config.worktreePath, agentDir, shared: sharedExtensions() });
+      } catch (err) {
+        console.error(
+          `[agent-manager] MCP extensions failed to load for ${config.name}: ${err instanceof Error ? err.message : err}`,
+        );
+        return null;
+      }
+    };
+    let ownExtensions = await loadOwnExtensions();
     const agentResourceLoader: ResourceLoader = {
-      // Re-guard on every read: a `/reload` from any agent swaps in a fresh
-      // runtime object that hasn't been protected yet.
-      getExtensions: () =>
-        guardExtensionsResult(resourceLoader.getExtensions(), (message) => console.log(message)),
+      getExtensions: () => ownExtensions?.merge(sharedExtensions()) ?? sharedExtensions(),
       getSkills: () => resourceLoader.getSkills(),
       getPrompts: () => resourceLoader.getPrompts(),
       getThemes: () => resourceLoader.getThemes(),
@@ -2896,7 +2922,12 @@ export class AgentManager {
       // synthetic bash-timeout guidance has no file, so it contributes none.
       getAppendSystemPromptSources: () => resourceLoader.getAppendSystemPromptSources(),
       extendResources: (paths) => resourceLoader.extendResources(paths),
-      reload: () => resourceLoader.reload(),
+      // A reload ends the session's extension runner, and with it the
+      // agent's own extensions, so those are loaded again as well.
+      reload: async () => {
+        await resourceLoader.reload();
+        ownExtensions = await loadOwnExtensions();
+      },
     };
     const ctxFiles = agentResourceLoader.getAgentsFiles().agentsFiles;
     console.log(
@@ -2945,7 +2976,15 @@ export class AgentManager {
       this.handleAgentEvent(config.id, event);
     });
 
-    this.handles.set(config.id, { config, session, unsubscribe, settingsManager });
+    this.handles.set(config.id, {
+      config,
+      session,
+      unsubscribe,
+      settingsManager,
+      shutdownOwnExtensions: async () => {
+        await ownExtensions?.shutdown(session.extensionRunner.createContext());
+      },
+    });
     // Fresh sessions are "idle" (no messages yet). Resumed sessions with
     // existing history are already in a user-turn, so they're "waiting_input".
     const hasHistory = session.messages.length > 0;
