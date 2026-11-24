@@ -660,6 +660,9 @@ export interface WatchManagerDeps {
   deliver: (agentId: string, message: WatchMessage) => Promise<void>;
   /** False once an agent has been removed: its watches are dropped. */
   agentExists: (agentId: string) => boolean;
+  /** Called after the set of watches may have changed (created, fired and
+   *  delivered, cancelled, moved to another agent). */
+  onChange?: () => void;
   run?: CommandRunner;
   now?: () => number;
   /** Delay between delivery retries. */
@@ -742,6 +745,15 @@ export class WatchManager {
     return [...this.watches.values()]
       .filter((w) => !agentId || w.agentId === agentId)
       .sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
+  }
+
+  /** How many watches each agent is waiting on. Agents with none are
+   *  left out. A watch that has fired still counts until its message is
+   *  delivered. */
+  countByAgent(): Record<string, number> {
+    const counts: Record<string, number> = {};
+    for (const w of this.list()) counts[w.agentId] = (counts[w.agentId] ?? 0) + 1;
+    return counts;
   }
 
   get(id: string): Watch | undefined {
@@ -1185,6 +1197,7 @@ export class WatchManager {
         await rename(tmp, this.filePath);
       })
       .catch((err) => console.error(`[watches] save failed: ${(err as Error).message}`));
+    this.deps.onChange?.();
   }
 
   /** Resolves once pending writes have hit disk (tests). */

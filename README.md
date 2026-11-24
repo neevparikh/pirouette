@@ -576,7 +576,9 @@ When the watch fires, the server sends the agent a message (queued behind
 its current turn; `--steer` to deliver after the current step) saying what
 happened: the failing checks with links, the new review, the exit code and
 last lines of output. The dashboard shows it as a yellow "watch w3 fired"
-row. A `pr` watch fires when a check fails or all pass, on a new review or
+row. Until then, a chat whose turn is over but which is waiting on a watch
+has a hollow blue ring in the chat list instead of the filled dot, so you
+can tell it from one that is waiting on you. A `pr` watch fires when a check fails or all pass, on a new review or
 comment, on merge/close, or on a new merge conflict (`--on` narrows that).
 `pr` and `until` give up after 24h by default and say so. Every watch fires
 once. Watches live in `state/watches.json` and survive a server restart,

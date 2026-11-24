@@ -213,7 +213,11 @@ export type WsEnvelope =
    *  model so each agent's badge is independent. Broadcast whenever it
    *  changes, and primed on connect. An empty snapshot means no
    *  fast-mode-capable provider has reported in yet (badge stays hidden). */
-  | { kind: "fast_mode"; snapshot: FastModeSnapshot };
+  | { kind: "fast_mode"; snapshot: FastModeSnapshot }
+  /** How many watches (`pru watch`) each agent is waiting on, keyed by
+   *  agent id; agents with none are left out. Sent whole on connect and
+   *  whenever a count changes. */
+  | { kind: "agent_watches"; counts: Record<string, number> };
 
 /** Envelope sent over WebSocket from a client to the server. Kept separate
  *  from WsEnvelope so the server can validate the smaller, narrower union
