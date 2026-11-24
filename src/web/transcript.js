@@ -579,7 +579,7 @@ export function renderTranscript(state, expandedItems, opts) {
  *
  *  @param {TranscriptState} state
  *  @param {Set<string>} [expandedItems]
- *  @param {{ rawAssistant?: boolean, agentId?: string }} [opts]
+ *  @param {{ rawAssistant?: boolean, agentId?: string, view?: TranscriptView }} [opts]
  *  @returns {{ key: string, html: string }[]}
  */
 export function renderTranscriptBlocks(state, expandedItems, opts) {
@@ -603,7 +603,32 @@ export function renderTranscriptBlocks(state, expandedItems, opts) {
   if (start > 0) {
     blocks.push({ key: OLDER_KEY, html: renderOlderRow(start) });
   }
+  // Rows the view hides collapse, run by run, into one fold row that says
+  // what is behind it and opens that run on click.
+  const view = renderOpts.view;
+  const kinds = hidesAnything(view) ? hiddenKinds(state, view) : null;
+  let foldOpen = false;
   for (let i = start; i < msgs.length; i++) {
+    if (kinds?.[i]) {
+      if (i === start || !kinds[i - 1]) {
+        // Key and count the whole run, including any part of it above the
+        // window, so paging in older messages doesn't close or renumber it.
+        let a = i;
+        while (a > 0 && kinds[a - 1]) a--;
+        let b = i;
+        while (b < msgs.length && kinds[b]) b++;
+        const foldKey = `fold:${messageKey(msgs[a], a)}`;
+        foldOpen = expanded.has(foldKey);
+        blocks.push({
+          key: foldKey,
+          html: renderFoldRow(foldKey, msgs, kinds, a, b, results, foldOpen, renderOpts),
+        });
+        if (!foldOpen) {
+          i = b - 1;
+          continue;
+        }
+      }
+    }
     const orig = msgs[i];
     let msg = orig;
     const result = msg.toolCallId && results.get(msg.toolCallId);
@@ -623,7 +648,7 @@ export function renderTranscriptBlocks(state, expandedItems, opts) {
 
   // Streaming bubbles use stable keys so they share DOM across deltas.
   const i0 = msgs.length;
-  if (state.streamingThinking) {
+  if (state.streamingThinking && view?.thinking !== false) {
     blocks.push({
       key: STREAMING_THINKING_KEY,
       html: renderMessage(
@@ -661,6 +686,81 @@ export function renderTranscriptBlocks(state, expandedItems, opts) {
     });
   }
   return blocks;
+}
+
+/**
+ * Which kinds of row the transcript shows. A missing or `true` field means
+ * shown.
+ * @typedef {Object} TranscriptView
+ * @property {boolean} [thinking]  The model's reasoning.
+ * @property {boolean} [tools]     Tool calls and their results.
+ * @property {boolean} [interim]   Assistant text followed by more work in
+ *           the same turn, i.e. everything but the turn's last message.
+ */
+export const VIEW_KINDS = ["thinking", "tools", "interim"];
+
+export function hidesAnything(view) {
+  return !!view && VIEW_KINDS.some((k) => view[k] === false);
+}
+
+/** For each message, the kind it is hidden as, or null if it is shown. */
+function hiddenKinds(state, view) {
+  const msgs = state.messages;
+  const kinds = new Array(msgs.length).fill(null);
+  // Walking backwards, the first assistant text met in a turn is its final
+  // message. Text still streaming is later than anything in `messages`.
+  let finalSeen = !!state.streamingText;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const msg = msgs[i];
+    if (msg.role === "user") {
+      finalSeen = false;
+    } else if (msg.role === "thinking") {
+      if (view.thinking === false) kinds[i] = "thinking";
+    } else if (msg.role === "tool" || msg.role === "tool_result") {
+      if (view.tools === false) kinds[i] = "tools";
+    } else if (msg.role === "assistant") {
+      if (finalSeen) {
+        if (view.interim === false) kinds[i] = "interim";
+      } else if (typeof msg.content === "string" && msg.content.trim()) {
+        finalSeen = true;
+      }
+    }
+  }
+  return kinds;
+}
+
+function plural(n, one, many) {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/** The row standing in for the hidden messages `a..b` (end exclusive). */
+function renderFoldRow(foldKey, msgs, kinds, a, b, results, open, opts) {
+  let thinking = 0;
+  let calls = 0;
+  let interim = 0;
+  let running = null;
+  for (let i = a; i < b; i++) {
+    const msg = msgs[i];
+    if (kinds[i] === "thinking") thinking++;
+    else if (kinds[i] === "interim") interim++;
+    else if (msg.role === "tool") {
+      calls++;
+      if (msg.toolStatus === "running" && !results.has(msg.toolCallId)) running = msg;
+    }
+  }
+  const parts = [];
+  if (calls) parts.push(plural(calls, "tool call", "tool calls"));
+  if (thinking) parts.push(plural(thinking, "thinking block", "thinking blocks"));
+  if (interim) parts.push(plural(interim, "interim message", "interim messages"));
+  // A result whose call is shown elsewhere can be the whole run.
+  if (parts.length === 0) parts.push(plural(b - a, "tool result", "tool results"));
+  const runningHtml = running && opts.agentRunning !== false
+    ? ` <span class="fold-running"><span class="tool-spinner" aria-hidden="true"></span>${escHtml(describeToolCall(running.toolName, running.args).header)}</span>`
+    : "";
+  return `
+    <div class="pi-row pi-row-fold px-4 py-1" data-msg-key="${escHtml(foldKey)}">
+      <button type="button" class="fold-toggle" data-toggle="${escHtml(foldKey)}" aria-expanded="${open}"><span aria-hidden="true">${open ? "▾" : "▸"}</span> ${escHtml(parts.join(" · "))}${open ? "" : " hidden"}</button>${runningHtml}
+    </div>`;
 }
 
 /** Key of the row standing in for messages before `startIndex`. */

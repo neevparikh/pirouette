@@ -9,6 +9,14 @@ follow [SemVer](https://semver.org).
 
 ### Added
 
+- **Choose what a chat's transcript shows.** A **view** button in the header
+  hides thinking, tool calls, or interim messages (assistant text followed
+  by more work in the same turn), in any combination; "final outputs only"
+  hides all three, leaving your messages and each turn's last reply, and
+  `/outputs` toggles it. Each run of hidden rows becomes one line saying
+  what is behind it ("12 tool calls · 3 thinking blocks hidden", plus the
+  tool still running, if any); click it to open that run in place. The
+  choice applies to every chat and is remembered by the browser.
 - **Agents can use MCP servers.** Servers listed in `~/.pi/agent/mcp.json`
   on the host are available to every agent, as they are in the pi CLI:
   through `codemode` scripts by default, or `tool_search` and direct tool

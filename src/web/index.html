@@ -595,6 +595,10 @@
       .tool-expand, .message-expand { display: block; padding: 0.25rem 0; color: rgb(var(--color-base16-cyan)); font-size: 12px; cursor: pointer; }
       .tool-expand:hover, .message-expand:hover { text-decoration: underline; }
       .tool-expand:focus-visible, .message-expand:focus-visible { outline: 2px solid rgb(var(--color-base16-cyan)); outline-offset: 2px; }
+      .fold-toggle { color: rgb(var(--color-base16-500)); font-size: 12px; cursor: pointer; }
+      .fold-toggle:hover { color: rgb(var(--color-base16-700)); }
+      .fold-toggle:focus-visible { outline: 2px solid rgb(var(--color-base16-cyan)); outline-offset: 2px; }
+      .fold-running { display: inline-flex; align-items: center; gap: 0.35rem; margin-left: 0.5rem; color: rgb(var(--color-base16-yellow)); font-size: 11px; }
       .tool-status { display: inline-flex; align-items: center; gap: 0.35rem; margin-left: auto; padding: 0 0.4rem; border-radius: 0.25rem; font-size: 11px; line-height: 20px; white-space: nowrap; }
       .tool-status-running { color: rgb(var(--color-base16-yellow)); background: rgb(var(--color-base16-yellow) / 0.12); }
       .tool-status-completed { color: rgb(var(--color-base16-green)); background: rgb(var(--color-base16-green) / 0.10); }
@@ -752,6 +756,7 @@
          * behind it at higher z-index. */
         #model-picker:not(.hidden),
         #thinking-picker:not(.hidden),
+        #view-picker:not(.hidden),
         #theme-picker:not(.hidden) {
           position: fixed !important;
           left: 0 !important;
@@ -959,6 +964,18 @@
                Preference is persisted in localStorage and applies to every
                agent. Active state uses the base16-blue accent. -->
           <button id="agent-raw-btn" class="text-xs px-2 py-1 rounded bg-base16-300/40 text-base16-500 hover:bg-base16-300/70 cursor-pointer font-mono" title="Toggle raw markdown view (applies to all assistant messages)">raw</button>
+
+          <!-- Transcript view picker: hide thinking, tool calls or interim
+               messages. Hidden rows fold into one line per run. Applies to
+               every chat. -->
+          <div class="relative">
+            <button id="agent-view-btn" class="text-xs px-2 py-1 rounded bg-base16-300/40 text-base16-500 hover:bg-base16-300/70 cursor-pointer font-mono whitespace-nowrap" aria-haspopup="menu" title="Choose what the transcript shows">view ▾</button>
+            <div
+              id="view-picker"
+              role="menu"
+              class="hidden absolute left-0 top-full mt-2 w-52 bg-base16-100 border border-base16-300 rounded-lg shadow-lg z-50 overflow-hidden flex flex-col"
+            ></div>
+          </div>
 
           <!-- Model picker. Click to open a search + list popup of every
                provider/model the registry knows about. Switching mid-turn
