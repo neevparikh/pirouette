@@ -10,6 +10,7 @@ import {
   escHtml,
   formatDocumentTitle,
   hidesToolResultBody,
+  isAwaitingWatch,
   looksLikeImagePathRef,
   normalizeModelId,
   parseToolArgs,
@@ -637,5 +638,23 @@ describe("clampSidebarWidth", () => {
 
   it("survives an unknown viewport", () => {
     expect(clampSidebarWidth(700, undefined)).toBe(SIDEBAR_MAX_WIDTH);
+  });
+});
+
+describe("isAwaitingWatch", () => {
+  it("is true for a finished turn with a watch outstanding", () => {
+    expect(isAwaitingWatch("waiting_input", 1)).toBe(true);
+    expect(isAwaitingWatch("idle", 3)).toBe(true);
+    expect(isAwaitingWatch("stopped", 1)).toBe(true);
+  });
+  it("is false without a watch", () => {
+    expect(isAwaitingWatch("waiting_input", 0)).toBe(false);
+    expect(isAwaitingWatch("idle", undefined)).toBe(false);
+  });
+  it("leaves running and failed agents showing their own state", () => {
+    expect(isAwaitingWatch("running", 2)).toBe(false);
+    expect(isAwaitingWatch("starting", 2)).toBe(false);
+    expect(isAwaitingWatch("error", 2)).toBe(false);
+    expect(isAwaitingWatch("shutdown", 2)).toBe(false);
   });
 });

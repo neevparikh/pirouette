@@ -712,3 +712,12 @@ export function clampSidebarWidth(width, viewportWidth) {
   const max = Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, half));
   return Math.round(Math.min(Math.max(requested, SIDEBAR_MIN_WIDTH), max));
 }
+
+/** True when an agent has nothing to do until one of its watches
+ *  (`pru watch`) fires: its turn is over and the server is waiting on a
+ *  timer, command or PR to wake it. A running agent is just running, and
+ *  one in an error state needs you whatever it is watching. */
+export function isAwaitingWatch(state, watchCount) {
+  if (!(watchCount > 0)) return false;
+  return state === "idle" || state === "waiting_input" || state === "stopped";
+}

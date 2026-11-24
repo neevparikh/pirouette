@@ -44,7 +44,9 @@ function req(over: Partial<WatchRequest>): WatchRequest {
   };
 }
 
-async function setup(opts: { run?: CommandRunner; deliverFails?: number; agents?: string[] } = {}) {
+async function setup(
+  opts: { run?: CommandRunner; deliverFails?: number; agents?: string[]; onChange?: () => void } = {},
+) {
   const stateDir = await mkdtemp(path.join(tmpdir(), "pru-watch-"));
   const delivered: Array<{ agentId: string; msg: WatchMessage }> = [];
   let failures = opts.deliverFails ?? 0;
@@ -53,6 +55,7 @@ async function setup(opts: { run?: CommandRunner; deliverFails?: number; agents?
     new WatchManager({
       stateDir,
       run: opts.run,
+      onChange: opts.onChange,
       retryMs: 20,
       agentExists: (id) => agents.has(id),
       deliver: async (agentId, msg) => {
@@ -468,6 +471,27 @@ describe("WatchManager", () => {
     await sleep(120);
     expect(delivered.map((d) => d.agentId)).toEqual(["cccc0003"]);
     expect(wm.list()).toHaveLength(0);
+    await wm.stop();
+  });
+
+  it("counts each agent's watches and reports every change to them", async () => {
+    const seen: Array<Record<string, number>> = [];
+    let wm: WatchManager | undefined;
+    const { delivered, make } = await setup({ onChange: () => seen.push(wm!.countByAgent()) });
+    wm = make();
+    expect(wm.countByAgent()).toEqual({});
+    await wm.create("aaaa0001", req({ kind: "timer", durationMs: 60_000 }));
+    const b = await wm.create("aaaa0001", req({ kind: "timer", durationMs: 60_000 }));
+    await wm.create("bbbb0002", req({ kind: "timer", durationMs: 30 }));
+    expect(wm.countByAgent()).toEqual({ aaaa0001: 2, bbbb0002: 1 });
+    wm.cancel(b.id);
+    expect(seen.at(-1)).toEqual({ aaaa0001: 1, bbbb0002: 1 });
+    // A fired watch stops counting once its message is delivered.
+    await until(() => delivered.length === 1);
+    await until(() => !("bbbb0002" in seen.at(-1)!));
+    expect(seen.at(-1)).toEqual({ aaaa0001: 1 });
+    wm.reassign("aaaa0001", "bbbb0002");
+    expect(seen.at(-1)).toEqual({ bbbb0002: 1 });
     await wm.stop();
   });
 });

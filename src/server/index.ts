@@ -122,8 +122,18 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
   // Watches (`pru watch`): the server waits on a timer / command / PR and
   // messages the agent when it fires. Delivery resumes a stopped agent,
   // like POST /message does.
-  const watchManager = new WatchManager({
+  // The dashboard marks agents that are waiting on a watch, so tell it
+  // whenever the per-agent counts change.
+  let sentWatchCounts = "{}";
+  const watchManager: WatchManager = new WatchManager({
     stateDir,
+    onChange: () => {
+      const counts = watchManager.countByAgent();
+      const serialised = JSON.stringify(counts);
+      if (serialised === sentWatchCounts) return;
+      sentWatchCounts = serialised;
+      broadcast({ kind: "agent_watches", counts });
+    },
     agentExists: (id) => agentManager.getAgent(id) !== undefined,
     deliver: async (agentId: string, msg: WatchMessage) => {
       if (!agentManager.isRunning(agentId)) await agentManager.resumeAgent(agentId);
@@ -1415,6 +1425,7 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
       kind: "projects_list",
       projects: projectManager.getAllProjects(),
     } satisfies WsEnvelope);
+    safeSend({ kind: "agent_watches", counts: watchManager.countByAgent() } satisfies WsEnvelope);
 
     // Prime the fast-mode badge so a freshly-loaded / reconnected client
     // shows the ⚡ state immediately instead of waiting for the next turn to

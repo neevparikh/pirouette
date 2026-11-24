@@ -9,6 +9,11 @@ follow [SemVer](https://semver.org).
 
 ### Added
 
+- **The chat list shows which chats are waiting on a watch.** A chat whose
+  turn is over but which has a `pru watch` outstanding gets a hollow blue
+  ring instead of the filled "your turn" dot, and its tooltip says how many
+  watches it is waiting on. A filled dot now means the chat won't move
+  until you say something.
 - **Choose what a chat's transcript shows.** A **view** button in the header
   hides thinking, tool calls, or interim messages (assistant text followed
   by more work in the same turn), in any combination; "final outputs only"

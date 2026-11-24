@@ -12,6 +12,7 @@ import {
   describeToolCall,
   escHtml,
   formatDocumentTitle,
+  isAwaitingWatch,
   pickFastModeState,
   relTime,
   shortenPath,
@@ -55,6 +56,8 @@ document.addEventListener("error", (event) => {
 // --- state ---
 
 let agents = [];
+/** agentId -> number of watches (`pru watch`) it is waiting on. */
+let watchCounts = {};
 let projects = [];
 let selectedAgentId = null;
 let selectedProjectName = "scratchpad"; // updated once the projects_list arrives
@@ -1575,6 +1578,11 @@ function handleWsMessage(envelope) {
       }
       break;
 
+    case "agent_watches":
+      watchCounts = envelope.counts || {};
+      renderAgentList();
+      break;
+
     case "projects_list":
       projects = envelope.projects;
       // Default selection: keep whatever was selected if it still exists,
@@ -1966,8 +1974,13 @@ function isActiveState(state) {
  *  don't lose discoverability. Forks just stack inline like any other
  *  agent -- the visual indent tree only made sense in a vertical list. */
 function renderAgentRow(a, _depth = 0) {
-  const dot = isActiveState(a.state)
-    ? `${statusColor(a.state)} pulse-dot`
+  // Waiting on a watch: a hollow blue ring instead of the filled "your
+  // turn" / idle dot, so chats that will wake themselves up read
+  // differently from ones that won't move until you say something.
+  const watches = watchCounts[a.id] || 0;
+  const watching = isAwaitingWatch(a.state, watches);
+  const dot = isActiveState(a.state) ? `${statusColor(a.state)} pulse-dot`
+    : watching ? "border-2 border-base16-blue"
     : statusColor(a.state);
   const activity = currentActivity[a.id];
   const stateLabel =
@@ -1978,6 +1991,7 @@ function renderAgentRow(a, _depth = 0) {
     // and otherwise show "▶ <tool>" instead of "restarting".
     : a.state === "shutdown" ? "restarting"
     : activity ? `▶ ${activity.tool}`
+    : watching ? `waiting on ${watches} watch${watches === 1 ? "" : "es"}`
     : a.state === "waiting_input" ? "your turn"
     : a.state;
   const titleParts = [
@@ -2040,7 +2054,7 @@ function renderAgentRow(a, _depth = 0) {
               : ""),
         )}"
       >
-        <span class="w-2 h-2 rounded-full flex-none ${dot}"></span>
+        <span class="w-2 h-2 rounded-full flex-none ${dot}"${watching ? ' data-watching="1"' : ""}></span>
         ${a.parentAgentId ? '<span class="text-base16-500 text-xs flex-none">↳</span>' : ""}
         <span class="truncate">${escHtml(a.name)}</span>
         ${needsAnswer ? '<span class="text-base16-yellow text-xs pulse-dot flex-none">?</span>' : ""}
