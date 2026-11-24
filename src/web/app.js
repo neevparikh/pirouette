@@ -24,6 +24,8 @@ import {
   reduceEvent,
   renderThinkingBody,
   renderTranscriptBlocks,
+  hidesAnything,
+  VIEW_KINDS,
   OLDER_KEY,
   STREAMING_THINKING_KEY,
 } from "./transcript.js";
@@ -108,6 +110,17 @@ const statsByAgent = {};
  *  renders as plain escaped source instead of rendered HTML. Persisted
  *  across reloads via localStorage `pirouette-raw-view`. */
 let rawView = localStorage.getItem("pirouette-raw-view") === "1";
+
+/** Which kinds of row the transcript shows (see TranscriptView). Global
+ *  across agents; the hidden kinds persist in localStorage
+ *  `pirouette-view-hidden`. */
+const transcriptView = { thinking: true, tools: true, interim: true };
+try {
+  const hidden = JSON.parse(localStorage.getItem("pirouette-view-hidden") || "[]");
+  for (const kind of VIEW_KINDS) if (hidden.includes(kind)) transcriptView[kind] = false;
+} catch {
+  // Unreadable preference: show everything.
+}
 
 /** Latest fast-mode badge snapshot from the server's `fast_mode` WS envelope
  *  (mirrored from a provider's `pi:fast-mode` channel).
@@ -207,6 +220,8 @@ const $modelSearch = document.getElementById("model-search");
 const $modelList = document.getElementById("model-list");
 const $thinkingBtn = document.getElementById("agent-thinking-btn");
 const $thinkingPicker = document.getElementById("thinking-picker");
+const $viewBtn = document.getElementById("agent-view-btn");
+const $viewPicker = document.getElementById("view-picker");
 const $thinkingList = document.getElementById("thinking-list");
 
 // --- extension UI modal (AskUserQuestion etc.) ---
@@ -942,6 +957,9 @@ function closeAllPickers() {
   if ($themePicker && !$themePicker.classList.contains("hidden")) {
     $themePicker.classList.add("hidden");
   }
+  if ($viewPicker && !$viewPicker.classList.contains("hidden")) {
+    $viewPicker.classList.add("hidden");
+  }
 }
 if ($mobileMenuBtn) {
   $mobileMenuBtn.addEventListener("click", () => {
@@ -1118,7 +1136,8 @@ document.addEventListener(
       pickerOpen:
         ($modelPicker && !$modelPicker.classList.contains("hidden")) ||
         ($thinkingPicker && !$thinkingPicker.classList.contains("hidden")) ||
-        ($themePicker && !$themePicker.classList.contains("hidden")),
+        ($themePicker && !$themePicker.classList.contains("hidden")) ||
+        ($viewPicker && !$viewPicker.classList.contains("hidden")),
       // The chord isn't a vim key, so vim has no claim on it.
       vimInsertMode:
         isEscape &&
@@ -1820,6 +1839,8 @@ function scheduleStreamingUpdate(kind) {
       // The turn ended (or moved on) before this frame: the full render
       // that cleared it already drew the final message.
       if (!text) continue;
+      // Hidden thinking has no bubble to update.
+      if (k !== "text" && !transcriptView.thinking) continue;
       updateStreamingElement(k === "text" ? "streaming-body" : "streaming-thinking-body", text, k);
     }
   });
@@ -2409,6 +2430,7 @@ function renderAgentHeader() {
     $resumeBtn.classList.add("hidden");
     $deleteBtn.classList.add("hidden");
     $rawBtn.classList.add("hidden");
+    $viewBtn.classList.add("hidden");
     $forkBtn.classList.add("hidden");
     $modelBtn.classList.add("hidden");
     $thinkingBtn.classList.add("hidden");
@@ -2421,6 +2443,7 @@ function renderAgentHeader() {
   // Re-show the always-applicable pills now that we have an agent.
   // (stop/resume/delete still toggle below based on agent state.)
   $rawBtn.classList.remove("hidden");
+  $viewBtn.classList.remove("hidden");
   $forkBtn.classList.remove("hidden");
   $modelBtn.classList.remove("hidden");
   $thinkingBtn.classList.remove("hidden");
@@ -2674,6 +2697,7 @@ function renderMessages() {
       blocks = renderTranscriptBlocks(state, expandedItemsFor(), {
         startIndex: start,
         rawAssistant: rawView,
+        view: transcriptView,
         agentId: selectedAgentId,
         widthCols: cols,
         agentRunning: agents.find((a) => a.id === selectedAgentId)?.state === "running",
@@ -3531,6 +3555,7 @@ const SLASH_COMMANDS = [
   { name: "resume", description: "Resume a stopped agent", kind: "client", takesArgs: false },
   { name: "copy", description: "Copy last assistant message to clipboard", kind: "client", takesArgs: false },
   { name: "raw", description: "Toggle raw markdown view", kind: "client", takesArgs: false },
+  { name: "outputs", description: "Show only each turn's final message (toggle)", kind: "client", takesArgs: false },
   { name: "model", description: "Open model picker", kind: "client", takesArgs: false },
   { name: "theme", description: "Open theme picker", kind: "client", takesArgs: false },
   { name: "notify", description: "Toggle browser notifications", kind: "client", takesArgs: false },
@@ -3848,6 +3873,9 @@ async function executeSlashCommand(name, args) {
         break;
       case "raw":
         $rawBtn.click();
+        break;
+      case "outputs":
+        toggleOutputsOnly();
         break;
       case "model":
         openModelPicker();
@@ -4385,6 +4413,76 @@ $rawBtn.addEventListener("click", () => {
   renderMessages();
 });
 applyRawBtnStyle();
+
+// Transcript view picker: choose which kinds of row the transcript shows.
+// Hidden rows fold into one clickable line per run (see transcript.js).
+const VIEW_LABELS = {
+  thinking: "thinking",
+  tools: "tool calls",
+  interim: "interim messages",
+};
+
+function outputsOnly() {
+  return VIEW_KINDS.every((k) => !transcriptView[k]);
+}
+
+function renderViewPicker() {
+  const row = (attr, checked, label) => `
+      <button type="button" role="menuitemcheckbox" aria-checked="${checked}"
+        class="w-full text-left px-3 py-1.5 text-sm font-mono cursor-pointer hover:bg-base16-200 ${checked ? "text-base16-700" : "text-base16-500"}"
+        ${attr}><span class="text-base16-green mr-1">${checked ? "✓" : " "}</span>${label}</button>`;
+  $viewPicker.innerHTML =
+    row("data-view-outputs", outputsOnly(), "final outputs only") +
+    '<div class="border-t border-base16-300 px-3 pt-1.5 text-[10px] uppercase tracking-wide text-base16-500">show</div>' +
+    VIEW_KINDS.map((k) => row(`data-view-kind="${k}"`, transcriptView[k], VIEW_LABELS[k])).join("");
+}
+
+function applyViewBtnStyle() {
+  const hiding = hidesAnything(transcriptView);
+  const active = "bg-base16-blue/25 text-base16-blue";
+  const inactive = "bg-base16-300/40 text-base16-500 hover:bg-base16-300/70";
+  $viewBtn.className = `text-xs px-2 py-1 rounded cursor-pointer font-mono whitespace-nowrap ${hiding ? active : inactive}`;
+  $viewBtn.title = hiding
+    ? `Hiding ${VIEW_KINDS.filter((k) => !transcriptView[k]).map((k) => VIEW_LABELS[k]).join(", ")} — click to change`
+    : "Choose what the transcript shows";
+}
+
+function setTranscriptView(next) {
+  Object.assign(transcriptView, next);
+  localStorage.setItem(
+    "pirouette-view-hidden",
+    JSON.stringify(VIEW_KINDS.filter((k) => !transcriptView[k])),
+  );
+  applyViewBtnStyle();
+  if (!$viewPicker.classList.contains("hidden")) renderViewPicker();
+  renderMessages();
+}
+
+function toggleOutputsOnly() {
+  const show = outputsOnly();
+  setTranscriptView({ thinking: show, tools: show, interim: show });
+}
+
+$viewBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if ($viewPicker.classList.toggle("hidden")) return;
+  renderViewPicker();
+});
+$viewPicker.addEventListener("click", (e) => {
+  // Re-rendering detaches the clicked row; keep the picker open regardless.
+  e.stopPropagation();
+  const target = e.target.closest("button");
+  if (!target) return;
+  const kind = target.getAttribute("data-view-kind");
+  if (kind) setTranscriptView({ [kind]: !transcriptView[kind] });
+  else if (target.hasAttribute("data-view-outputs")) toggleOutputsOnly();
+});
+document.addEventListener("click", (e) => {
+  if (!$viewPicker.classList.contains("hidden") && e.target !== $viewBtn) {
+    $viewPicker.classList.add("hidden");
+  }
+});
+applyViewBtnStyle();
 
 // Delegated click handler for message/thinking/tool preview controls.
 // Attached once so we don't re-bind after every reconciliation pass. Walks up from

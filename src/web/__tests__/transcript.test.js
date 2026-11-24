@@ -915,3 +915,93 @@ describe("renderTranscriptBlocks windowing and caching", () => {
     expect(renderTranscriptBlocks(long, new Set(), { widthCols: 80 })[0].html).toBe(collapsed);
   });
 });
+
+describe("renderTranscriptBlocks view filter", () => {
+  const tool = (id) => [
+    { role: "tool", toolName: "bash", toolCallId: id, args: { command: "ls" }, content: "", ts: 0 },
+    { role: "tool_result", toolName: "bash", toolCallId: id, content: "ok", ts: 0 },
+  ];
+  // Two turns: idx 0-7 and 8-9.
+  const state = {
+    ...initialTranscriptState(),
+    messages: [
+      { role: "user", content: "do it", ts: 0 },
+      { role: "thinking", content: "hmm", ts: 0 },
+      { role: "assistant", content: "Looking.", ts: 0 },
+      ...tool("c1"),
+      ...tool("c2"),
+      { role: "assistant", content: "Done.", ts: 0 },
+      { role: "user", content: "thanks", ts: 0 },
+      { role: "assistant", content: "Welcome.", ts: 0 },
+    ],
+  };
+  const OUTPUTS = { thinking: false, tools: false, interim: false };
+  const keys = (view, expanded = new Set(), opts = {}) =>
+    renderTranscriptBlocks(state, expanded, { view, ...opts }).map((b) => b.key);
+
+  it("shows everything without a view, or with nothing hidden", () => {
+    expect(keys(undefined)).toHaveLength(10);
+    expect(keys({ thinking: true, tools: true, interim: true })).toEqual(keys(undefined));
+  });
+
+  it("folds a turn's actions into one row, keeping its final message", () => {
+    const blocks = renderTranscriptBlocks(state, new Set(), { view: OUTPUTS });
+    expect(blocks.map((b) => b.key)).toEqual(["msg:0", "fold:msg:1", "msg:7", "msg:8", "msg:9"]);
+    expect(blocks[1].html).toContain("2 tool calls · 1 thinking block · 1 interim message hidden");
+    expect(blocks[1].html).toContain('data-toggle="fold:msg:1"');
+    expect(blocks[1].html).toContain('aria-expanded="false"');
+  });
+
+  it("hides each kind independently", () => {
+    expect(keys({ thinking: false })).toEqual([
+      "msg:0", "fold:msg:1", "msg:2", "tc:c1:tool", "tc:c1:tool_result", "tc:c2:tool", "tc:c2:tool_result", "msg:7", "msg:8", "msg:9",
+    ]);
+    expect(keys({ tools: false })).toEqual(["msg:0", "msg:1", "msg:2", "fold:tc:c1:tool", "msg:7", "msg:8", "msg:9"]);
+    expect(keys({ interim: false })).toEqual([
+      "msg:0", "msg:1", "fold:msg:2", "tc:c1:tool", "tc:c1:tool_result", "tc:c2:tool", "tc:c2:tool_result", "msg:7", "msg:8", "msg:9",
+    ]);
+  });
+
+  it("opens a fold in place when its key is expanded", () => {
+    const blocks = renderTranscriptBlocks(state, new Set(["fold:msg:1"]), { view: OUTPUTS });
+    expect(blocks.map((b) => b.key)).toEqual([
+      "msg:0", "fold:msg:1", "msg:1", "msg:2", "tc:c1:tool", "tc:c1:tool_result", "tc:c2:tool", "tc:c2:tool_result", "msg:7", "msg:8", "msg:9",
+    ]);
+    expect(blocks[1].html).toContain('aria-expanded="true"');
+    expect(blocks[1].html).not.toContain(" hidden<");
+  });
+
+  it("keeps a fold's key and counts when the window starts inside it", () => {
+    const blocks = renderTranscriptBlocks(state, new Set(), { view: OUTPUTS, startIndex: 4 });
+    expect(blocks.map((b) => b.key)).toEqual([OLDER_KEY, "fold:msg:1", "msg:7", "msg:8", "msg:9"]);
+    expect(blocks[1].html).toContain("2 tool calls");
+    expect(keys(OUTPUTS, new Set(["fold:msg:1"]), { startIndex: 4 }).slice(0, 4)).toEqual([
+      OLDER_KEY, "fold:msg:1", "tc:c1:tool_result", "tc:c2:tool",
+    ]);
+  });
+
+  it("treats text still streaming as the turn's final message", () => {
+    const live = {
+      ...state,
+      messages: [...state.messages, ...tool("c3")],
+      streamingText: "More",
+      streamingThinking: "pondering",
+    };
+    const blocks = renderTranscriptBlocks(live, new Set(), { view: OUTPUTS });
+    expect(blocks.map((b) => b.key)).toEqual(["msg:0", "fold:msg:1", "msg:7", "msg:8", "fold:msg:9", STREAMING_TEXT_KEY]);
+    expect(blocks[4].html).toContain("1 tool call · 1 interim message hidden");
+    // Thinking alone can stay visible.
+    expect(renderTranscriptBlocks(live, new Set(), { view: { tools: false } }).map((b) => b.key))
+      .toContain(STREAMING_THINKING_KEY);
+  });
+
+  it("names the tool still running behind a fold", () => {
+    const running = reduceEvents([
+      { type: "tool_execution_start", toolName: "bash", toolCallId: "r1", args: { command: "sleep 9" } },
+    ]);
+    const html = (agentRunning) =>
+      renderTranscriptBlocks(running, new Set(), { view: OUTPUTS, agentRunning })[0].html;
+    expect(html(true)).toContain("fold-running");
+    expect(html(false)).not.toContain("fold-running");
+  });
+});
