@@ -28,6 +28,8 @@ import { renderToolBody, toolLanguageFromPath, toolResultLanguage } from "./tool
  * @property {"running"|"completed"|"failed"|"unknown"} [toolStatus]
  * @property {{ id: string, name: string }} [from]
  *           On a user row: another agent sent it, not the user.
+ * @property {boolean} [blocked]
+ *           On a system error row: the provider refused the turn.
  */
 
 /**
@@ -513,9 +515,14 @@ export function renderMessage(msg, idx, expandedItems, opts) {
   }
 
   if (msg.role === "system") {
+    // A refused turn poisons the context for every message after it, so the
+    // row carries the way out: roll the chat back to before the turn.
+    const rollback = msg.blocked && typeof msg.ts === "number"
+      ? `<div class="mt-1"><button type="button" data-rollback-ts="${msg.ts}" class="text-xs px-2 py-1 rounded bg-base16-orange/20 text-base16-orange hover:bg-base16-orange/30 cursor-pointer" title="Drop this turn from the agent's context and put your message back in the input box. Files changed and commands run in the turn are not undone.">roll back to before this turn</button></div>`
+      : "";
     return `
       <div class="message-enter pi-row pi-row-system px-4 py-1" data-msg-key="${wrapKey}">
-        <div class="text-base16-orange/80 bg-base16-orange/10 rounded px-2 py-1">${escHtml(msg.content)}</div>
+        <div class="text-base16-orange/80 bg-base16-orange/10 rounded px-2 py-1">${escHtml(msg.content)}${rollback}</div>
       </div>`;
   }
 

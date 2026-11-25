@@ -73,6 +73,12 @@ import { setupWorktreeDataTools } from "./worktree-setup.js";
 import { ProjectManager } from "./project-manager.js";
 import { StateManager } from "./state.js";
 import { normalizeEvent } from "./normalize.js";
+import {
+  ROLLBACK_ENTRY_TYPE,
+  findRollbackTarget,
+  isBlockedResponse,
+  type RollbackEntry,
+} from "./rollback.js";
 import { consumeRestartNotice, type RestartNotice } from "./restart-notice.js";
 import { FastModeTracker } from "./fast-mode.js";
 import {
@@ -1206,6 +1212,7 @@ export class AgentManager {
         content: unknown;
         timestamp: number;
         stopReason?: string;
+        rawStopReason?: string;
         errorMessage?: string;
         toolName?: string;
         toolCallId?: string;
@@ -1275,6 +1282,9 @@ export class AgentManager {
             role: "system",
             content: `Error: ${msg.errorMessage}`,
             ts: msg.timestamp,
+            // A refusal, not a transient API error: the dashboard offers to
+            // roll the chat back to before the turn (see rollback.ts).
+            ...(isBlockedResponse(msg) ? { blocked: true } : {}),
           });
         }
       } else if (msg.role === "toolResult") {
@@ -1709,6 +1719,62 @@ export class AgentManager {
     }
 
     return successor;
+  }
+
+  /** Roll an agent's chat back to just before an earlier message, in place.
+   *
+   *  The way out of a refused turn: whatever the provider objected to stays
+   *  in context and gets the next message refused too, so drop the turn
+   *  and let the user send something else. The target is the last message
+   *  that started a turn (the user's, another agent's, or a watch's) at or
+   *  before `beforeTs` — the timestamp of any row in the transcript — or the
+   *  last one in the chat when `beforeTs` is omitted.
+   *
+   *  Same operation as picking a user message in pi's `/tree`: the session's
+   *  leaf moves to the target's parent and the abandoned turn stays in the
+   *  JSONL as a dead branch. Files changed and commands run in that turn
+   *  are NOT undone. Returns the target's text (a user's own message only)
+   *  so the dashboard can put it back in the composer. */
+  async rollbackAgent(
+    id: string,
+    opts: { beforeTs?: number } = {},
+  ): Promise<{ text: string | null; kind: "user" | "agent" | "watch"; dropped: number }> {
+    return this.withAgentLock(id, async () => {
+      const handle = this.handles.get(id);
+      if (!handle) throw new Error(`Agent ${id} is not running; resume it before rolling back`);
+      if (!this.sessionIsIdle(handle)) {
+        throw new Error("Wait for the current turn to finish (or interrupt it) before rolling back");
+      }
+      const sessionManager = handle.session.sessionManager;
+      const oldLeafId = sessionManager.getLeafId();
+      const target = findRollbackTarget(
+        sessionManager.getBranch() as ReadonlyArray<RollbackEntry>,
+        opts.beforeTs,
+      );
+      if (!target) {
+        throw new Error(
+          opts.beforeTs === undefined
+            ? "Nothing to roll back: this chat has no messages"
+            : "That message is no longer part of this chat; reload and try again",
+        );
+      }
+      console.log(
+        `[agent-manager] rollbackAgent ${handle.config.name} (${id}) to before ${target.entryId} ` +
+          `(${target.kind}, dropping ${target.dropped} entries)`,
+      );
+      const result = await handle.session.navigateTree(target.entryId, { summarize: false });
+      if (result.cancelled) throw new Error("Rollback was cancelled by an extension");
+      // Pin the new leaf on disk. Custom entries never reach the model.
+      sessionManager.appendCustomEntry(ROLLBACK_ENTRY_TYPE, {
+        from: oldLeafId,
+        target: target.entryId,
+      });
+      return {
+        text: target.kind === "user" ? (result.editorText ?? "") : null,
+        kind: target.kind,
+        dropped: target.dropped,
+      };
+    });
   }
 
   /** List user messages in an agent's session that can serve as fork

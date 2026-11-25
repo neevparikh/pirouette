@@ -9,6 +9,13 @@ follow [SemVer](https://semver.org).
 
 ### Added
 
+- **Roll a chat back out of a blocked turn.** When the provider refuses a
+  turn, its error row in the transcript now has a **roll back to before
+  this turn** button: the turn leaves the agent's context, from the
+  message that started it, and that message goes back in the input box to
+  reword. `/rollback` does the same for your last message at any time.
+  Only the conversation is rolled back, not files or commands, and the
+  dropped turn stays in the session file as an abandoned branch.
 - **The chat list shows which chats are waiting on a watch.** A chat whose
   turn is over but which has a `pru watch` outstanding gets a hollow blue
   ring instead of the filled "your turn" dot, and its tooltip says how many

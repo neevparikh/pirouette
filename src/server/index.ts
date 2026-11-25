@@ -1159,6 +1159,31 @@ export async function runServer(opts: RunServerOptions = {}): Promise<ServerHand
         return;
       }
 
+      // Roll the chat back to just before an earlier message, in place:
+      // the way out of a turn the provider refused. Body: { beforeTs? } —
+      // the `ts` of a transcript row; the target is the last turn-starting
+      // message at or before it (default: the last one in the chat).
+      // Returns that message's text so the client can restore it into the
+      // composer.
+      if (method === "POST" && sub === "/rollback") {
+        try {
+          const raw = await readBody(req);
+          const body = (raw.trim() ? JSON.parse(raw) : {}) as { beforeTs?: unknown };
+          if (body.beforeTs != null && (typeof body.beforeTs !== "number" || !Number.isFinite(body.beforeTs))) {
+            error(res, 400, "beforeTs must be a number");
+            return;
+          }
+          const result = await agentManager.rollbackAgent(agentId, {
+            ...(typeof body.beforeTs === "number" ? { beforeTs: body.beforeTs } : {}),
+          });
+          broadcast({ kind: "agent_rolled_back", agentId });
+          json(res, 200, { ok: true, ...result });
+        } catch (err) {
+          error(res, 400, err instanceof Error ? err.message : String(err));
+        }
+        return;
+      }
+
       // Discard the current session and start a fresh one. Same agent, same
       // worktree, no conversation history. Broadcasts agent_session_reset so
       // every connected client clears its cached transcript.
