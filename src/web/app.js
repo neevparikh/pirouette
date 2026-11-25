@@ -1642,6 +1642,16 @@ function handleWsMessage(envelope) {
       break;
     }
 
+    case "agent_rolled_back":
+      // The chat was rolled back to an earlier message (here or in another
+      // tab): the tail of the transcript is gone, so reload it.
+      historyLoaded[envelope.agentId] = false;
+      if (selectedAgentId === envelope.agentId) {
+        void fetchHistory(envelope.agentId);
+        void fetchStats(envelope.agentId);
+      }
+      break;
+
     case "agent_session_reset":
       // The server discarded this agent's session and started a fresh one
       // (in response to /new). Clear local transcript caches so the next
@@ -3204,6 +3214,71 @@ async function interruptAgent() {
   }
 }
 
+/** Roll the selected agent's chat back to just before an earlier message
+ *  (POST /api/agents/:id/rollback) — the way out of a turn the provider
+ *  refused. `beforeTs` is the `ts` of a transcript row: the chat goes back
+ *  to before the last message that started a turn at or above that row.
+ *  Without it, to before the last such message in the chat.
+ *
+ *  The rolled-back message's text is put back in the composer so it can be
+ *  reworded and resent, as pi's `/tree` does. */
+async function rollbackAgent(beforeTs) {
+  if (!selectedAgentId) return false;
+  const agentId = selectedAgentId;
+  // Preview from what's on screen; the server picks the same message.
+  const messages = stateFor(agentId).messages;
+  let end = messages.length - 1;
+  if (beforeTs !== undefined) {
+    const at = messages.findLastIndex((m) => m.ts === beforeTs);
+    if (at >= 0) end = at;
+  }
+  let target = null;
+  for (let i = end; i >= 0; i--) {
+    if (messages[i].role === "user" && !messages[i].pending) {
+      target = messages[i];
+      break;
+    }
+  }
+  if (!target) {
+    alert("Nothing to roll back to: no earlier message in this chat.");
+    return false;
+  }
+  const preview = target.content.length > 200 ? `${target.content.slice(0, 200)}…` : target.content;
+  const sender = target.from ? `message from agent ${target.from.name}` : target.watch ? "watch message" : "message";
+  const ok = window.confirm(
+    `Roll this chat back to before the ${sender}:\n\n"${preview}"\n\n` +
+      "That message and everything after it leave the agent's context. " +
+      "Files it changed and commands it ran are not undone." +
+      (target.from || target.watch ? "" : " Your message goes back in the input box."),
+  );
+  if (!ok) return false;
+  try {
+    const res = await fetch(`/api/agents/${agentId}/rollback`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      // Anchor on the message the user just confirmed, not on "the latest".
+      body: JSON.stringify({ beforeTs: target.ts }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(`Failed to roll back: ${data.error || res.statusText}`);
+      return false;
+    }
+    // Same guard as interrupt: don't paste one chat's text into another's box.
+    if (typeof data.text === "string" && data.text && selectedAgentId === agentId) {
+      const existing = $input.value.trim();
+      $input.value = [data.text, existing].filter(Boolean).join("\n\n");
+      autoResize();
+      $input.focus();
+      vim.enterInsertMode();
+    }
+    return true;
+  } catch (err) {
+    alert(`Failed to roll back: ${err}`);
+    return false;
+  }
+}
+
 /** Move the selected agent's running bash commands into the background
  *  (POST /api/agents/:id/bash). They keep running; the tool calls return
  *  with the output so far and the agent is messaged when they exit. */
@@ -3559,6 +3634,7 @@ async function loadCommandsManifest() {
 // passes everything after the first space through as `args`).
 const SLASH_COMMANDS = [
   { name: "fork", description: "Fork this agent (copy session into a new agent)", kind: "client", takesArgs: false },
+  { name: "rollback", description: "Roll the chat back to before your last message (e.g. after a blocked turn)", kind: "client", takesArgs: false },
   { name: "new", description: "Discard history and start a fresh session for this agent", kind: "api", endpoint: "new", takesArgs: false },
   { name: "compact", description: "Manually compact session context", argLabel: "[instructions]", kind: "api", endpoint: "compact", takesArgs: true },
   { name: "handoff", description: "Hand this agent's work to a fresh agent in the same worktree", argLabel: "[briefing]", kind: "client", takesArgs: true },
@@ -3862,6 +3938,9 @@ async function executeSlashCommand(name, args) {
         break;
       case "handoff":
         await handoffAgent(args);
+        break;
+      case "rollback":
+        await rollbackAgent();
         break;
       case "rename":
         if (!selectedAgentId) {
@@ -4574,6 +4653,12 @@ $messages.addEventListener("click", (e) => {
   // Skipped if the sender has since been removed.
   if (e.target.closest("[data-load-older]")) {
     showOlderMessages(Infinity);
+    return;
+  }
+  const rollback = e.target.closest("[data-rollback-ts]");
+  if (rollback && $messages.contains(rollback)) {
+    const ts = Number(rollback.getAttribute("data-rollback-ts"));
+    if (Number.isFinite(ts)) void rollbackAgent(ts);
     return;
   }
   const sender = e.target.closest("[data-open-agent]");

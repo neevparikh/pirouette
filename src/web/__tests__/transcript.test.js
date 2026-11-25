@@ -783,6 +783,16 @@ describe("renderMessage", () => {
     expect(html).toContain("something broke");
   });
 
+  it("offers a rollback on a refused turn, and only there", () => {
+    const blocked = renderMessage(
+      { role: "system", content: "Error: blocked under the Usage Policy", ts: 1234, blocked: true },
+      0,
+    );
+    expect(blocked).toContain('data-rollback-ts="1234"');
+    const plain = renderMessage({ role: "system", content: "Error: overloaded", ts: 1234 }, 0);
+    expect(plain).not.toContain("data-rollback-ts");
+  });
+
   it("unknown role returns empty string", () => {
     expect(renderMessage({ role: "nonsense", content: "x", ts: 0 }, 0)).toBe("");
   });

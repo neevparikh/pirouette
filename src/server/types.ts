@@ -158,6 +158,9 @@ export type WsEnvelope =
   | { kind: "agent_updated"; agentId: string; agent: AgentConfig & { running?: boolean } }
   | { kind: "agent_removed"; agentId: string }
   | { kind: "agent_session_reset"; agentId: string }
+  /** The agent's chat was rolled back to an earlier message
+   *  (POST /api/agents/:id/rollback); clients refetch its history. */
+  | { kind: "agent_rolled_back"; agentId: string }
   | { kind: "projects_list"; projects: ProjectConfig[] }
   | { kind: "project_created"; project: ProjectConfig }
   | { kind: "project_removed"; projectName: string }
@@ -391,6 +394,9 @@ export interface ChatMessage {
   /** On a `user` row: set when a fired watch (`pru watch`) sent it.
    *  `content` is the message without the header the model sees. */
   watch?: { id: string; kind: string; summary: string };
+  /** On a `system` error row: the provider refused the turn (as opposed to
+   *  a transient API error). The dashboard offers a rollback on these. */
+  blocked?: boolean;
 }
 
 /** A single image attachment formatted for the frontend. */

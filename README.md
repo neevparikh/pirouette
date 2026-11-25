@@ -595,6 +595,25 @@ tracks them with watches, reviews what they ship, and gives you a short
 with something like `pru launch payments-captain` and a first message of
 "You're the captain for <area>. Use the captain skill."
 
+### Blocked turns: rolling back
+
+When a provider refuses a turn (Anthropic's `refusal` stop reason, an
+OpenAI `content_filter`, …) the chat shows the error with a **roll back to
+before this turn** button. Whatever triggered the refusal is still in the
+agent's context, so later messages tend to be refused too; rolling back
+takes the whole turn out of context, starting from the message that began
+it, and puts that message back in the input box for you to reword.
+
+`/rollback` does the same for your last message at any time, refused or
+not; run it again to go back further. Either way the agent must be between
+turns.
+
+Only the conversation is rolled back. Files the agent changed and commands
+it ran in the dropped turn stay as they are, and the agent no longer
+remembers them — say so in your next message if it matters. Nothing is
+deleted from the session file: the dropped turn stays there as a branch
+the agent is no longer on.
+
 ### Runaway commands: the bash deadline
 
 Pi's `bash` tool has an optional `timeout` and waits forever without one.
